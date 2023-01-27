@@ -41,6 +41,11 @@ jobs:
           cd secp256k1\builds\msvc\vs2017
           msbuild /p:Configuration=StaticRelease -p:PlatformToolset=v142
 
+      - name: Compile libsodium Win64
+        run: |
+          curl  -Lo libsodium-1.0.18-stable-msvc.zip https://download.libsodium.org/libsodium/releases/libsodium-1.0.18-stable-msvc.zip
+          unzip libsodium-1.0.18-stable-msvc.zip
+
       - name: Install pre-compiled OpenSSL Win64
         run: |
           curl  -Lo openssl-1.1.1o.zip https://github.com/neodiX42/precompiled-openssl-win64/raw/main/openssl-1.1.1o.zip

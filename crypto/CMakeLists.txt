@@ -307,7 +307,7 @@ target_include_directories(ton_crypto PUBLIC ${sodium_INCLUDE_DIR})
 target_link_libraries(ton_crypto PUBLIC ${sodium_LIBRARY_RELEASE})
 
 if (MSVC)
-  find_package(SECP256K1)
+  find_package(SECP256K1 REQUIRED)
   if (SECP256K1_FOUND)
     target_include_directories(ton_crypto_core SYSTEM PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIRS}>)
     target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARIES})
