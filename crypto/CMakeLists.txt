@@ -302,8 +302,6 @@ if (NOT WIN32)
   endif()
 endif()
 target_include_directories(ton_crypto SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
-target_include_directories(ton_crypto PUBLIC ${sodium_INCLUDE_DIR})
-target_link_libraries(ton_crypto PUBLIC ${sodium_LIBRARY_RELEASE})
 
 if (MSVC)
   find_package(SECP256K1 REQUIRED)
