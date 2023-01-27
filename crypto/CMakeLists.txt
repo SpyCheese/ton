@@ -317,7 +317,7 @@ if (MSVC)
   endif()
 
 else()
-  find_package(Sodium REQUIRED)
+  find_package(SODIUM REQUIRED)
   target_link_libraries(ton_crypto_core PUBLIC secp256k1)
 endif()
 
