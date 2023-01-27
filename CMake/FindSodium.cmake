@@ -36,7 +36,7 @@ if (NOT DEFINED SODIUM_USE_STATIC_LIBS)
   option(SODIUM_USE_STATIC_LIBS "enable to statically link against sodium" OFF)
 endif()
 if(NOT (SODIUM_USE_STATIC_LIBS EQUAL SODIUM_USE_STATIC_LIBS_LAST))
-  unset(sodium_LIBRARY CACHE)
+  unset(SODIUM_LIBRARY CACHE)
   unset(SODIUM_LIBRARY_DEBUG CACHE)
   unset(SODIUM_LIBRARY_RELEASE CACHE)
   unset(SODIUM_DLL_DEBUG CACHE)
@@ -51,7 +51,7 @@ if (UNIX)
   # import pkg-config
   find_package(PkgConfig QUIET)
   if (PKG_CONFIG_FOUND)
-    pkg_check_modules(sodium_PKG QUIET libsodium)
+    pkg_check_modules(SODIUM_PKG QUIET libsodium)
   endif()
 
   if(SODIUM_USE_STATIC_LIBS)
@@ -70,11 +70,11 @@ if (UNIX)
 
     set(XPREFIX SODIUM_PKG_STATIC)
   else()
-    if (NOT sodium_PKG_FOUND)
-      set(sodium_PKG_LIBRARIES sodium)
+    if (NOT SODIUM_PKG_FOUND)
+      set(SODIUM_PKG_LIBRARIES SODIUM)
     endif()
 
-    set(XPREFIX sodium_PKG)
+    set(XPREFIX SODIUM_PKG)
   endif()
 
   find_path(SODIUM_INCLUDE_DIR sodium.h
@@ -217,8 +217,8 @@ if (SODIUM_INCLUDE_DIR)
   if (EXISTS _VERSION_HEADER)
     file(READ "${_VERSION_HEADER}" _VERSION_HEADER_CONTENT)
     string(REGEX REPLACE ".*#[ \t]*define[ \t]*SODIUM_VERSION_STRING[ \t]*\"([^\n]*)\".*" "\\1"
-      sodium_VERSION "${_VERSION_HEADER_CONTENT}")
-    set(sodium_VERSION "${sodium_VERSION}" PARENT_SCOPE)
+      SODIUM_VERSION "${_VERSION_HEADER_CONTENT}")
+    set(SODIUM_VERSION "${SODIUM_VERSION}" PARENT_SCOPE)
   endif()
 endif()
 
@@ -231,11 +231,11 @@ find_package_handle_standard_args(
   SODIUM_LIBRARY_DEBUG
   SODIUM_INCLUDE_DIR
   VERSION_VAR
-  sodium_VERSION
+  SODIUM_VERSION
 )
 
 if(SODIUM_FOUND)
-  set(sodium_LIBRARIES
+  set(SODIUM_LIBRARIES
     optimized ${SODIUM_LIBRARY_RELEASE} debug ${SODIUM_LIBRARY_DEBUG})
 endif()
 
