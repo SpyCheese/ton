@@ -13,7 +13,7 @@ find_path(
 
 find_library(
     SODIUM_LIBRARY
-    NAMES libsodium
+    NAMES libsodium.lib
     DOC "sodium library"
 )
 

@@ -314,6 +314,7 @@ if (MSVC)
   if (SODIUM_FOUND)
     target_include_directories(ton_crypto SYSTEM PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIRS}>)
     target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARIES})
+    target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
   endif()
 
 else()
