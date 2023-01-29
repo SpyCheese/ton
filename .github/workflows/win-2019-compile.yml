@@ -45,8 +45,6 @@ jobs:
         run: |
           curl  -Lo libsodium-1.0.18-stable-msvc.zip https://download.libsodium.org/libsodium/releases/libsodium-1.0.18-stable-msvc.zip
           unzip libsodium-1.0.18-stable-msvc.zip
-          dir 
-          dir libsodium-1.0.18-stable-msvc
 
       - name: Install pre-compiled OpenSSL Win64
         run: |
