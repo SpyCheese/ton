@@ -5,6 +5,14 @@
 #  SECP256K1_INCLUDE_DIRS - the SECP256K1 include directory
 #  SECP256K1_LIBRARY - Link these to use SECP256K1
 
+if (UNIX)
+  # import pkg-config
+  find_package(PkgConfig QUIET)
+  if (PKG_CONFIG_FOUND)
+    pkg_check_modules(secp2561k_PKG QUIET libsodium)
+  endif()
+endif()
+
 find_path(
     SECP256K1_INCLUDE_DIR
     NAMES secp256k1_recovery.h
