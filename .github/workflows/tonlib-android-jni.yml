@@ -34,14 +34,14 @@ jobs:
         export SECP256K1_INCLUDE_DIR=$(pwd)/example/android/third_party/secp256k1/include
         export SECP256K1_LIBRARY=$(pwd)/example/android/third_party/secp256k1/.libs/libsecp256k1.a
         export SODIUM_INCLUDE_DIR=$(pwd)/example/android/third_party/libsodium/libsodium-android-westmere/include
-        export SODIUM_LIBRARY=$(pwd)/example/android/third_party/libsodium/libsodium-android-westmere/lib/libsodium.a
+        export SODIUM_LIBRARY_RELEASE=$(pwd)/example/android/third_party/libsodium/libsodium-android-westmere/lib/libsodium.a
         
         rm -rf example/android/src/drinkless/org/ton/TonApi.java
         cd example/android/
         
         cmake -GNinja -DTON_ONLY_TONLIB=ON  \
         -DSECP256K1_INCLUDE_DIR=${SECP256K1_INCLUDE_DIR} -DSECP256K1_LIBRARY=${SECP256K1_LIBRARY} \
-        -DSODIUM_INCLUDE_DIR=${SODIUM_INCLUDE_DIR} -DSODIUM_LIBRARY=${SODIUM_LIBRARY} .
+        -DSODIUM_INCLUDE_DIR=${SODIUM_INCLUDE_DIR} -DSODIUM_LIBRARY_RELEASE=${SODIUM_LIBRARY_RELEASE} .
         
         ninja prepare_cross_compiling
         rm CMakeCache.txt
