@@ -13,7 +13,7 @@ find_path(
 
 find_library(
     SECP256K1_LIBRARY
-    NAMES secp256k1
+    NAMES secp256k1 libsecp256k1
     DOC "secp256k1 library"
 )
 
