@@ -13,7 +13,7 @@ find_path(
 
 find_library(
     SODIUM_LIBRARY
-    NAMES libsodium.a
+    NAMES libsodium.a libsodium.lib
 )
 
 if (SODIUM_LIBRARY)
