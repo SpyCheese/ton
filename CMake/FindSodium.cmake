@@ -235,7 +235,7 @@ find_package_handle_standard_args(
 )
 
 if(SODIUM_FOUND)
-  set(sodium_LIBRARIES
+  set(SODIUM_LIBRARIES
     optimized ${SODIUM_LIBRARY_RELEASE} debug ${SODIUM_LIBRARY_DEBUG})
 endif()
 
