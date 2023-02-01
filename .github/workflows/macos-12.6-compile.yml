@@ -24,6 +24,7 @@ jobs:
         run: |
           export NONINTERACTIVE=1
           brew install ninja secp256k1 libsodium
+          find / -name secp256k1_recovery.h
           rootPath=`pwd`
           mkdir build
           cd build

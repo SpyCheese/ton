@@ -12,6 +12,11 @@ pushd .
 # ANDROID_DISABLE_FORMAT_STRING_CHECKS
 # ANDROID_CCACHE
 
+export SECP256K1_INCLUDE_DIR=$(pwd)/secp256k1/include
+export SECP256K1_LIBRARY=$(pwd)/secp256k1/.libs/libsecp256k1.a
+export SODIUM_INCLUDE_DIR=$(pwd)/libsodium/libsodium-android-westmere/include
+export SODIUM_LIBRARY_RELEASE=$(pwd)/libsodium/libsodium-android-westmere/lib/libsodium.a
+
 if [ $ARCH == "arm" ]
 then
   ABI="armeabi-v7a"
