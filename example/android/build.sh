@@ -33,8 +33,8 @@ then
 elif [ $ARCH == "arm64" ]
 then
   ABI="arm64-v8a"
-  export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-armv8/include
-  export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-armv8/lib/libsodium.a
+  export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-armv8-a/include
+  export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-armv8-a/lib/libsodium.a
 fi
 
 
