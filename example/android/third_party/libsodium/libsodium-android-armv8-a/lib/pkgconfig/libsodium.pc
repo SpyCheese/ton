@@ -1,4 +1,4 @@
-prefix=/home/alex/magnet/example/android/third_party/libsodium/libsodium-1.0.18/libsodium-android-armv7-a
+prefix=/home/alex/magnet/example/android/third_party/libsodium/libsodium-1.0.18/libsodium-android-armv8-a
 exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include

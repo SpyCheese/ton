@@ -2,10 +2,15 @@
 
 rm -rf libsodium
 
-git clone https://github.com/jedisct1/libsodium.git
+export ANDROID_NDK_ROOT=../../../../android-ndk-r25b
+export NDK_PLATFORM="android-24"
+export OPENSSL_DIR=../crypto
 
-cd libsodium
-./autogen.sh -s
+wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.18.tar.gz
+tar -xvf libsodium-1.0.18.tar.gz
+
+cd libsodium-1.0.18
+#./autogen.sh -s
 
 ./dist-build/android-x86.sh
 cp -R libsodium-android-i686 ..
@@ -17,7 +22,7 @@ cp -R libsodium-android-westmere ..
 cp -R libsodium-android-armv7-a ..
 
 ./dist-build/android-armv8-a.sh
-cp -R libsodium-android-armv8-a+crypto ..
+cp -R libsodium-android-armv8-a ..
 
 #./dist-build/android-aar.sh
 
