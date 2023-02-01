@@ -41,9 +41,7 @@ jobs:
 
         sudo apt install libsodium-dev
 
-        cmake -GNinja -DTON_ONLY_TONLIB=ON -DSODIUM_USE_STATIC_LIBS=1 \
-        -DSECP256K1_INCLUDE_DIR=${SECP256K1_INCLUDE_DIR} -DSECP256K1_LIBRARY=${SECP256K1_LIBRARY} \
-        -DSODIUM_INCLUDE_DIR=${SODIUM_INCLUDE_DIR} -DSODIUM_LIBRARY_RELEASE=${SODIUM_LIBRARY_RELEASE} .
+        cmake -GNinja -DTON_ONLY_TONLIB=ON .
         
         ninja prepare_cross_compiling
 
