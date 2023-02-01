@@ -14,22 +14,29 @@ pushd .
 
 export SECP256K1_INCLUDE_DIR=$(pwd)/third_party/secp256k1/include
 export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/.libs/libsecp256k1.a
-export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-westmere/include
-export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-westmere/lib/libsodium.a
 
 if [ $ARCH == "arm" ]
 then
   ABI="armeabi-v7a"
+  export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-armv7-a/include
+  export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-armv7-a/lib/libsodium.a
 elif [ $ARCH == "x86" ]
 then
   ABI=$ARCH
+  export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-i686/include
+  export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-i686/lib/libsodium.a
 elif [ $ARCH == "x86_64" ]
 then
   ABI=$ARCH
+  export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-westmere/include
+  export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-westmere/lib/libsodium.a
 elif [ $ARCH == "arm64" ]
 then
   ABI="arm64-v8a"
+  export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-armv8-a+crypto/include
+  export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-armv8-a+crypto/lib/libsodium.a
 fi
+
 
 ARCH=$ABI
 echo $ABI
