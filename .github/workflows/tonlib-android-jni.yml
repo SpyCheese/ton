@@ -38,12 +38,13 @@ jobs:
         
         rm -rf example/android/src/drinkless/org/ton/TonApi.java
         cd example/android/
-        
-        cmake -GNinja -DTON_ONLY_TONLIB=ON  \
+#  sudo apt install libsodium-dev
+        cmake -GNinja -DTON_ONLY_TONLIB=ON -DSODIUM_USE_STATIC_LIBS=1 \
         -DSECP256K1_INCLUDE_DIR=${SECP256K1_INCLUDE_DIR} -DSECP256K1_LIBRARY=${SECP256K1_LIBRARY} \
         -DSODIUM_INCLUDE_DIR=${SODIUM_INCLUDE_DIR} -DSODIUM_LIBRARY_RELEASE=${SODIUM_LIBRARY_RELEASE} .
         
-        ninja prepare_cross_compiling
+        ninja prepare_cross_compiling        
+#  sudo apt remove libsodium-dev             
         rm CMakeCache.txt
         ./build-all.sh
         ../../android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip libs/x86/libnative-lib.so

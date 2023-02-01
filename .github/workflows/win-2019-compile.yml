@@ -22,7 +22,9 @@ jobs:
           submodules: 'recursive'
 
       - name: Install ninja
-        run: choco install ninja
+        run: |
+          curl -Lo ninja-win.zip https://github.com/ninja-build/ninja/releases/download/v1.11.1/ninja-win.zip
+          unzip ninja-win.zip
 
       - name: Check out zlib repository
         uses: actions/checkout@v3
@@ -68,6 +70,7 @@ jobs:
         run: |
           set root=%cd%
           echo %root%
+          SET PATH=%root%;%PATH%
           mkdir build
           cd build
           cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DSECP256K1_INCLUDE_DIR=%root%\secp256k1\include -DSECP256K1_LIBRARY=%root%\secp256k1\bin\x64\Release\v142\static\secp256k1.lib -DSODIUM_INCLUDE_DIR=%root%\libsodium\include -DSODIUM_LIBRARY=%root%\libsodium\x64\Release\v142\static\libsodium.lib -DREADLINE_INCLUDE_DIR=%root%\readline-5.0-1-lib\include\readline -DREADLINE_LIBRARY=%root%\readline-5.0-1-lib\lib\readline.lib -DZLIB_FOUND=1 -DMHD_FOUND=1 -DMHD_LIBRARY=%root%\libmicrohttpd-0.9.75-w32-bin\x86_64\VS2019\Release-static\libmicrohttpd.lib -DMHD_INCLUDE_DIR=%root%\libmicrohttpd-0.9.75-w32-bin\x86_64\VS2019\Release-static -DZLIB_INCLUDE_DIR=%root%\zlib -DZLIB_LIBRARY=%root%\zlib\contrib\vstudio\vc14\x64\ZlibStatReleaseWithoutAsm\zlibstat.lib -DOPENSSL_FOUND=1 -DOPENSSL_INCLUDE_DIR=%root%/openssl-1.1/x64/include -DOPENSSL_CRYPTO_LIBRARY=%root%/openssl-1.1/x64/lib/libcrypto.lib -DCMAKE_CXX_FLAGS="/DTD_WINDOWS=1 /EHsc /bigobj"
