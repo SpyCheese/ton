@@ -8,5 +8,5 @@ Version: 1.0.18
 Description: A modern and easy-to-use crypto library
 
 Libs: -L${libdir} -lsodium
-Libs.private:  -Qunused-arguments -pthread 
+Libs.private:  -pthread 
 Cflags: -I${includedir}
