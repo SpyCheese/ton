@@ -1,6 +1,8 @@
 #!/bin/bash
 pushd .
 
+export SECP256K1_INCLUDE_DIR=$(pwd)/third_party/secp256k1/include
+
 if [ $ARCH == "arm" ]
 then
   ABI="armeabi-v7a"
