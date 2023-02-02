@@ -13,4 +13,4 @@ echo
 
 echo Building tonlib for arm64...
 echo
-ARCH="arm64" ./build.sh || exit 1
+#ARCH="arm64" ./build.sh || exit 1
