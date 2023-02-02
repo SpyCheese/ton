@@ -16,7 +16,7 @@ jobs:
     - name: Install libraries
       run: |
         sudo apt update
-        sudo apt install -y build-essential git make cmake clang libgflags-dev zlib1g-dev libssl-dev libreadline-dev libmicrohttpd-dev pkg-config libgsl-dev python3 python3-dev ninja-build libsecp256k1-dev
+        sudo apt install -y build-essential git make cmake clang libgflags-dev zlib1g-dev libssl-dev libreadline-dev libmicrohttpd-dev pkg-config libgsl-dev python3 python3-dev ninja-build
 
     - name: Configure & Build
       run: |        
@@ -35,13 +35,13 @@ jobs:
         rm -rf example/android/src/drinkless/org/ton/TonApi.java
         cd example/android/
 
-        sudo apt install libtool autoconf libsodium-dev
-
+        sudo apt install -y libtool autoconf libsodium-dev libsecp256k1-dev
+             
         cmake -GNinja -DTON_ONLY_TONLIB=ON .
         
         ninja prepare_cross_compiling
 
-        sudo apt remove libsodium-dev
+        sudo apt remove -y libsodium-dev libsecp256k1-dev
 
         rm CMakeCache.txt
         ./build-all.sh
