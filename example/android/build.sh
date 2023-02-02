@@ -1,4 +1,5 @@
 #!/bin/bash
+
 pushd .
 
 export SECP256K1_INCLUDE_DIR=$(pwd)/third_party/secp256k1/include
@@ -49,5 +50,8 @@ cmake .. -GNinja -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.
 ninja native-lib || exit 1
 popd
 
+$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip build-$ARCH/libnative-lib.so
+
 mkdir -p libs/$ARCH/
 cp build-$ARCH/libnative-lib.so* libs/$ARCH/
+
