@@ -13,7 +13,7 @@ pushd .
 # ANDROID_CCACHE
 
 export SECP256K1_INCLUDE_DIR=$(pwd)/third_party/secp256k1/include
-export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/.libs/libsecp256k1.a
+export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/arm/libsecp256k1.a
 #export SECP256K1_LIBRARY=/usr/local/lib/libsecp256k1.a
 
 if [ $ARCH == "arm" ]
@@ -31,6 +31,7 @@ then
   ABI=$ARCH
   export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-westmere/include
   export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-westmere/lib/libsodium.a
+  export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/x86-64/libsecp256k1.a
 elif [ $ARCH == "arm64" ]
 then
   ABI="arm64-v8a"
