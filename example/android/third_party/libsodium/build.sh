@@ -5,6 +5,9 @@ rm -rf libsodium
 export ANDROID_NDK_ROOT=../../../../android-ndk-r25b
 export NDK_PLATFORM="android-24"
 export OPENSSL_DIR=../crypto
+export LIBSODIUM_FULL_BUILD=1
+export CC=
+export CXX=
 
 wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.18.tar.gz
 tar -xvf libsodium-1.0.18.tar.gz

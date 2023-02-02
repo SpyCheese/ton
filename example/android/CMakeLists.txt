@@ -40,6 +40,10 @@ target_link_libraries(native-lib tonlib)
 target_include_directories(native-lib PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIRS}>)
 target_link_libraries(native-lib PUBLIC ${SODIUM_LIBRARIES})
 
+message(STATUS "Found Secp256k1: ${SECP256K1_LIBRARY}")
+target_include_directories(native-lib PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIRS}>)
+target_link_libraries(native-lib PUBLIC ${SECP256K1_LIBRARIES})
+
 set(TONLIB_API_JAVA_PACKAGE "drinkless/org/ton")
 target_compile_definitions(native-lib PRIVATE PACKAGE_NAME="${TONLIB_API_JAVA_PACKAGE}")
 

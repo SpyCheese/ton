@@ -14,6 +14,7 @@ pushd .
 
 export SECP256K1_INCLUDE_DIR=$(pwd)/third_party/secp256k1/include
 export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/.libs/libsecp256k1.a
+#export SECP256K1_LIBRARY=/usr/local/lib/libsecp256k1.a
 
 if [ $ARCH == "arm" ]
 then
@@ -49,16 +50,13 @@ echo cmake .. -GNinja -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/and
       -DSECP256K1_INCLUDE_DIR=${SECP256K1_INCLUDE_DIR} -DSECP256K1_LIBRARY=${SECP256K1_LIBRARY} \
       -DSODIUM_INCLUDE_DIR=${SODIUM_INCLUDE_DIR} -DSODIUM_LIBRARY_RELEASE=${SODIUM_LIBRARY_RELEASE}
 
-ls -lart ${SODIUM_LIBRARY_RELEASE}
-
 cmake .. -GNinja -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake \
  -DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=${ABI} -DOPENSSL_ROOT_DIR=${OPENSSL_DIR}/${ARCH} -DTON_ARCH="" -DTON_ONLY_TONLIB=ON \
  -DSECP256K1_INCLUDE_DIR=${SECP256K1_INCLUDE_DIR} -DSECP256K1_LIBRARY=${SECP256K1_LIBRARY} \
  -DSODIUM_INCLUDE_DIR=${SODIUM_INCLUDE_DIR} -DSODIUM_LIBRARY_RELEASE=${SODIUM_LIBRARY_RELEASE} || exit 1
+
 ninja native-lib || exit 1
 popd
 
 mkdir -p libs/$ARCH/
 cp build-$ARCH/libnative-lib.so* libs/$ARCH/
-
-

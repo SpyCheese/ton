@@ -35,7 +35,7 @@ jobs:
         rm -rf example/android/src/drinkless/org/ton/TonApi.java
         cd example/android/
 
-        sudo apt install libsodium-dev
+        sudo apt install libtool autoconf libsodium-dev
 
         cmake -GNinja -DTON_ONLY_TONLIB=ON .
         

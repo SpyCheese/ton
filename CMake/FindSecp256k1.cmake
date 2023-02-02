@@ -17,6 +17,10 @@ find_library(
     DOC "secp256k1 library"
 )
 
+if (SECP256K1_LIBRARY)
+  message(STATUS "Found Secp256k1: ${SECP256K1_LIBRARY}")
+endif()
+
 set(SECP256K1_INCLUDE_DIRS ${SECP256K1_INCLUDE_DIR})
 set(SECP256K1_LIBRARIES ${SECP256K1_LIBRARY})
 
