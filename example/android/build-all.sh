@@ -9,7 +9,7 @@ ARCH="x86_64" ./build.sh || exit 1
 
 echo Building tonlib for arm...
 echo
-#ARCH="arm" ./build.sh || exit 1
+ARCH="arm" ./build.sh || exit 1
 
 echo Building tonlib for arm64...
 echo

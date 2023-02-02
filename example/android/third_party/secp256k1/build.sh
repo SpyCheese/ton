@@ -10,15 +10,19 @@ cd secp256k1
 #./configure --enable-module-recovery
 
 ./configure --enable-module-recovery --enable-experimental --with-asm=arm --host=arm-linux-androideabi CC=armv7a-linux-androideabi21-clang CFLAGS="-mthumb -march=armv7-a" CCASFLAGS="-Wa,-mthumb -Wa,-march=armv7-a"
+make
 cp .libs/libsecp256k1.a ../armv7/
 
 ./configure --enable-module-recovery --enable-experimental --with-asm=arm --host=arm-linux-androideabi CC=aarch64-linux-android21-clang CFLAGS="-mthumb -march=armv8-a" CCASFLAGS="-Wa,-mthumb -Wa,-march=armv8-a"
+make
 cp .libs/libsecp256k1.a ../armv8/
 
 ./configure --enable-module-recovery --host=x86_64-linux-androideabi CC=x86_64-linux-android21-clang
+make
 cp .libs/libsecp256k1.a ../x86-64/
 
 ./configure --enable-module-recovery --host=i686-linux-androideabi CC=i686-linux-android21-clang
+make
 cp .libs/libsecp256k1.a ../i686/
 
 make
