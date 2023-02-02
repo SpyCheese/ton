@@ -1,31 +1,18 @@
 #!/bin/bash
 pushd .
-# ANDROID_TOOLCHAIN
-# ANDROID_ABI
-# ANDROID_PLATFORM
-# ANDROID_STL
-# ANDROID_PIE
-# ANDROID_CPP_FEATURES
-# ANDROID_ALLOW_UNDEFINED_SYMBOLS
-# ANDROID_ARM_MODE
-# ANDROID_ARM_NEON
-# ANDROID_DISABLE_FORMAT_STRING_CHECKS
-# ANDROID_CCACHE
-
-export SECP256K1_INCLUDE_DIR=$(pwd)/third_party/secp256k1/include
-export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/arm64/libsecp256k1.a
-#export SECP256K1_LIBRARY=/usr/local/lib/libsecp256k1.a
 
 if [ $ARCH == "arm" ]
 then
   ABI="armeabi-v7a"
   export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-armv7-a/include
   export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-armv7-a/lib/libsodium.a
+  export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/armv7/libsecp256k1.a
 elif [ $ARCH == "x86" ]
 then
   ABI=$ARCH
   export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-i686/include
   export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-i686/lib/libsodium.a
+  export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/i686/libsecp256k1.a
 elif [ $ARCH == "x86_64" ]
 then
   ABI=$ARCH
@@ -37,6 +24,7 @@ then
   ABI="arm64-v8a"
   export SODIUM_INCLUDE_DIR=$(pwd)/third_party/libsodium/libsodium-android-armv8-a/include
   export SODIUM_LIBRARY_RELEASE=$(pwd)/third_party/libsodium/libsodium-android-armv8-a/lib/libsodium.a
+  export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/armv8/libsecp256k1.a
 fi
 
 
