@@ -29,7 +29,7 @@ jobs:
         export JAVA_INCLUDE_PATH2=${JAVA_HOME}/include/linux
         
         export ANDROID_NDK_ROOT=$(pwd)/android-ndk-r25b
-        export NDK_PLATFORM="android-24"
+        export NDK_PLATFORM="android-21"
         export OPENSSL_DIR=$(pwd)/example/android/third_party/crypto
         
         rm -rf example/android/src/drinkless/org/ton/TonApi.java

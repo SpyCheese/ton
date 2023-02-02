@@ -1,6 +1,6 @@
 #!/bin/sh
 
-rm -rf libsodium
+rm -rf libsodium-1.0.18 libsodium-1.0.18.tar.gz builds
 
 export ANDROID_NDK_ROOT=../../../../android-ndk-r25b
 export NDK_PLATFORM="android-24"
@@ -12,8 +12,9 @@ export CXX=
 wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.18.tar.gz
 tar -xvf libsodium-1.0.18.tar.gz
 
+mkdir builds
 cd libsodium-1.0.18
-#./autogen.sh -s
+./autogen.sh -s
 
 ./dist-build/android-x86.sh
 cp -R libsodium-android-i686 ..
