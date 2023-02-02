@@ -13,7 +13,7 @@ pushd .
 # ANDROID_CCACHE
 
 export SECP256K1_INCLUDE_DIR=$(pwd)/third_party/secp256k1/include
-export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/arm/libsecp256k1.a
+export SECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/arm64/libsecp256k1.a
 #export SECP256K1_LIBRARY=/usr/local/lib/libsecp256k1.a
 
 if [ $ARCH == "arm" ]
