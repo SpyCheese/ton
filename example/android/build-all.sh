@@ -5,7 +5,7 @@ echo
 
 echo Building tonlib for x86_64...
 echo
-#ARCH="x86_64" ./build.sh || exit 1
+ARCH="x86_64" ./build.sh || exit 1
 
 echo Building tonlib for arm...
 echo
@@ -13,4 +13,4 @@ echo
 
 echo Building tonlib for arm64...
 echo
-ARCH="arm64" ./build.sh || exit 1
+#ARCH="arm64" ./build.sh || exit 1
