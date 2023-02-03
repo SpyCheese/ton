@@ -30,6 +30,7 @@ jobs:
         
         export ANDROID_NDK_ROOT=$(pwd)/android-ndk-r25b
         export NDK_PLATFORM="android-21"
+        export ANDROID_PLATFORM="android-21"
         export OPENSSL_DIR=$(pwd)/example/android/third_party/crypto
         
         rm -rf example/android/src/drinkless/org/ton/TonApi.java
