@@ -1,6 +1,6 @@
 #!/bin/sh
 export PATH=$PATH:$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
-export NDK_PLATFORM="android-24"
+export NDK_PLATFORM="android-21"
 export CC=
 export CXX=
 
