@@ -13,7 +13,7 @@ wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.18.tar.gz
 tar -xvf libsodium-1.0.18.tar.gz
 
 cd libsodium-1.0.18
-./autogen.sh -s
+#./autogen.sh -s
 
 ./dist-build/android-x86.sh
 cp -R libsodium-android-i686 ..
