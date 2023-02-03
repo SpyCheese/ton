@@ -1,9 +1,9 @@
 #!/bin/sh
 
-rm -rf libsodium-1.0.18 libsodium-1.0.18.tar.gz builds
+rm -rf libsodium-1.0.18 libsodium-1.0.18.tar.gz
 
 export ANDROID_NDK_ROOT=../../../../android-ndk-r25b
-export NDK_PLATFORM="android-21"
+export NDK_PLATFORM="android-32"
 export OPENSSL_DIR=../crypto
 export LIBSODIUM_FULL_BUILD=1
 export CC=
@@ -12,7 +12,6 @@ export CXX=
 wget https://download.libsodium.org/libsodium/releases/libsodium-1.0.18.tar.gz
 tar -xvf libsodium-1.0.18.tar.gz
 
-mkdir builds
 cd libsodium-1.0.18
 ./autogen.sh -s
 
