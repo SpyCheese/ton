@@ -304,27 +304,22 @@ endif()
 target_include_directories(ton_crypto SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
 
 find_package(Secp256k1 REQUIRED)
+find_package(Sodium REQUIRED)
 
 if (MSVC)
+  target_include_directories(ton_crypto_core PUBLIC ${SODIUM_INCLUDE_DIRS})
+  target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARIES})
+  target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
+
   target_include_directories(ton_crypto_core PUBLIC ${SECP256K1_INCLUDE_DIRS})
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARIES})
-
-  find_package(SodiumAndroid REQUIRED)
-  if (SODIUMANDROID_FOUND)
-    target_include_directories(ton_crypto_core PUBLIC ${SODIUM_INCLUDE_DIRS})
-    target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARIES})
-    target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
-  endif()
-
 elseif (ANDROID)
-  find_package(SodiumAndroid REQUIRED)
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIRS}>)
   target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARIES})
 
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIRS}>)
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARIES})
 else()
-  find_package(Sodium REQUIRED)
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIRS}>)
   target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARIES})
 
