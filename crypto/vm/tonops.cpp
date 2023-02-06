@@ -419,11 +419,11 @@ int exec_hash_ext(VmState* st, unsigned args) {
         throw VmError{Excno::type_chk, "expected slice or builder"};
       }
     }
-    hasher.append(data, size);
     total_bits += size;
     long long gas_total = (i + 1) + total_bits / 8 / hasher.bytes_per_gas_unit();
-    st->consume_gas_limited_chk(gas_total - gas_consumed);
+    st->consume_gas(gas_total - gas_consumed);
     gas_consumed = gas_total;
+    hasher.append(data, size);
   }
   stack.pop_many(cnt);
   td::BufferSlice hash = hasher.finish();
@@ -488,6 +488,7 @@ int exec_ed25519_check_signature(VmState* st, bool from_slice) {
   if (!key_int->export_bytes(key, 32, false)) {
     throw VmError{Excno::range_chk, "Ed25519 public key must fit in an unsigned 256-bit integer"};
   }
+  st->register_chksgn_call();
   td::Ed25519::PublicKey pub_key{td::SecureString(td::Slice{key, 32})};
   auto res = pub_key.verify_signature(td::Slice{data, data_len}, td::Slice{signature, 64});
   stack.push_bool(res.is_ok() || st->get_chksig_always_succeed());
@@ -515,6 +516,7 @@ int exec_ecrecover(VmState* st) {
   if (!hash->export_bytes(hash_bytes, 32, false)) {
     throw VmError{Excno::range_chk, "data hash must fit in an unsigned 256-bit integer"};
   }
+  st->consume_gas(VmState::ecrecover_gas_price);
   unsigned char public_key[65];
   if (td::ecrecover(hash_bytes, signature, public_key)) {
     td::uint8 h = public_key[0];
