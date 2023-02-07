@@ -328,9 +328,9 @@ else()
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIRS}>)
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARIES})
 
-  if (NOT APPLE)
-    target_link_libraries(ton_crypto_core PUBLIC secp256k1)
-  endif()
+#  if (NOT APPLE)
+#    target_link_libraries(ton_crypto_core PUBLIC secp256k1)
+#  endif()
 endif()
 
 add_library(ton_db STATIC ${TON_DB_SOURCE})
