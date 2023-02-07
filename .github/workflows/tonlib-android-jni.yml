@@ -36,9 +36,9 @@ jobs:
         rm -rf example/android/src/drinkless/org/ton/TonApi.java
         cd example/android/
 
-        sudo apt install -y libtool autoconf libsodium-dev
+        sudo apt install -y libtool autoconf libsodium-dev libsecp256k1-dev
              
-        cmake -GNinja -DTON_ONLY_TONLIB=ON -DSECP256K1_LIBRARY=$(pwd)/third_party/secp256k1/libsecp256k1.a -DSECP256K1_INCLUDE_DIR=$(pwd)/third_party/secp256k1/include .
+        cmake -GNinja -DTON_ONLY_TONLIB=ON .
         
         ninja prepare_cross_compiling
 
