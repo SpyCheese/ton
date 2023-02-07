@@ -87,14 +87,11 @@ if (UNIX)
     HINTS ${${XPREFIX}_LIBRARY_DIRS}
     )
 
-
   ########################################################################
   # Windows
 elseif (WIN32)
   set(SODIUM_DIR "$ENV{SODIUM_DIR}" CACHE FILEPATH "sodium install directory")
   mark_as_advanced(SODIUM_DIR)
-
-  message(STATUS "SODIUM_DIR='${SODIUM_DIR}'")
 
   find_path(SODIUM_INCLUDE_DIR
     NAMES sodium.h
