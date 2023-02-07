@@ -94,7 +94,10 @@ elseif (WIN32)
   set(SODIUM_DIR "$ENV{SODIUM_DIR}" CACHE FILEPATH "sodium install directory")
   mark_as_advanced(SODIUM_DIR)
 
-  find_path(SODIUM_INCLUDE_DIR sodium.h
+  message(STATUS "SODIUM_DIR='${SODIUM_DIR}'")
+
+  find_path(SODIUM_INCLUDE_DIR
+    NAMES sodium.h
     HINTS ${SODIUM_DIR}
     PATH_SUFFIXES include
     )
