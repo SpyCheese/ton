@@ -314,7 +314,6 @@ if (MSVC)
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIRS}>)
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARIES})
 elseif (ANDROID)
-#  find_package(SodiumAndroid REQUIRED)
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIR}>)
   target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARY_RELEASE})
 
