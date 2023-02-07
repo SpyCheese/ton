@@ -306,7 +306,7 @@ target_include_directories(ton_crypto SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_
 find_package(Secp256k1 REQUIRED)
 
 if (MSVC)
-  find_package(SodiumAndroid REQUIRED)
+  find_package(Sodium REQUIRED)
   target_include_directories(ton_crypto_core PUBLIC ${SODIUM_INCLUDE_DIRS})
   target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARIES})
   target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)

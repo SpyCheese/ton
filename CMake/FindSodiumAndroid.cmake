@@ -16,10 +16,6 @@ find_library(
     NAMES libsodium.a libsodium.lib
 )
 
-if (SODIUM_LIBRARY_RELEASE)
-  message(STATUS "Found SodiumAndroid: ${SODIUM_LIBRARY_RELEASE}")
-endif()
-
 set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
 set(SODIUM_LIBRARIES ${SODIUM_LIBRARY_RELEASE})
 
