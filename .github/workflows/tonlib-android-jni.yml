@@ -57,5 +57,5 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@master
       with:
-        name: Tonlib JNI libraries for Android
+        name: tonlib-android-jni
         path: artifacts
