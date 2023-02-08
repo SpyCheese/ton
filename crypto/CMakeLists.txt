@@ -307,30 +307,23 @@ find_package(Secp256k1 REQUIRED)
 
 if (MSVC)
   find_package(Sodium REQUIRED)
-  target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIR}>)
-  target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARY_RELEASE})
   target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
-
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIRS}>)
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARIES})
 elseif (ANDROID)
-  target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIR}>)
-  target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARY_RELEASE})
-
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIR}>)
   target_link_libraries(ton_crypto PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}>)
 else()
   find_package(Sodium REQUIRED)
-  target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIR}>)
-  target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARY_RELEASE})
-
   target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIRS}>)
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARIES})
-
   if (NOT APPLE)
     target_link_libraries(ton_crypto_core PUBLIC secp256k1)
   endif()
 endif()
+
+target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIR}>)
+target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARY_RELEASE})
 
 add_library(ton_db STATIC ${TON_DB_SOURCE})
 target_include_directories(ton_db PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
