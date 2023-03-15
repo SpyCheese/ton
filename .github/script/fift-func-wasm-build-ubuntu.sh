@@ -1,7 +1,7 @@
 # The script builds funcfift compiler to WASM
 
 # dependencies:
-#sudo apt-get install -y build-essential git make cmake clang libgflags-dev zlib1g-dev libssl-dev libreadline-dev libmicrohttpd-dev pkg-config libgsl-dev python3 python3-dev python3-pip nodejs libevent-dev
+# sudo apt-get install -y build-essential git make cmake clang libgflags-dev zlib1g-dev libssl-dev libreadline-dev libmicrohttpd-dev pkg-config libgsl-dev python3 python3-dev python3-pip nodejs libevent-dev libsecp256k1-dev libsodium-dev
 
 export CC=$(which clang)
 export CXX=$(which clang++)
