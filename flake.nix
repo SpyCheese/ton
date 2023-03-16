@@ -32,12 +32,14 @@
               zlib
               libmicrohttpd
               libsodium
+              secp256k1
             ] else
               [
                 (openssl_1_1.override { static = true; }).dev
                 (zlib.override { shared = false; }).dev
                 pkgsStatic.libmicrohttpd.dev
                 pkgsStatic.libsodium.dev
+                secp256k1
               ] ++ optional staticGlibc glibc.static;
 
           cmakeFlags = [ "-DTON_USE_ABSEIL=OFF" "-DNIX=ON" ] ++ optionals staticMusl [
