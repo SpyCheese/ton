@@ -24,15 +24,15 @@ set(EMULATOR_EMSCRIPTEN_SOURCE
 
 include(GenerateExportHeader)
 
-if (NIX)
-  add_library(emulator_static STATIC ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
-else()
-  add_library(emulator_static SHARED ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
-endif()
-
+add_library(emulator_static STATIC ${EMULATOR_STATIC_SOURCE})
 target_link_libraries(emulator_static PUBLIC ton_crypto ton_block smc-envelope)
 
-add_library(emulator SHARED ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
+if (NIX)
+  add_library(emulator STATIC ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
+else
+  add_library(emulator SHARED ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
+endif()
+
 target_link_libraries(emulator PUBLIC emulator_static)
 generate_export_header(emulator EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/emulator_export.h)
 target_include_directories(emulator PUBLIC
