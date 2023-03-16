@@ -29,7 +29,7 @@ target_link_libraries(emulator_static PUBLIC ton_crypto ton_block smc-envelope)
 
 if (NIX)
   add_library(emulator STATIC ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
-else
+else()
   add_library(emulator SHARED ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
 endif()
 
