@@ -24,7 +24,12 @@ set(EMULATOR_EMSCRIPTEN_SOURCE
 
 include(GenerateExportHeader)
 
-add_library(emulator_static STATIC ${EMULATOR_STATIC_SOURCE})
+if (NIX)
+  add_library(emulator STATIC ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
+else()
+  add_library(emulator SHARED ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
+endif()
+
 target_link_libraries(emulator_static PUBLIC ton_crypto ton_block smc-envelope)
 
 add_library(emulator SHARED ${EMULATOR_SOURCE} ${EMULATOR_HEADERS})
