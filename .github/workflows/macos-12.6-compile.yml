@@ -53,7 +53,7 @@ jobs:
           cp build/crypto/tlbc artifacts/
           cp build/validator-engine-console/validator-engine-console artifacts/ 
           cp build/tonlib/tonlib-cli artifacts/
-          cp build/tonlib/libtonlibjson.0.5.dylib artifacts/ 
+          cp build/tonlib/libtonlibjson.0.5.dylib artifacts/libtonlibjson.dylib 
           cp build/http/http-proxy artifacts/
           cp build/rldp-http-proxy/rldp-http-proxy artifacts/
           cp build/dht-server/dht-server artifacts/
