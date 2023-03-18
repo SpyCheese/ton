@@ -107,18 +107,18 @@ jobs:
 # create release
 
       - name: Read Changelog.md and use it as a body of new release
-        id: read_release
+        id: read_changes
         shell: bash
         run: |
           r=$(cat recent_changelog.md)
           r="${r//'%'/'%25'}"
           r="${r//$'\n'/'%0A'}"
           r="${r//$'\r'/'%0D'}"
-          echo "{CHANGELOG_BODY}={$r}" >> $GITHUB_OUTPUT
+          echo "CHANGELOG_BODY=$r" >> $GITHUB_OUTPUT
 
       - name: Get current date
-        id: date
-        run: echo "{date}={$(date +'%Y.%m')}" >> $GITHUB_OUTPUT
+        id: tag
+        run: echo "TAG=$(date +'%Y.%m')" >> $GITHUB_OUTPUT
 
       - name: Get registration token
         id: getRegToken
@@ -131,10 +131,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ steps.date.outputs.date }}
-          release_name: v${{ steps.date.outputs.date }}
+          tag_name: v${{ steps.tag.outputs.TAG }}
+          release_name: v${{ steps.tag.outputs.TAG }}
           body: |
-            ${{ steps.read_release.outputs.CHANGELOG_BODY }}
+            ${{ steps.read_changes.outputs.CHANGELOG_BODY }}
           draft: false
           prerelease: false
 
