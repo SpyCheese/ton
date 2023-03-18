@@ -110,15 +110,15 @@ jobs:
         id: read_release
         shell: bash
         run: |
-          r=$(cat Changelog.md)
+          r=$(cat recent_changelog.md)
           r="${r//'%'/'%25'}"
           r="${r//$'\n'/'%0A'}"
           r="${r//$'\r'/'%0D'}"
-          echo "::set-output name=CHANGELOG_BODY::$r"
+          echo "{CHANGELOG_BODY}={$r}" >> $GITHUB_OUTPUT
 
       - name: Get current date
         id: date
-        run: echo "::set-output name=date::$(date +'%Y.%m')"
+        run: echo "{date}={$(date +'%Y.%m')}" >> $GITHUB_OUTPUT
 
       - name: Get registration token
         id: getRegToken
