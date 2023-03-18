@@ -114,7 +114,9 @@ jobs:
           r="${r//'%'/'%25'}"
           r="${r//$'\n'/'%0A'}"
           r="${r//$'\r'/'%0D'}"
-          echo "CHANGELOG_BODY=$r" >> $GITHUB_OUTPUT
+          echo "CHANGELOG_BODY=<<EOF" >> $GITHUB_OUTPUT
+          echo $r
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Get current date
         id: tag
@@ -132,7 +134,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ steps.tag.outputs.TAG }}
-          release_name: v${{ steps.tag.outputs.TAG }}
+          release_name: TON ${{ steps.tag.outputs.TAG }}
           body: |
             ${{ steps.read_changes.outputs.CHANGELOG_BODY }}
           draft: false
