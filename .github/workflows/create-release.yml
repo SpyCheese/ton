@@ -114,7 +114,7 @@ jobs:
           r="${r//'%'/'%25'}"
           r="${r//$'\n'/'%0A'}"
           r="${r//$'\r'/'%0D'}"
-          echo "CHANGELOG_BODY=<<EOF" >> $GITHUB_OUTPUT
+          echo "CHANGELOG_BODY<<EOF" >> $GITHUB_OUTPUT
           echo $r
           echo "EOF" >> $GITHUB_OUTPUT
 
