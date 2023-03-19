@@ -110,7 +110,7 @@ jobs:
         id: read_release
         shell: bash
         run: |
-          r=$(cat Changelog.md)
+          r=$(cat recent_changelog.md)
           r="${r//'%'/'%25'}"
           r="${r//$'\n'/'%0A'}"
           r="${r//$'\r'/'%0D'}"
