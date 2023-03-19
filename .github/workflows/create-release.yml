@@ -107,7 +107,7 @@ jobs:
 # create release
 
       - name: Read Changelog.md and use it as a body of new release
-        id: read_changes
+        id: changes
         shell: bash
         run: |
           r=$(cat recent_changelog.md)
@@ -120,7 +120,7 @@ jobs:
 
       - name: Get current date
         id: tag
-        run: echo "TAG=$(date +'%Y.%m')" >> $GITHUB_OUTPUT
+        run: echo "TAG=$(date +'%Y.%m.%d')" >> $GITHUB_OUTPUT
 
       - name: Get registration token
         id: getRegToken
@@ -136,7 +136,7 @@ jobs:
           tag_name: v${{ steps.tag.outputs.TAG }}
           release_name: TON ${{ steps.tag.outputs.TAG }}
           body: |
-            ${{ steps.read_changes.outputs.CHANGELOG_BODY }}
+            ${{ steps.changes.outputs.CHANGELOG_BODY }}
           draft: false
           prerelease: false
 
@@ -150,7 +150,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries.zip
           asset_name: ton-win-x86-64.zip
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Windows 2019 single artifact - fift
         uses: svenstaro/upload-release-action@v2
@@ -158,7 +158,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries/fift.exe
           asset_name: fift.exe
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Windows 2019 single artifact - func
         uses: svenstaro/upload-release-action@v2
@@ -166,7 +166,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries/func.exe
           asset_name: func.exe
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Windows 2019 single artifact - lite-client
         uses: svenstaro/upload-release-action@v2
@@ -174,7 +174,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries/lite-client.exe
           asset_name: lite-client.exe
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Windows 2019 single artifact - rldp-http-proxy
         uses: svenstaro/upload-release-action@v2
@@ -182,7 +182,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries/rldp-http-proxy.exe
           asset_name: rldp-http-proxy.exe
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Windows 2019 single artifact - http-proxy
         uses: svenstaro/upload-release-action@v2
@@ -190,7 +190,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries/http-proxy.exe
           asset_name: http-proxy.exe
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Windows 2019 single artifact - storage-daemon-cli
         uses: svenstaro/upload-release-action@v2
@@ -198,7 +198,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries/storage-daemon-cli.exe
           asset_name: storage-daemon-cli.exe
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Windows 2019 single artifact - tonlibjson
         uses: svenstaro/upload-release-action@v2
@@ -206,7 +206,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries/tonlibjson.dll
           asset_name: tonlibjson.dll
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Windows 2019 single artifact - tonlib-cli
         uses: svenstaro/upload-release-action@v2
@@ -214,7 +214,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-win-binaries/tonlib-cli.exe
           asset_name: tonlib-cli.exe
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
 # mac x86-64
 
@@ -224,7 +224,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries.zip
           asset_name: ton-mac-x86-64.zip
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Mac x86-64 single artifact - fift
         uses: svenstaro/upload-release-action@v2
@@ -232,7 +232,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries/fift
           asset_name: fift-mac-x86-64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Mac x86-64 single artifact - func
         uses: svenstaro/upload-release-action@v2
@@ -240,7 +240,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries/func
           asset_name: func-mac-x86-64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Mac x86-64 single artifact - lite-client
         uses: svenstaro/upload-release-action@v2
@@ -248,7 +248,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries/lite-client
           asset_name: lite-client-mac-x86-64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Mac x86-64 single artifact - rldp-http-proxy
         uses: svenstaro/upload-release-action@v2
@@ -256,7 +256,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries/rldp-http-proxy
           asset_name: rldp-http-proxy-mac-x86-64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Mac x86-64 single artifact - http-proxy
         uses: svenstaro/upload-release-action@v2
@@ -264,7 +264,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries/http-proxy
           asset_name: http-proxy-mac-x86-64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Mac x86-64 single artifact - storage-daemon-cli
         uses: svenstaro/upload-release-action@v2
@@ -272,7 +272,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries/storage-daemon-cli
           asset_name: storage-daemon-cli-mac-x86-64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Mac x86-64 single artifact - tonlibjson
         uses: svenstaro/upload-release-action@v2
@@ -280,7 +280,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries/libtonlibjson.dylib
           asset_name: tonlibjson-mac-x86-64.dylib
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Mac x86-64 single artifact - tonlib-cli
         uses: svenstaro/upload-release-action@v2
@@ -288,7 +288,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-macos-binaries/tonlib-cli
           asset_name: tonlib-cli-mac-x86-64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
 # linux x86-64
 
@@ -298,7 +298,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries.zip
           asset_name: ton-linux-x86_64.zip
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Linux x86-64 single artifact - fift
         uses: svenstaro/upload-release-action@v2
@@ -306,7 +306,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries/fift
           asset_name: fift-linux-x86_64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Linux x86-64 single artifact - func
         uses: svenstaro/upload-release-action@v2
@@ -314,7 +314,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries/func
           asset_name: func-linux-x86_64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Linux x86-64 single artifact - lite-client
         uses: svenstaro/upload-release-action@v2
@@ -322,7 +322,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries/lite-client
           asset_name: lite-client-linux-x86_64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Linux x86-64 single artifact - rldp-http-proxy
         uses: svenstaro/upload-release-action@v2
@@ -330,7 +330,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries/rldp-http-proxy
           asset_name: rldp-http-proxy-linux-x86_64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Linux x86-64 single artifact - http-proxy
         uses: svenstaro/upload-release-action@v2
@@ -338,7 +338,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries/http-proxy
           asset_name: http-proxy-linux-x86_64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Linux x86-64 single artifact - storage-daemon-cli
         uses: svenstaro/upload-release-action@v2
@@ -346,7 +346,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries/storage-daemon-cli
           asset_name: storage-daemon-cli-linux-x86_64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Linux x86-64 single artifact - tonlibjson
         uses: svenstaro/upload-release-action@v2
@@ -354,7 +354,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries/libtonlibjson.so
           asset_name: tonlibjson-linux-x86_64.so
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload Linux x86-64 single artifact - tonlib-cli
         uses: svenstaro/upload-release-action@v2
@@ -362,7 +362,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-x86_64-linux-binaries/tonlib-cli
           asset_name: tonlib-cli-linux-x86_64
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
 
 #      - name: Upload Linux arm64 artifacts
 #        uses: svenstaro/upload-release-action@v2
@@ -370,7 +370,7 @@ jobs:
 #          repo_token: ${{ secrets.GITHUB_TOKEN }}
 #          file: artifacts/ton-aarch64-linux-binaries.zip
 #          asset_name: ton-linux-arm64.zip
-#          tag: v${{ steps.date.outputs.date }}
+#          tag: v${{ steps.tag.outputs.TAG }}
 #
 #      - name: Upload Mac arm64 artifacts
 #        uses: svenstaro/upload-release-action@v2
@@ -378,7 +378,7 @@ jobs:
 #          repo_token: ${{ secrets.GITHUB_TOKEN }}
 #          file: artifacts/ton-aarch64-macos-binaries
 #          asset_name: ton-mac-arm64.zip
-#          tag: v${{ steps.date.outputs.date }}
+#          tag: v${{ steps.tag.outputs.TAG }}
 
       - name: Upload WASM artifacts
         uses: svenstaro/upload-release-action@v2
@@ -386,4 +386,4 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: artifacts/ton-wasm-binaries.zip
           asset_name: ton-wasm-binaries.zip
-          tag: v${{ steps.date.outputs.date }}
+          tag: v${{ steps.tag.outputs.TAG }}
