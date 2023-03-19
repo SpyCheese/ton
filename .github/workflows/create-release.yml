@@ -107,16 +107,14 @@ jobs:
 # create release
 
       - name: Read Changelog.md and use it as a body of new release
-        id: changes
+        id: read_release
         shell: bash
         run: |
-          r=$(cat recent_changelog.md)
+          r=$(cat Changelog.md)
           r="${r//'%'/'%25'}"
           r="${r//$'\n'/'%0A'}"
           r="${r//$'\r'/'%0D'}"
-          echo "CHANGELOG_BODY<<EOF" >> $GITHUB_OUTPUT
-          echo $r
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "::set-output name=CHANGELOG_BODY::$r"
 
       - name: Get current date
         id: tag
@@ -136,7 +134,7 @@ jobs:
           tag_name: v${{ steps.tag.outputs.TAG }}
           release_name: TON ${{ steps.tag.outputs.TAG }}
           body: |
-            ${{ steps.changes.outputs.CHANGELOG_BODY }}
+            ${{ steps.read_release.outputs.CHANGELOG_BODY }}
           draft: false
           prerelease: false
 
