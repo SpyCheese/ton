@@ -654,11 +654,12 @@ td::Result<GasLimitsPrices> Config::do_get_gas_limits_prices(td::Ref<vm::Cell> c
     res.delete_due_limit = r.delete_due_limit;
   };
   block::gen::GasLimitsPrices::Record_gas_prices_ext rec;
+  vm::CellSlice cs0 = cs;
   if (tlb::unpack(cs, rec)) {
     f(rec, rec.special_gas_limit);
   } else {
     block::gen::GasLimitsPrices::Record_gas_prices rec0;
-    if (tlb::unpack(cs, rec0)) {
+    if (tlb::unpack(cs = cs0, rec0)) {
       f(rec0, rec0.gas_limit);
     } else {
       return td::Status::Error(PSLICE() << "configuration parameter " << id

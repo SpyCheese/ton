@@ -1,4 +1,4 @@
-/* 
+/*
     This file is part of TON Blockchain source code.
 
     TON Blockchain is free software; you can redistribute it and/or
@@ -152,6 +152,9 @@ class ValidatorEngine : public td::actor::Actor {
   std::string local_config_ = "";
   std::string global_config_ = "ton-global.config";
   std::string config_file_;
+  std::string temp_config_file() const {
+    return config_file_ + ".tmp";
+  }
 
   std::string fift_dir_ = "";
 
@@ -200,6 +203,7 @@ class ValidatorEngine : public td::actor::Actor {
   double sync_ttl_ = 0;
   double archive_ttl_ = 0;
   double key_proof_ttl_ = 0;
+  td::uint32 celldb_compress_depth_ = 0;
   bool read_config_ = false;
   bool started_keyring_ = false;
   bool started_ = false;
@@ -257,6 +261,9 @@ class ValidatorEngine : public td::actor::Actor {
     keys_[key.compute_short_id()] = key;
   }
   void schedule_shutdown(double at);
+  void set_celldb_compress_depth(td::uint32 value) {
+    celldb_compress_depth_ = value;
+  }
   void start_up() override;
   ValidatorEngine() {
   }

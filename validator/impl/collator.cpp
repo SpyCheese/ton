@@ -44,6 +44,12 @@ namespace validator {
 using td::Ref;
 using namespace std::literals::string_literals;
 
+// Don't increase MERGE_MAX_QUEUE_LIMIT too much: merging requires cleaning the whole queue in out_msg_queue_cleanup
+static const td::uint32 FORCE_SPLIT_QUEUE_SIZE = 4096;
+static const td::uint32 SPLIT_MAX_QUEUE_SIZE = 100000;
+static const td::uint32 MERGE_MAX_QUEUE_SIZE = 2047;
+static const td::uint32 SKIP_EXTERNALS_QUEUE_SIZE = 8000;
+
 #define DBG(__n) dbg(__n)&&
 #define DSTART int __dcnt = 0;
 #define DEB DBG(++__dcnt)
@@ -100,7 +106,7 @@ Collator::Collator(ShardIdFull shard, bool is_hardfork, UnixTime min_ts, BlockId
  * The results of these queries are handled by corresponding callback functions.
  */
 void Collator::start_up() {
-  LOG(DEBUG) << "Collator for shard " << shard_.to_str() << " started";
+  LOG(WARNING) << "Collator for shard " << shard_.to_str() << " started";
   LOG(DEBUG) << "Previous block #1 is " << prev_blocks.at(0).to_str();
   if (prev_blocks.size() > 1) {
     LOG(DEBUG) << "Previous block #2 is " << prev_blocks.at(1).to_str();
@@ -548,7 +554,7 @@ bool Collator::preprocess_prev_mc_state() {
  * @param res The retreived masterchain state.
  */
 void Collator::after_get_mc_state(td::Result<std::pair<Ref<MasterchainState>, BlockIdExt>> res) {
-  LOG(DEBUG) << "in Collator::after_get_mc_state()";
+  LOG(WARNING) << "in Collator::after_get_mc_state()";
   --pending;
   if (res.is_error()) {
     fatal_error(res.move_as_error());
@@ -583,7 +589,7 @@ void Collator::after_get_mc_state(td::Result<std::pair<Ref<MasterchainState>, Bl
  * @param res The retrieved shard state.
  */
 void Collator::after_get_shard_state(int idx, td::Result<Ref<ShardState>> res) {
-  LOG(DEBUG) << "in Collator::after_get_shard_state(" << idx << ")";
+  LOG(WARNING) << "in Collator::after_get_shard_state(" << idx << ")";
   --pending;
   if (res.is_error()) {
     fatal_error(res.move_as_error());
@@ -788,13 +794,32 @@ bool Collator::request_neighbor_msg_queues() {
 }
 
 /**
+ * Requests the size of the outbound message queue from the previous state(s).
+ *
+* @returns True if the request was successful, false otherwise.
+ */
+bool Collator::request_out_msg_queue_size() {
+  if (after_split_) {
+    // If block is after split, the size is calculated during split (see Collator::split_last_state)
+    return true;
+  }
+  for (size_t i = 0; i < prev_blocks.size(); ++i) {
+    ++pending;
+    send_closure_later(manager, &ValidatorManager::get_out_msg_queue_size, prev_blocks[i],
+                       [self = get_self(), i](td::Result<td::uint32> res) {
+                         td::actor::send_closure(std::move(self), &Collator::got_out_queue_size, i, std::move(res));
+                       });
+  }
+  return true;
+}
+
+/**
  * Handles the result of obtaining the outbound queue for a neighbor.
  *
  * @param i The index of the neighbor.
  * @param res The obtained outbound queue.
  */
 void Collator::got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res) {
-  LOG(DEBUG) << "obtained outbound queue for neighbor #" << i;
   --pending;
   if (res.is_error()) {
     fatal_error(res.move_as_error());
@@ -802,6 +827,7 @@ void Collator::got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res) 
   }
   Ref<MessageQueue> outq_descr = res.move_as_ok();
   block::McShardDescr& descr = neighbors_.at(i);
+  LOG(WARNING) << "obtained outbound queue for neighbor #" << i << " : " << descr.shard().to_str();
   if (outq_descr->get_block_id() != descr.blk_) {
     LOG(DEBUG) << "outq_descr->id = " << outq_descr->get_block_id().to_str() << " ; descr.id = " << descr.blk_.to_str();
     fatal_error(
@@ -848,6 +874,27 @@ void Collator::got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res) 
   if (!pending) {
     LOG(INFO) << "all neighbor output queues fetched";
   }
+  check_pending();
+}
+
+/**
+ * Handles the result of obtaining the size of the outbound message queue.
+ *
+ * If the block is after merge then the two sizes are added.
+ *
+ * @param i The index of the previous block (0 or 1).
+ * @param res The result object containing the size of the queue.
+ */
+void Collator::got_out_queue_size(size_t i, td::Result<td::uint32> res) {
+  --pending;
+  if (res.is_error()) {
+    fatal_error(
+        res.move_as_error_prefix(PSTRING() << "failed to get message queue size from prev block #" << i << ": "));
+    return;
+  }
+  td::uint32 size = res.move_as_ok();
+  LOG(WARNING) << "got outbound queue size from prev block #" << i << ": " << size;
+  out_msg_queue_size_ += size;
   check_pending();
 }
 
@@ -969,7 +1016,7 @@ bool Collator::split_last_state(block::ShardState& ss) {
     return fatal_error(res2.move_as_error());
   }
   sibling_processed_upto_ = res2.move_as_ok();
-  auto res3 = ss.split(shard_);
+  auto res3 = ss.split(shard_, &out_msg_queue_size_);
   if (res3.is_error()) {
     return fatal_error(std::move(res3));
   }
@@ -1383,6 +1430,9 @@ bool Collator::check_this_shard_mc_info() {
 bool Collator::init_block_limits() {
   CHECK(block_limits_);
   CHECK(state_usage_tree_);
+  if (now_ > prev_now_ + 15 && block_limits_->lt_delta.hard() > 200) {
+    block_limits_->lt_delta = {20, 180, 200};
+  }
   block_limits_->usage_tree = state_usage_tree_.get();
   block_limit_status_ = std::make_unique<block::BlockLimitStatus>(*block_limits_);
   return true;
@@ -1444,6 +1494,9 @@ bool Collator::do_preinit() {
     return fatal_error("cannot initialize block limits");
   }
   if (!request_neighbor_msg_queues()) {
+    return false;
+  }
+  if (!request_out_msg_queue_size()) {
     return false;
   }
   return true;
@@ -1709,7 +1762,7 @@ bool Collator::register_shard_block_creators(std::vector<td::Bits256> creator_li
  */
 bool Collator::try_collate() {
   if (!preinit_complete) {
-    LOG(DEBUG) << "running do_preinit()";
+    LOG(WARNING) << "running do_preinit()";
     if (!do_preinit()) {
       return fatal_error(-667, "error preinitializing data required by collator");
     }
@@ -1818,6 +1871,13 @@ bool Collator::init_utime() {
   CHECK(config_);
   // consider unixtime and lt from previous block(s) of the same shardchain
   prev_now_ = prev_state_utime_;
+  // Extend collator timeout if previous block is too old
+  td::Timestamp new_timeout = td::Timestamp::in(std::min(30.0, (td::Clocks::system() - (double)prev_now_) / 2));
+  if (timeout < new_timeout) {
+    timeout = new_timeout;
+    alarm_timestamp() = timeout;
+  }
+
   auto prev = std::max<td::uint32>(config_->utime, prev_now_);
   now_ = std::max<td::uint32>(prev + 1, (unsigned)std::time(nullptr));
   if (now_ > now_upper_limit_) {
@@ -2002,7 +2062,7 @@ bool Collator::do_collate() {
   // After do_collate started it will not be interrupted by timeout
   alarm_timestamp() = td::Timestamp::never();
 
-  LOG(DEBUG) << "do_collate() : start";
+  LOG(WARNING) << "do_collate() : start";
   if (!fetch_config_params()) {
     return fatal_error("cannot fetch required configuration parameters from masterchain state");
   }
@@ -2163,74 +2223,144 @@ bool Collator::out_msg_queue_cleanup() {
     block::gen::t_OutMsgQueue.print(std::cerr, *rt);
     rt->print_rec(std::cerr);
   }
-  for (const auto& nb : neighbors_) {
-    if (!nb.is_disabled() && (!nb.processed_upto || !nb.processed_upto->can_check_processed())) {
-      return fatal_error(-667, PSTRING() << "internal error: no info for checking processed messages from neighbor "
-                                         << nb.blk_.to_str());
-    }
-  }
 
-  auto res = out_msg_queue_->filter([&](vm::CellSlice& cs, td::ConstBitPtr key, int n) -> int {
-    assert(n == 352);
-    // LOG(DEBUG) << "key is " << key.to_hex(n);
-    if (queue_cleanup_timeout_.is_in_past(td::Timestamp::now())) {
-      LOG(WARNING) << "cleaning up outbound queue takes too long, ending";
-      outq_cleanup_partial_ = true;
-      return (1 << 30) + 1;  // retain all remaining outbound queue entries including this one without processing
-    }
-    if (block_full_) {
-      LOG(WARNING) << "BLOCK FULL while cleaning up outbound queue, cleanup completed only partially";
-      outq_cleanup_partial_ = true;
-      return (1 << 30) + 1;  // retain all remaining outbound queue entries including this one without processing
-    }
-    block::EnqueuedMsgDescr enq_msg_descr;
-    unsigned long long created_lt;
-    if (!(cs.fetch_ulong_bool(64, created_lt)  // augmentation
-          && enq_msg_descr.unpack(cs)          // unpack EnqueuedMsg
-          && enq_msg_descr.check_key(key)      // check key
-          && enq_msg_descr.lt_ == created_lt)) {
-      LOG(ERROR) << "cannot unpack EnqueuedMsg with key " << key.to_hex(n);
-      return -1;
-    }
-    LOG(DEBUG) << "scanning outbound message with (lt,hash)=(" << enq_msg_descr.lt_ << ","
-               << enq_msg_descr.hash_.to_hex() << ") enqueued_lt=" << enq_msg_descr.enqueued_lt_;
-    bool delivered = false;
-    ton::LogicalTime deliver_lt = 0;
-    for (const auto& neighbor : neighbors_) {
-      // could look up neighbor with shard containing enq_msg_descr.next_prefix more efficiently
-      // (instead of checking all neighbors)
-      if (!neighbor.is_disabled() && neighbor.processed_upto->already_processed(enq_msg_descr)) {
-        delivered = true;
-        deliver_lt = neighbor.end_lt();
-        break;
+  if (after_merge_) {
+    // We need to clean the whole queue after merge
+    // Queue is not too big, see const MERGE_MAX_QUEUE_SIZE
+    for (const auto& nb : neighbors_) {
+      if (!nb.is_disabled() && (!nb.processed_upto || !nb.processed_upto->can_check_processed())) {
+        return fatal_error(-667, PSTRING() << "internal error: no info for checking processed messages from neighbor "
+                                           << nb.blk_.to_str());
       }
     }
-    if (delivered) {
-      LOG(DEBUG) << "outbound message with (lt,hash)=(" << enq_msg_descr.lt_ << "," << enq_msg_descr.hash_.to_hex()
-                 << ") enqueued_lt=" << enq_msg_descr.enqueued_lt_ << " has been already delivered, dequeueing";
-      if (!dequeue_message(std::move(enq_msg_descr.msg_env_), deliver_lt)) {
-        fatal_error(PSTRING() << "cannot dequeue outbound message with (lt,hash)=(" << enq_msg_descr.lt_ << ","
-                              << enq_msg_descr.hash_.to_hex() << ") by inserting a msg_export_deq record");
+    td::uint32 deleted = 0;
+    auto res = out_msg_queue_->filter([&](vm::CellSlice& cs, td::ConstBitPtr key, int n) -> int {
+      assert(n == 352);
+      block::EnqueuedMsgDescr enq_msg_descr;
+      unsigned long long created_lt;
+      if (!(cs.fetch_ulong_bool(64, created_lt)  // augmentation
+            && enq_msg_descr.unpack(cs)          // unpack EnqueuedMsg
+            && enq_msg_descr.check_key(key)      // check key
+            && enq_msg_descr.lt_ == created_lt)) {
+        LOG(ERROR) << "cannot unpack EnqueuedMsg with key " << key.to_hex(n);
         return -1;
       }
-      register_out_msg_queue_op();
-      if (!block_limit_status_->fits(block::ParamLimits::cl_normal)) {
-        block_full_ = true;
+      LOG(DEBUG) << "scanning outbound message with (lt,hash)=(" << enq_msg_descr.lt_ << ","
+                 << enq_msg_descr.hash_.to_hex() << ") enqueued_lt=" << enq_msg_descr.enqueued_lt_;
+      bool delivered = false;
+      ton::LogicalTime deliver_lt = 0;
+      for (const auto& neighbor : neighbors_) {
+        // could look up neighbor with shard containing enq_msg_descr.next_prefix more efficiently
+        // (instead of checking all neighbors)
+        if (!neighbor.is_disabled() && neighbor.processed_upto->already_processed(enq_msg_descr)) {
+          delivered = true;
+          deliver_lt = neighbor.end_lt();
+          break;
+        }
       }
+      if (delivered) {
+        ++deleted;
+        CHECK(out_msg_queue_size_ > 0);
+        --out_msg_queue_size_;
+        LOG(DEBUG) << "outbound message with (lt,hash)=(" << enq_msg_descr.lt_ << "," << enq_msg_descr.hash_.to_hex()
+                   << ") enqueued_lt=" << enq_msg_descr.enqueued_lt_ << " has been already delivered, dequeueing";
+        if (!dequeue_message(std::move(enq_msg_descr.msg_env_), deliver_lt)) {
+          fatal_error(PSTRING() << "cannot dequeue outbound message with (lt,hash)=(" << enq_msg_descr.lt_ << ","
+                                << enq_msg_descr.hash_.to_hex() << ") by inserting a msg_export_deq record");
+          return -1;
+        }
+        register_out_msg_queue_op();
+        if (!block_limit_status_->fits(block::ParamLimits::cl_normal)) {
+          block_full_ = true;
+        }
+      }
+      return !delivered;
+    });
+    LOG(WARNING) << "deleted " << deleted << " messages from out_msg_queue after merge, remaining queue size is "
+                 << out_msg_queue_size_;
+    if (res < 0) {
+      return fatal_error("error scanning/updating OutMsgQueue");
     }
-    return !delivered;
-  });
-  LOG(DEBUG) << "deleted " << res << " messages from out_msg_queue";
-  if (res < 0) {
-    return fatal_error("error scanning/updating OutMsgQueue");
+  } else {
+    std::vector<std::pair<block::OutputQueueMerger, const block::McShardDescr*>> queue_parts;
+
+    block::OutputQueueMerger::Neighbor this_queue{BlockIdExt{new_id} /* block id is only used for logs */,
+                                                  out_msg_queue_->get_root_cell()};
+    for (const auto& nb : neighbors_) {
+      if (nb.is_disabled()) {
+        continue;
+      }
+      if (!nb.processed_upto || !nb.processed_upto->can_check_processed()) {
+        return fatal_error(-667, PSTRING() << "internal error: no info for checking processed messages from neighbor "
+                                           << nb.blk_.to_str());
+      }
+      queue_parts.emplace_back(block::OutputQueueMerger{nb.shard(), {this_queue}}, &nb);
+    }
+
+    size_t i = 0;
+    td::uint32 deleted = 0;
+    while (!queue_parts.empty()) {
+      if (block_full_) {
+        LOG(WARNING) << "BLOCK FULL while cleaning up outbound queue, cleanup completed only partially";
+        break;
+      }
+      if (queue_cleanup_timeout_.is_in_past(td::Timestamp::now())) {
+        LOG(WARNING) << "cleaning up outbound queue takes too long, ending";
+        break;
+      }
+      if (i == queue_parts.size()) {
+        i = 0;
+      }
+      auto& queue = queue_parts.at(i).first;
+      auto nb = queue_parts.at(i).second;
+      auto kv = queue.extract_cur();
+      if (kv) {
+        block::EnqueuedMsgDescr enq_msg_descr;
+        if (!(enq_msg_descr.unpack(kv->msg.write())        // unpack EnqueuedMsg
+              && enq_msg_descr.check_key(kv->key.cbits())  // check key
+              )) {
+          return fatal_error(PSTRING() << "error scanning/updating OutMsgQueue: cannot unpack EnqueuedMsg with key "
+                                       << kv->key.to_hex());
+        }
+        if (nb->processed_upto->already_processed(enq_msg_descr)) {
+          LOG(DEBUG) << "scanning outbound message with (lt,hash)=(" << enq_msg_descr.lt_ << ","
+                     << enq_msg_descr.hash_.to_hex() << ") enqueued_lt=" << enq_msg_descr.enqueued_lt_
+                     << ": message has been already delivered, dequeueing";
+          ++deleted;
+          CHECK(out_msg_queue_size_ > 0);
+          --out_msg_queue_size_;
+          out_msg_queue_->lookup_delete_with_extra(kv->key.cbits(), kv->key_len);
+          if (!dequeue_message(std::move(enq_msg_descr.msg_env_), nb->end_lt())) {
+            return fatal_error(PSTRING() << "cannot dequeue outbound message with (lt,hash)=(" << enq_msg_descr.lt_
+                                         << "," << enq_msg_descr.hash_.to_hex()
+                                         << ") by inserting a msg_export_deq record");
+          }
+          register_out_msg_queue_op();
+          if (!block_limit_status_->fits(block::ParamLimits::cl_normal)) {
+            block_full_ = true;
+          }
+          queue.next();
+          ++i;
+          continue;
+        } else {
+          LOG(DEBUG) << "scanning outbound message with (lt,hash)=(" << enq_msg_descr.lt_ << ","
+                     << enq_msg_descr.hash_.to_hex() << ") enqueued_lt=" << enq_msg_descr.enqueued_lt_
+                     << ": message has not been delivered";
+        }
+      }
+      LOG(DEBUG) << "no more unprocessed messages to shard " << nb->shard().to_str();
+      std::swap(queue_parts[i], queue_parts.back());
+      queue_parts.pop_back();
+    }
+    LOG(WARNING) << "deleted " << deleted << " messages from out_msg_queue, remaining queue size is "
+                 << out_msg_queue_size_;
   }
-  auto rt = out_msg_queue_->get_root();
   if (verbosity >= 2) {
+    auto rt = out_msg_queue_->get_root();
     std::cerr << "new out_msg_queue is ";
     block::gen::t_OutMsgQueue.print(std::cerr, *rt);
     rt->print_rec(std::cerr);
   }
-  // CHECK(block::gen::t_OutMsgQueue.validate_upto(100000, *rt));  // DEBUG, comment later if SLOW
   return register_out_msg_queue_op(true);
 }
 
@@ -2537,7 +2667,7 @@ bool Collator::create_ticktock_transaction(const ton::StdSmcAddress& smc_addr, t
     return fatal_error(td::Status::Error(
         -666, std::string{"cannot serialize new transaction for smart contract "} + smc_addr.to_hex()));
   }
-  if (!trans->update_limits(*block_limit_status_)) {
+  if (!trans->update_limits(*block_limit_status_, /* with_gas = */ false)) {
     return fatal_error(-666, "cannot update block limit status to include the new transaction");
   }
   if (trans->commit(*acc).is_null()) {
@@ -2553,10 +2683,11 @@ bool Collator::create_ticktock_transaction(const ton::StdSmcAddress& smc_addr, t
  * Creates an ordinary transaction using a given message.
  *
  * @param msg_root The root of the message to be processed serialized using Message TLB-scheme.
+ * @param is_special_tx True if creating a special transaction (mint/recover), false otherwise.
  *
  * @returns The root of the serialized transaction, or an empty reference if the transaction creation fails.
  */
-Ref<vm::Cell> Collator::create_ordinary_transaction(Ref<vm::Cell> msg_root) {
+Ref<vm::Cell> Collator::create_ordinary_transaction(Ref<vm::Cell> msg_root, bool is_special_tx) {
   ton::StdSmcAddress addr;
   auto cs = vm::load_cell_slice(msg_root);
   bool external;
@@ -2614,7 +2745,8 @@ Ref<vm::Cell> Collator::create_ordinary_transaction(Ref<vm::Cell> msg_root) {
   }
   std::unique_ptr<block::transaction::Transaction> trans = res.move_as_ok();
 
-  if (!trans->update_limits(*block_limit_status_)) {
+  if (!trans->update_limits(*block_limit_status_,
+                            /* with_gas = */ !(is_special_tx && compute_phase_cfg_.special_gas_full))) {
     fatal_error("cannot update block limit status to include the new transaction");
     return {};
   }
@@ -2887,7 +3019,7 @@ int Collator::process_one_new_message(block::NewOutMsg msg, bool enqueue_only, R
     return -1;
   }
   // 1. create a Transaction processing this Message
-  auto trans_root = create_ordinary_transaction(msg.msg);
+  auto trans_root = create_ordinary_transaction(msg.msg, is_special != nullptr);
   if (trans_root.is_null()) {
     fatal_error("cannot create transaction for re-processing output message");
     return -1;
@@ -3015,6 +3147,7 @@ bool Collator::enqueue_transit_message(Ref<vm::Cell> msg, Ref<vm::Cell> old_msg_
   try {
     LOG(DEBUG) << "inserting into outbound queue message with (lt,key)=(" << start_lt << "," << key.to_hex() << ")";
     ok = out_msg_queue_->set_builder(key.bits(), 352, cb, vm::Dictionary::SetMode::Add);
+    ++out_msg_queue_size_;
   } catch (vm::VmError) {
     ok = false;
   }
@@ -3037,6 +3170,8 @@ bool Collator::delete_out_msg_queue_msg(td::ConstBitPtr key) {
   try {
     LOG(DEBUG) << "deleting from outbound queue message with key=" << key.to_hex(352);
     queue_rec = out_msg_queue_->lookup_delete(key, 352);
+    CHECK(out_msg_queue_size_ > 0);
+    --out_msg_queue_size_;
   } catch (vm::VmError err) {
     LOG(ERROR) << "error deleting from out_msg_queue dictionary: " << err.get_msg();
   }
@@ -3277,6 +3412,11 @@ bool Collator::process_inbound_external_messages() {
     LOG(INFO) << "skipping processing of inbound external messages";
     return true;
   }
+  if (out_msg_queue_size_ > SKIP_EXTERNALS_QUEUE_SIZE) {
+    LOG(INFO) << "skipping processing of inbound external messages because out_msg_queue is too big ("
+              << out_msg_queue_size_ << " > " << SKIP_EXTERNALS_QUEUE_SIZE << ")";
+    return true;
+  }
   bool full = !block_limit_status_->fits(block::ParamLimits::cl_soft);
   for (auto& ext_msg_pair : ext_msg_list_) {
     if (full) {
@@ -3514,6 +3654,7 @@ bool Collator::enqueue_message(block::NewOutMsg msg, td::RefInt256 fwd_fees_rema
     LOG(DEBUG) << "inserting into outbound queue a new message with (lt,key)=(" << start_lt << "," << key.to_hex()
                << ")";
     ok = out_msg_queue_->set_builder(key.bits(), 352, cb, vm::Dictionary::SetMode::Add);
+    ++out_msg_queue_size_;
   } catch (vm::VmError) {
     ok = false;
   }
@@ -4122,6 +4263,7 @@ static int history_weight(td::uint64 history) {
  * @returns True if the check is successful.
  */
 bool Collator::check_block_overload() {
+  LOG(INFO) << "final out_msg_queue size is " << out_msg_queue_size_;
   overload_history_ <<= 1;
   underload_history_ <<= 1;
   block_size_estimate_ = block_limit_status_->estimate_block_size();
@@ -4130,13 +4272,31 @@ bool Collator::check_block_overload() {
             << " size_estimate=" << block_size_estimate_;
   auto cl = block_limit_status_->classify();
   if (cl <= block::ParamLimits::cl_underload) {
-    underload_history_ |= 1;
-    LOG(INFO) << "block is underloaded";
+    if (out_msg_queue_size_ > MERGE_MAX_QUEUE_SIZE) {
+      LOG(INFO)
+          << "block is underloaded, but don't set underload history because out_msg_queue size is too big to merge ("
+          << out_msg_queue_size_ << " > " << MERGE_MAX_QUEUE_SIZE << ")";
+    } else {
+      underload_history_ |= 1;
+      LOG(INFO) << "block is underloaded";
+    }
   } else if (cl >= block::ParamLimits::cl_soft) {
-    overload_history_ |= 1;
-    LOG(INFO) << "block is overloaded (category " << cl << ")";
+    if (out_msg_queue_size_ > SPLIT_MAX_QUEUE_SIZE) {
+      LOG(INFO) << "block is overloaded (category " << cl
+                << "), but don't set overload history because out_msg_queue size is too big to split ("
+                << out_msg_queue_size_ << " > " << SPLIT_MAX_QUEUE_SIZE << ")";
+    } else {
+      overload_history_ |= 1;
+      LOG(INFO) << "block is overloaded (category " << cl << ")";
+    }
   } else {
     LOG(INFO) << "block is loaded normally";
+  }
+  if (!(overload_history_ & 1) && out_msg_queue_size_ >= FORCE_SPLIT_QUEUE_SIZE &&
+      out_msg_queue_size_ <= SPLIT_MAX_QUEUE_SIZE) {
+    overload_history_ |= 1;
+    LOG(INFO) << "setting overload history because out_msg_queue reached force split limit (" << out_msg_queue_size_
+              << " >= " << FORCE_SPLIT_QUEUE_SIZE << ")";
   }
   if (collator_settings & 1) {
     LOG(INFO) << "want_split manually set";
@@ -4877,7 +5037,7 @@ void Collator::return_block_candidate(td::Result<td::Unit> saved) {
     fatal_error(std::move(err));
   } else {
     CHECK(block_candidate);
-    LOG(INFO) << "sending new BlockCandidate to Promise";
+    LOG(WARNING) << "sending new BlockCandidate to Promise";
     main_promise(block_candidate->clone());
     busy_ = false;
     stop();
@@ -4975,6 +5135,8 @@ void Collator::after_get_external_messages(td::Result<std::vector<Ref<ExtMessage
       bad_ext_msgs_.emplace_back(ext_msg->hash());
     }
   }
+  LOG(WARNING) << "got " << vect.size() << " external messages from mempool, " << bad_ext_msgs_.size()
+               << " bad messages";
   check_pending();
 }
 
