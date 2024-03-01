@@ -128,9 +128,8 @@ class OverlayPeer {
 class OverlayImpl : public Overlay {
  public:
   OverlayImpl(td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
-              td::actor::ActorId<OverlayManager> manager, td::actor::ActorId<dht::Dht> dht_node,
-              adnl::AdnlNodeIdShort local_id, OverlayIdFull overlay_id, bool pub,
-              std::vector<adnl::AdnlNodeIdShort> nodes, std::unique_ptr<Overlays::Callback> callback,
+              td::actor::ActorId<OverlayManager> manager, adnl::AdnlNodeIdShort local_id, OverlayIdFull overlay_id,
+              bool pub, std::vector<adnl::AdnlNodeIdShort> nodes, std::unique_ptr<Overlays::Callback> callback,
               OverlayPrivacyRules rules, td::string scope = "{ \"type\": \"undefined\" }", OverlayOptions opts = {});
 
   void receive_message(adnl::AdnlNodeIdShort src, td::BufferSlice data) override;
@@ -305,7 +304,9 @@ class OverlayImpl : public Overlay {
     if (!next_dht_store_query_) {
       next_dht_store_query_ = td::Timestamp::in(td::Random::fast(60.0, 100.0));
     }
-    if (frequent_dht_lookup_ && peers_.size() == bad_peers_.size()) {
+    if (!retry_dht_before_.is_in_past() && peers_.size() == bad_peers_.size()) {
+      next_dht_query_ = td::Timestamp::in(td::Random::fast(0.5, 1.0));
+    } else if (frequent_dht_lookup_ && peers_.size() == bad_peers_.size()) {
       next_dht_query_ = td::Timestamp::in(td::Random::fast(6.0, 10.0));
     } else {
       next_dht_query_ = next_dht_store_query_;

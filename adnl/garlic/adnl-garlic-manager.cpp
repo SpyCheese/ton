@@ -63,9 +63,11 @@ void AdnlGarlicManager::start_up() {
   b.as_slice().copy_from(as_slice(X));
   overlay_id_full_ = overlay::OverlayIdFull{std::move(b)};
   overlay_id_ = overlay_id_full_.compute_short_id();
-  td::actor::send_closure(overlays_, &overlay::Overlays::create_public_overlay_external, local_id_,
-                          overlay_id_full_.clone(), std::make_unique<overlay::Overlays::EmptyCallback>(),
-                          overlay::OverlayPrivacyRules{}, R"({ "type": "garlic" })");
+  overlay::OverlayOptions opts;
+  opts.announce_self_ = false;
+  td::actor::send_closure(overlays_, &overlay::Overlays::create_public_overlay_ex, local_id_, overlay_id_full_.clone(),
+                          std::make_unique<overlay::Overlays::EmptyCallback>(), overlay::OverlayPrivacyRules{},
+                          R"({ "type": "garlic" })", opts);
   alarm();
 }
 
