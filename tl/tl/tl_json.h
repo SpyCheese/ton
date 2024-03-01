@@ -53,7 +53,8 @@ struct JsonBytes {
 };
 
 inline void to_json(JsonValueScope &jv, const JsonBytes json_bytes) {
-  jv << JsonString(PSLICE() << base64_encode(json_bytes.bytes));
+  auto base64 = base64_encode(json_bytes.bytes);
+  jv << JsonString(base64);
 }
 template <class T>
 struct JsonVectorBytesImpl {
@@ -107,12 +108,13 @@ inline Status from_json(std::int32_t &to, JsonValue from) {
 inline Status from_json(bool &to, JsonValue from) {
   if (from.type() != JsonValue::Type::Boolean) {
     int32 x;
+    auto type = from.type();
     auto status = from_json(x, std::move(from));
     if (status.is_ok()) {
       to = x != 0;
       return Status::OK();
     }
-    return Status::Error(PSLICE() << "Expected bool, got " << from.type());
+    return Status::Error(PSLICE() << "Expected bool, got " << type);
   }
   to = from.get_boolean();
   return Status::OK();
@@ -276,8 +278,7 @@ std::enable_if_t<!std::is_constructible<T>::value, Status> from_json(ton::tl_obj
 
   DowncastHelper<T> helper(constructor);
   Status status;
-  bool ok = downcast_call(static_cast<T &>(helper), [&](auto &dummy) {
-    auto result = ton::create_tl_object<std::decay_t<decltype(dummy)>>();
+  bool ok = downcast_construct(static_cast<T &>(helper), [&](auto result) {
     status = from_json(*result, object);
     to = std::move(result);
   });

@@ -44,6 +44,7 @@ class ShardState : public td::CntObject {
   virtual BlockIdExt get_block_id() const = 0;
   virtual RootHash root_hash() const = 0;
   virtual td::Ref<vm::Cell> root_cell() const = 0;
+  virtual td::optional<BlockIdExt> get_master_ref() const = 0;
 
   virtual td::Status validate_deep() const = 0;
 
@@ -84,6 +85,7 @@ class MasterchainState : virtual public ShardState {
   virtual td::Status prepare() {
     return td::Status::OK();
   }
+  virtual block::SizeLimitsConfig::ExtMsgLimits get_ext_msg_limits() const = 0;
 };
 
 }  // namespace validator

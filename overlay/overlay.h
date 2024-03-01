@@ -42,7 +42,7 @@ class Overlay : public td::actor::Actor {
                                              td::actor::ActorId<OverlayManager> manager,
                                              adnl::AdnlNodeIdShort local_id,
                                              OverlayIdFull overlay_id, std::unique_ptr<Overlays::Callback> callback,
-                                             OverlayPrivacyRules rules, td::string scope, bool is_external = false);
+                                             OverlayPrivacyRules rules, td::string scope, OverlayOptions opts = {});
   static td::actor::ActorOwn<Overlay> create(td::actor::ActorId<keyring::Keyring> keyring,
                                              td::actor::ActorId<adnl::Adnl> adnl,
                                              td::actor::ActorId<OverlayManager> manager,

@@ -715,7 +715,7 @@ td::uint64 BlockLimitStatus::estimate_block_size(const vm::NewCellStorageStat::S
     sum += *extra;
   }
   return 2000 + (sum.bits >> 3) + sum.cells * 12 + sum.internal_refs * 3 + sum.external_refs * 40 + accounts * 200 +
-         transactions * 200 + (extra ? 200 : 0);
+         transactions * 200 + (extra ? 200 : 0) + extra_out_msgs * 300 + public_library_diff * 700;
 }
 
 int BlockLimitStatus::classify() const {
@@ -1009,8 +1009,8 @@ td::Status ShardState::merge_with(ShardState& sib) {
   return td::Status::OK();
 }
 
-td::Result<std::unique_ptr<vm::AugmentedDictionary>> ShardState::compute_split_out_msg_queue(
-    ton::ShardIdFull subshard) {
+td::Result<std::unique_ptr<vm::AugmentedDictionary>> ShardState::compute_split_out_msg_queue(ton::ShardIdFull subshard,
+                                                                                             td::uint32* queue_size) {
   auto shard = id_.shard_full();
   if (!ton::shard_is_parent(shard, subshard)) {
     return td::Status::Error(-666, "cannot split subshard "s + subshard.to_str() + " from state of " + id_.to_str() +
@@ -1018,7 +1018,7 @@ td::Result<std::unique_ptr<vm::AugmentedDictionary>> ShardState::compute_split_o
   }
   CHECK(out_msg_queue_);
   auto subqueue = std::make_unique<vm::AugmentedDictionary>(*out_msg_queue_);
-  int res = block::filter_out_msg_queue(*subqueue, shard, subshard);
+  int res = block::filter_out_msg_queue(*subqueue, shard, subshard, queue_size);
   if (res < 0) {
     return td::Status::Error(-666, "error splitting OutMsgQueue of "s + id_.to_str());
   }
@@ -1040,7 +1040,7 @@ td::Result<std::shared_ptr<block::MsgProcessedUptoCollection>> ShardState::compu
   return std::move(sub_processed_upto);
 }
 
-td::Status ShardState::split(ton::ShardIdFull subshard) {
+td::Status ShardState::split(ton::ShardIdFull subshard, td::uint32* queue_size) {
   if (!ton::shard_is_parent(id_.shard_full(), subshard)) {
     return td::Status::Error(-666, "cannot split subshard "s + subshard.to_str() + " from state of " + id_.to_str() +
                                        " because it is not a parent");
@@ -1058,7 +1058,7 @@ td::Status ShardState::split(ton::ShardIdFull subshard) {
   auto shard1 = id_.shard_full();
   CHECK(ton::shard_is_parent(shard1, subshard));
   CHECK(out_msg_queue_);
-  int res1 = block::filter_out_msg_queue(*out_msg_queue_, shard1, subshard);
+  int res1 = block::filter_out_msg_queue(*out_msg_queue_, shard1, subshard, queue_size);
   if (res1 < 0) {
     return td::Status::Error(-666, "error splitting OutMsgQueue of "s + id_.to_str());
   }
@@ -1098,8 +1098,12 @@ td::Status ShardState::split(ton::ShardIdFull subshard) {
   return td::Status::OK();
 }
 
-int filter_out_msg_queue(vm::AugmentedDictionary& out_queue, ton::ShardIdFull old_shard, ton::ShardIdFull subshard) {
-  return out_queue.filter([subshard, old_shard](vm::CellSlice& cs, td::ConstBitPtr key, int key_len) -> int {
+int filter_out_msg_queue(vm::AugmentedDictionary& out_queue, ton::ShardIdFull old_shard, ton::ShardIdFull subshard,
+                         td::uint32* queue_size) {
+  if (queue_size) {
+    *queue_size = 0;
+  }
+  return out_queue.filter([=](vm::CellSlice& cs, td::ConstBitPtr key, int key_len) -> int {
     CHECK(key_len == 352);
     LOG(DEBUG) << "scanning OutMsgQueue entry with key " << key.to_hex(key_len);
     block::tlb::MsgEnvelope::Record_std env;
@@ -1122,7 +1126,11 @@ int filter_out_msg_queue(vm::AugmentedDictionary& out_queue, ton::ShardIdFull ol
                  << " does not contain current address belonging to shard " << old_shard.to_str();
       return -1;
     }
-    return ton::shard_contains(subshard, cur_prefix);
+    bool res = ton::shard_contains(subshard, cur_prefix);
+    if (res && queue_size) {
+      ++*queue_size;
+    }
+    return res;
   });
 }
 
@@ -1364,42 +1372,61 @@ std::ostream& operator<<(std::ostream& os, const CurrencyCollection& cc) {
 bool ValueFlow::set_zero() {
   return from_prev_blk.set_zero() && to_next_blk.set_zero() && imported.set_zero() && exported.set_zero() &&
          fees_collected.set_zero() && fees_imported.set_zero() && recovered.set_zero() && created.set_zero() &&
-         minted.set_zero();
+         minted.set_zero() && burned.set_zero();
 }
 
 bool ValueFlow::validate() const {
   return is_valid() && from_prev_blk + imported + fees_imported + created + minted + recovered ==
-                           to_next_blk + exported + fees_collected;
+                           to_next_blk + exported + fees_collected + burned;
 }
 
 bool ValueFlow::store(vm::CellBuilder& cb) const {
   vm::CellBuilder cb2;
-  return cb.store_long_bool(block::gen::ValueFlow::cons_tag[0], 32)  // value_flow ^[
-         && from_prev_blk.store(cb2)                                 //   from_prev_blk:CurrencyCollection
-         && to_next_blk.store(cb2)                                   //   to_next_blk:CurrencyCollection
-         && imported.store(cb2)                                      //   imported:CurrencyCollection
-         && exported.store(cb2)                                      //   exported:CurrencyCollection
-         && cb.store_ref_bool(cb2.finalize())                        // ]
-         && fees_collected.store(cb)                                 // fees_collected:CurrencyCollection
-         && fees_imported.store(cb2)                                 // ^[ fees_imported:CurrencyCollection
-         && recovered.store(cb2)                                     //    recovered:CurrencyCollection
-         && created.store(cb2)                                       //    created:CurrencyCollection
-         && minted.store(cb2)                                        //    minted:CurrencyCollection
-         && cb.store_ref_bool(cb2.finalize());                       // ] = ValueFlow;
+  auto type = burned.is_zero() ? block::gen::ValueFlow::value_flow : block::gen::ValueFlow::value_flow_v2;
+  return cb.store_long_bool(block::gen::ValueFlow::cons_tag[type], 32)  // ^[
+         && from_prev_blk.store(cb2)                                    //   from_prev_blk:CurrencyCollection
+         && to_next_blk.store(cb2)                                      //   to_next_blk:CurrencyCollection
+         && imported.store(cb2)                                         //   imported:CurrencyCollection
+         && exported.store(cb2)                                         //   exported:CurrencyCollection
+         && cb.store_ref_bool(cb2.finalize())                           // ]
+         && fees_collected.store(cb)                                    // fees_collected:CurrencyCollection
+         && (burned.is_zero() || burned.store(cb))            // fees_burned:CurrencyCollection
+         && fees_imported.store(cb2)                                    // ^[ fees_imported:CurrencyCollection
+         && recovered.store(cb2)                                        //    recovered:CurrencyCollection
+         && created.store(cb2)                                          //    created:CurrencyCollection
+         && minted.store(cb2)                                           //    minted:CurrencyCollection
+         && cb.store_ref_bool(cb2.finalize());                          // ] = ValueFlow;
 }
 
 bool ValueFlow::fetch(vm::CellSlice& cs) {
-  block::gen::ValueFlow::Record f;
-  if (!(tlb::unpack(cs, f) && from_prev_blk.validate_unpack(std::move(f.r1.from_prev_blk)) &&
-        to_next_blk.validate_unpack(std::move(f.r1.to_next_blk)) &&
-        imported.validate_unpack(std::move(f.r1.imported)) && exported.validate_unpack(std::move(f.r1.exported)) &&
-        fees_collected.validate_unpack(std::move(f.fees_collected)) &&
-        fees_imported.validate_unpack(std::move(f.r2.fees_imported)) &&
-        recovered.validate_unpack(std::move(f.r2.recovered)) && created.validate_unpack(std::move(f.r2.created)) &&
-        minted.validate_unpack(std::move(f.r2.minted)))) {
+  if (cs.size() < 32) {
     return invalidate();
   }
-  return true;
+  auto tag = cs.prefetch_ulong(32);
+  block::gen::ValueFlow::Record_value_flow f1;
+  if (tag == block::gen::ValueFlow::cons_tag[block::gen::ValueFlow::value_flow] && tlb::unpack(cs, f1) &&
+      from_prev_blk.validate_unpack(std::move(f1.r1.from_prev_blk)) &&
+      to_next_blk.validate_unpack(std::move(f1.r1.to_next_blk)) &&
+      imported.validate_unpack(std::move(f1.r1.imported)) && exported.validate_unpack(std::move(f1.r1.exported)) &&
+      fees_collected.validate_unpack(std::move(f1.fees_collected)) && burned.set_zero() &&
+      fees_imported.validate_unpack(std::move(f1.r2.fees_imported)) &&
+      recovered.validate_unpack(std::move(f1.r2.recovered)) && created.validate_unpack(std::move(f1.r2.created)) &&
+      minted.validate_unpack(std::move(f1.r2.minted))) {
+    return true;
+  }
+  block::gen::ValueFlow::Record_value_flow_v2 f2;
+  if (tag == block::gen::ValueFlow::cons_tag[block::gen::ValueFlow::value_flow_v2] && tlb::unpack(cs, f2) &&
+      from_prev_blk.validate_unpack(std::move(f2.r1.from_prev_blk)) &&
+      to_next_blk.validate_unpack(std::move(f2.r1.to_next_blk)) &&
+      imported.validate_unpack(std::move(f2.r1.imported)) && exported.validate_unpack(std::move(f2.r1.exported)) &&
+      fees_collected.validate_unpack(std::move(f2.fees_collected)) &&
+      burned.validate_unpack(std::move(f2.burned)) &&
+      fees_imported.validate_unpack(std::move(f2.r2.fees_imported)) &&
+      recovered.validate_unpack(std::move(f2.r2.recovered)) && created.validate_unpack(std::move(f2.r2.created)) &&
+      minted.validate_unpack(std::move(f2.r2.minted))) {
+    return true;
+  }
+  return invalidate();
 }
 
 bool ValueFlow::unpack(Ref<vm::CellSlice> csr) {
@@ -1424,7 +1451,8 @@ bool ValueFlow::show(std::ostream& os) const {
           show_one(os, " to_next_blk:", to_next_blk) && show_one(os, " imported:", imported) &&
           show_one(os, " exported:", exported) && show_one(os, " fees_collected:", fees_collected) &&
           show_one(os, " fees_imported:", fees_imported) && show_one(os, " recovered:", recovered) &&
-          show_one(os, " created:", created) && show_one(os, " minted:", minted) && say(os, ")")) ||
+          show_one(os, " created:", created) && show_one(os, " minted:", minted) &&
+          (burned.is_zero() || show_one(os, " burned:", burned)) && say(os, ")")) ||
          (say(os, "...<invalid-value-flow>)") && false);
 }
 

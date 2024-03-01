@@ -28,6 +28,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include "common/global-version.h"
 
 namespace ton {
 
@@ -108,7 +109,7 @@ inline ErrorCtxSet ErrorCtx::set_guard(std::vector<std::string> str_list) {
 
 class ValidateQuery : public td::actor::Actor {
   static constexpr int supported_version() {
-    return 3;
+    return SUPPORTED_VERSION;
   }
   static constexpr long long supported_capabilities() {
     return ton::capCreateStatsEnabled | ton::capBounceMsgBody | ton::capReportVersion | ton::capShortDequeue;
@@ -194,6 +195,7 @@ class ValidateQuery : public td::actor::Actor {
   ton::LogicalTime prev_key_block_lt_;
   std::unique_ptr<block::BlockLimits> block_limits_;
   std::unique_ptr<block::BlockLimitStatus> block_limit_status_;
+  td::uint64 total_gas_used_{0}, total_special_gas_used_{0};
 
   LogicalTime start_lt_, end_lt_;
   UnixTime prev_now_{~0u}, now_{~0u};
@@ -217,7 +219,7 @@ class ValidateQuery : public td::actor::Actor {
 
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
   block::ValueFlow value_flow_;
-  block::CurrencyCollection import_created_, transaction_fees_;
+  block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
   td::RefInt256 import_fees_;
 
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
@@ -341,8 +343,7 @@ class ValidateQuery : public td::actor::Actor {
                                        const block::McShardDescr& src_nb, bool& unprocessed);
   bool check_in_queue();
   bool check_delivered_dequeued();
-  std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account,
-                                                    Ref<vm::CellSlice> extra);
+  std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account);
   std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
   bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
                              bool is_last);
@@ -361,6 +362,7 @@ class ValidateQuery : public td::actor::Actor {
   bool check_one_prev_dict_update(ton::BlockSeqno seqno, Ref<vm::CellSlice> old_val_extra,
                                   Ref<vm::CellSlice> new_val_extra);
   bool check_mc_state_extra();
+  bool postcheck_value_flow();
   td::Status check_counter_update(const block::DiscountedCounter& oc, const block::DiscountedCounter& nc,
                                   unsigned expected_incr);
   bool check_one_block_creator_update(td::ConstBitPtr key, Ref<vm::CellSlice> old_val, Ref<vm::CellSlice> new_val);
@@ -368,6 +370,14 @@ class ValidateQuery : public td::actor::Actor {
   bool check_one_shard_fee(ShardIdFull shard, const block::CurrencyCollection& fees,
                            const block::CurrencyCollection& create);
   bool check_mc_block_extra();
+
+  bool check_timeout() {
+    if (timeout && timeout.is_in_past()) {
+      abort_query(td::Status::Error(ErrorCode::timeout, "timeout"));
+      return false;
+    }
+    return true;
+  }
 };
 
 }  // namespace validator

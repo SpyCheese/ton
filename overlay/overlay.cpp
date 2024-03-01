@@ -37,10 +37,10 @@ td::actor::ActorOwn<Overlay> Overlay::create(td::actor::ActorId<keyring::Keyring
                                              td::actor::ActorId<OverlayManager> manager,
                                              adnl::AdnlNodeIdShort local_id,
                                              OverlayIdFull overlay_id, std::unique_ptr<Overlays::Callback> callback,
-                                             OverlayPrivacyRules rules, td::string scope, bool is_external) {
-  auto R = td::actor::create_actor<OverlayImpl>("overlay", keyring, adnl, manager, local_id, std::move(overlay_id),
-                                                true, std::vector<adnl::AdnlNodeIdShort>(), std::move(callback),
-                                                std::move(rules), scope, is_external);
+                                             OverlayPrivacyRules rules, td::string scope, OverlayOptions opts) {
+  auto R = td::actor::create_actor<OverlayImpl>("overlay", keyring, adnl, manager, local_id,
+                                                std::move(overlay_id), true, std::vector<adnl::AdnlNodeIdShort>(),
+                                                std::move(callback), std::move(rules), scope, opts);
   return td::actor::ActorOwn<Overlay>(std::move(R));
 }
 
@@ -58,7 +58,7 @@ OverlayImpl::OverlayImpl(td::actor::ActorId<keyring::Keyring> keyring, td::actor
                          td::actor::ActorId<OverlayManager> manager, adnl::AdnlNodeIdShort local_id,
                          OverlayIdFull overlay_id, bool pub, std::vector<adnl::AdnlNodeIdShort> nodes,
                          std::unique_ptr<Overlays::Callback> callback, OverlayPrivacyRules rules, td::string scope,
-                         bool is_external)
+                         OverlayOptions opts)
     : keyring_(keyring)
     , adnl_(adnl)
     , manager_(manager)
@@ -68,15 +68,11 @@ OverlayImpl::OverlayImpl(td::actor::ActorId<keyring::Keyring> keyring, td::actor
     , public_(pub)
     , rules_(std::move(rules))
     , scope_(scope)
-    , is_external_(is_external) {
+    , announce_self_(opts.announce_self_)
+    , frequent_dht_lookup_(opts.frequent_dht_lookup_) {
   overlay_id_ = id_full_.compute_short_id();
 
-  if (is_external_) {
-    CHECK(public_);
-    VLOG(OVERLAY_INFO) << this << ": creating public external";
-  } else {
-    VLOG(OVERLAY_INFO) << this << ": creating " << (public_ ? "public" : "private");
-  }
+  VLOG(OVERLAY_INFO) << this << ": creating " << (public_ ? "public" : "private");
 
   for (auto &node : nodes) {
     CHECK(!public_);
@@ -140,11 +136,6 @@ void OverlayImpl::process_query(adnl::AdnlNodeIdShort src, ton_api::overlay_getB
 */
 
 void OverlayImpl::receive_query(adnl::AdnlNodeIdShort src, td::BufferSlice data, td::Promise<td::BufferSlice> promise) {
-  if (is_external_) {
-    LOG(OVERLAY_WARNING) << "dropping query in external overlay " << overlay_id_;
-    promise.set_error(td::Status::Error("overlay is external"));
-    return;
-  }
   if (!public_) {
     auto P = peers_.get(src);
     if (P == nullptr) {
@@ -152,6 +143,8 @@ void OverlayImpl::receive_query(adnl::AdnlNodeIdShort src, td::BufferSlice data,
       promise.set_error(td::Status::Error(ErrorCode::protoviolation, "overlay is private"));
       return;
     }
+  } else {
+    on_ping_result(src, true);
   }
   auto R = fetch_tl_object<ton_api::Function>(data.clone(), true);
 
@@ -230,10 +223,8 @@ void OverlayImpl::receive_message(adnl::AdnlNodeIdShort src, td::BufferSlice dat
       VLOG(OVERLAY_WARNING) << this << ": received query in private overlay from unknown source " << src;
       return;
     }
-  }
-  if (is_external_) {
-    LOG(OVERLAY_WARNING) << "dropping message in external overlay " << overlay_id_;
-    return;
+  } else {
+    on_ping_result(src, true);
   }
   auto X = fetch_tl_object<ton_api::overlay_Broadcast>(data.clone(), true);
   if (X.is_error()) {
@@ -257,28 +248,28 @@ void OverlayImpl::alarm() {
     peers_.iterate([&](const adnl::AdnlNodeIdShort &key, OverlayPeer &peer) {
       peer.throughput_out_bytes = static_cast<td::uint32>(peer.throughput_out_bytes_ctr / t_elapsed);
       peer.throughput_in_bytes = static_cast<td::uint32>(peer.throughput_in_bytes_ctr / t_elapsed);
-
+      
       peer.throughput_out_packets = static_cast<td::uint32>(peer.throughput_out_packets_ctr / t_elapsed);
       peer.throughput_in_packets = static_cast<td::uint32>(peer.throughput_in_packets_ctr / t_elapsed);
-
+      
       peer.throughput_out_bytes_ctr = 0;
       peer.throughput_in_bytes_ctr = 0;
-
+      
       peer.throughput_out_packets_ctr = 0;
       peer.throughput_in_packets_ctr = 0;
-
+      
       auto P = td::PromiseCreator::lambda([SelfId, peer_id = key](td::Result<td::string> result) {
         result.ensure();
         td::actor::send_closure(SelfId, &Overlay::update_peer_ip_str, peer_id, result.move_as_ok());
       });
-
+      
       td::actor::send_closure(adnl_, &adnl::AdnlSenderInterface::get_conn_ip_str, local_id_, key, std::move(P));
     });
-
+    
     update_throughput_at_ = td::Timestamp::in(50.0);
     last_throughput_update_ = td::Timestamp::now();
   }
-
+  
   if (public_) {
     if (peers_.size() > 0) {
       auto P = get_random_peer();
@@ -286,7 +277,8 @@ void OverlayImpl::alarm() {
         send_random_peers(P->get_id(), {});
       }
     }
-    if (next_dht_query_.is_in_past()) {
+    if (next_dht_query_ && next_dht_query_.is_in_past()) {
+      next_dht_query_ = td::Timestamp::never();
       auto dht_key = dht::DhtKey{overlay_id_.pubkey_hash(), "nodes", 0};
       td::actor::send_closure(
           adnl_, &adnl::Adnl::get_local_id_dht_node, local_id_,
@@ -306,13 +298,16 @@ void OverlayImpl::alarm() {
             });
             td::actor::send_closure(dht_node, &dht::Dht::get_value, std::move(dht_key), std::move(P));
           });
-      next_dht_query_ = td::Timestamp::in(td::Random::fast(60.0, 100.0));
     }
     if (update_db_at_.is_in_past()) {
       if (peers_.size() > 0) {
         std::vector<OverlayNode> vec;
         for (td::uint32 i = 0; i < 20; i++) {
-          vec.push_back(get_random_peer()->get());
+          auto P = get_random_peer();
+          if (!P) {
+            break;
+          }
+          vec.push_back(P->get());
         }
         td::actor::send_closure(manager_, &OverlayManager::save_to_db, local_id_, overlay_id_, std::move(vec));
       }
@@ -350,11 +345,13 @@ void OverlayImpl::receive_dht_nodes(td::Result<dht::DhtValue> res, bool dummy) {
     VLOG(OVERLAY_NOTICE) << this << ": can not get value from DHT: " << res.move_as_error();
   }
 
-  if (peers_.size() == 0 && !retry_dht_before_.is_in_past()) {
-    next_dht_query_ = td::Timestamp::in(0.5);
+  if (!(next_dht_store_query_ && next_dht_store_query_.is_in_past())) {
+    finish_dht_query();
+    return;
   }
-
-  if (is_external_) {
+  next_dht_store_query_ = td::Timestamp::never();
+  if (!announce_self_) {
+    finish_dht_query();
     return;
   }
 
@@ -362,6 +359,7 @@ void OverlayImpl::receive_dht_nodes(td::Result<dht::DhtValue> res, bool dummy) {
   auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), oid = print_id()](td::Result<OverlayNode> R) {
     if (R.is_error()) {
       LOG(ERROR) << oid << "cannot get self node";
+      td::actor::send_closure(SelfId, &OverlayImpl::finish_dht_query);
       return;
     }
     td::actor::send_closure(SelfId, &OverlayImpl::update_dht_nodes, R.move_as_ok());
@@ -388,23 +386,28 @@ void OverlayImpl::update_dht_nodes(OverlayNode node) {
 
   td::actor::send_closure(
       adnl_, &adnl::Adnl::get_local_id_dht_node, local_id_,
-      [SelfId = actor_id(this), value = std::move(value), oid = print_id()](td::Result<td::actor::ActorId<dht::Dht>> R) mutable {
-        if (R.is_error()) {
-          VLOG(OVERLAY_NOTICE) << oid << ": error storing to DHT: " << R.move_as_error();
-          return;
-        }
-        auto dht_node = R.move_as_ok();
-        if (dht_node.empty()) {
-          VLOG(OVERLAY_NOTICE) << oid << ": error storing to DHT: no DHT node";
-          return;
-        }
-        auto P = td::PromiseCreator::lambda([oid = std::move(oid)](td::Result<td::Unit> res) {
-          if (res.is_error()) {
-            VLOG(OVERLAY_NOTICE) << oid << ": error storing to DHT: " << res.move_as_error();
-          }
-        });
-        td::actor::send_closure(dht_node, &dht::Dht::set_value, std::move(value), std::move(P));
-      });
+                          [SelfId = actor_id(this), value = std::move(value),
+                           oid = print_id()](td::Result<td::actor::ActorId<dht::Dht>> R) mutable {
+                            if (R.is_error()) {
+                              VLOG(OVERLAY_NOTICE) << oid << ": error storing to DHT: " << R.move_as_error();
+                              td::actor::send_closure(SelfId, &OverlayImpl::finish_dht_query);
+                              return;
+                            }
+                            auto dht_node = R.move_as_ok();
+                            if (dht_node.empty()) {
+                              VLOG(OVERLAY_NOTICE) << oid << ": error storing to DHT: no DHT node";
+                              td::actor::send_closure(SelfId, &OverlayImpl::finish_dht_query);
+                              return;
+                            }
+                            auto P =
+                                td::PromiseCreator::lambda([SelfId, oid = std::move(oid)](td::Result<td::Unit> res) {
+                                  if (res.is_error()) {
+                                    VLOG(OVERLAY_NOTICE) << oid << ": error storing to DHT: " << res.move_as_error();
+                                  }
+                                  td::actor::send_closure(SelfId, &OverlayImpl::finish_dht_query);
+                                });
+                            td::actor::send_closure(dht_node, &dht::Dht::set_value, std::move(value), std::move(P));
+                          });
 }
 
 void OverlayImpl::bcast_gc() {
@@ -543,9 +546,6 @@ void OverlayImpl::send_new_fec_broadcast_part(PublicKeyHash local_id, Overlay::B
 }
 
 void OverlayImpl::deliver_broadcast(PublicKeyHash source, td::BufferSlice data) {
-  if (is_external_) {
-    return;
-  }
   callback_->receive_broadcast(source, overlay_id_, std::move(data));
 }
 
@@ -618,10 +618,6 @@ void OverlayImpl::set_privacy_rules(OverlayPrivacyRules rules) {
 }
 
 void OverlayImpl::check_broadcast(PublicKeyHash src, td::BufferSlice data, td::Promise<td::Unit> promise) {
-  if (is_external_) {
-    promise.set_result(td::Unit());
-    return;
-  }
   callback_->check_broadcast(src, overlay_id_, std::move(data), std::move(promise));
 }
 
@@ -662,18 +658,18 @@ void OverlayImpl::get_stats(td::Promise<tl_object_ptr<ton_api::engine_validator_
     node_obj->adnl_id_ = key.bits256_value();
     node_obj->t_out_bytes_ = peer.throughput_out_bytes;
     node_obj->t_in_bytes_ = peer.throughput_in_bytes;
-
+    
     node_obj->t_out_pckts_ = peer.throughput_out_packets;
     node_obj->t_in_pckts_ = peer.throughput_in_packets;
-
+   
     node_obj->ip_addr_ = peer.ip_addr_str;
-
+    
     node_obj->last_in_query_ = static_cast<td::uint32>(peer.last_in_query_at.at_unix());
     node_obj->last_out_query_ = static_cast<td::uint32>(peer.last_out_query_at.at_unix());
-
+    
     node_obj->bdcst_errors_ = peer.broadcast_errors;
     node_obj->fec_bdcst_errors_ = peer.fec_broadcast_errors;
-
+ 
     res->nodes_.push_back(std::move(node_obj));
   });
 

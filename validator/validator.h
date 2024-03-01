@@ -35,6 +35,7 @@
 #include "interfaces/proof.h"
 #include "interfaces/shard.h"
 #include "catchain/catchain-types.h"
+#include "interfaces/external-message.h"
 
 namespace ton {
 
@@ -80,6 +81,9 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual BlockSeqno get_truncate_seqno() const = 0;
   virtual BlockSeqno sync_upto() const = 0;
   virtual std::string get_session_logs_file() const = 0;
+  virtual td::uint32 get_celldb_compress_depth() const = 0;
+  virtual size_t get_max_open_archive_files() const = 0;
+  virtual double get_archive_preload_period() const = 0;
 
   virtual void set_zero_block_id(BlockIdExt block_id) = 0;
   virtual void set_init_block_id(BlockIdExt block_id) = 0;
@@ -99,6 +103,9 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual void truncate_db(BlockSeqno seqno) = 0;
   virtual void set_sync_upto(BlockSeqno seqno) = 0;
   virtual void set_session_logs_file(std::string f) = 0;
+  virtual void set_celldb_compress_depth(td::uint32 value) = 0;
+  virtual void set_max_open_archive_files(size_t value) = 0;
+  virtual void set_archive_preload_period(double value) = 0;
 
   static td::Ref<ValidatorManagerOptions> create(
       BlockIdExt zero_block_id, BlockIdExt init_block_id,
@@ -165,6 +172,8 @@ class ValidatorManagerInterface : public td::actor::Actor {
   virtual void get_top_masterchain_block(td::Promise<BlockIdExt> promise) = 0;
   virtual void get_top_masterchain_state_block(
       td::Promise<std::pair<td::Ref<MasterchainState>, BlockIdExt>> promise) = 0;
+  virtual void get_last_liteserver_state_block(
+      td::Promise<std::pair<td::Ref<MasterchainState>, BlockIdExt>> promise) = 0;
 
   virtual void get_block_data(BlockHandle handle, td::Promise<td::BufferSlice> promise) = 0;
   virtual void check_zero_state_exists(BlockIdExt block_id, td::Promise<bool> promise) = 0;
@@ -186,7 +195,7 @@ class ValidatorManagerInterface : public td::actor::Actor {
   virtual void write_handle(BlockHandle handle, td::Promise<td::Unit> promise) = 0;
 
   virtual void new_external_message(td::BufferSlice data) = 0;
-  virtual void check_external_message(td::BufferSlice data, td::Promise<td::Unit> promise) = 0;
+  virtual void check_external_message(td::BufferSlice data, td::Promise<td::Ref<ExtMessage>> promise) = 0;
   virtual void new_ihr_message(td::BufferSlice data) = 0;
   virtual void new_shard_block(BlockIdExt block_id, CatchainSeqno cc_seqno, td::BufferSlice data) = 0;
 
@@ -223,6 +232,8 @@ class ValidatorManagerInterface : public td::actor::Actor {
 
   virtual void prepare_perf_timer_stats(td::Promise<std::vector<PerfTimerStats>> promise) = 0;
   virtual void add_perf_timer_stat(std::string name, double duration) = 0;
+  virtual void get_out_msg_queue_size(BlockIdExt block_id, td::Promise<td::uint32> promise) = 0;
+
 };
 
 }  // namespace validator

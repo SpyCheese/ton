@@ -51,12 +51,6 @@ using ValidatorSessionId = td::Bits256;
 constexpr WorkchainId masterchainId = -1, basechainId = 0, workchainInvalid = 0x80000000;
 constexpr ShardId shardIdAll = (1ULL << 63);
 
-constexpr unsigned split_merge_delay = 100;        // prepare (delay) split/merge for 100 seconds
-constexpr unsigned split_merge_interval = 100;     // split/merge is enabled during 60 second interval
-constexpr unsigned min_split_merge_interval = 30;  // split/merge interval must be at least 30 seconds
-constexpr unsigned max_split_merge_delay =
-    1000;  // end of split/merge interval must be at most 1000 seconds in the future
-
 enum GlobalCapabilities {
   capIhrEnabled = 1,
   capCreateStatsEnabled = 2,
@@ -359,6 +353,14 @@ struct BlockBroadcast {
   td::uint32 validator_set_hash;
   td::BufferSlice data;
   td::BufferSlice proof;
+
+  BlockBroadcast clone() const {
+    std::vector<BlockSignature> new_signatures;
+    for (const BlockSignature& s : signatures) {
+      new_signatures.emplace_back(s.node, s.signature.clone());
+    }
+    return {block_id, std::move(new_signatures), catchain_seqno, validator_set_hash, data.clone(), proof.clone()};
+  }
 };
 
 struct Ed25519_PrivateKey {

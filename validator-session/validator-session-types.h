@@ -27,6 +27,12 @@ namespace ton {
 
 namespace validatorsession {
 
+constexpr int VERBOSITY_NAME(VALIDATOR_SESSION_WARNING) = verbosity_WARNING;
+constexpr int VERBOSITY_NAME(VALIDATOR_SESSION_NOTICE) = verbosity_DEBUG;
+constexpr int VERBOSITY_NAME(VALIDATOR_SESSION_INFO) = verbosity_DEBUG;
+constexpr int VERBOSITY_NAME(VALIDATOR_SESSION_DEBUG) = verbosity_DEBUG;
+constexpr int VERBOSITY_NAME(VALIDATOR_SESSION_EXTRA_DEBUG) = verbosity_DEBUG + 1;
+
 using ValidatorSessionRootHash = td::Bits256;
 using ValidatorSessionFileHash = td::Bits256;
 using ValidatorSessionCollatedDataFileHash = td::Bits256;
@@ -68,8 +74,10 @@ struct ValidatorSessionStats {
 
   struct Producer {
     PublicKeyHash id = PublicKeyHash::zero();
+    ValidatorSessionCandidateId candidate_id = ValidatorSessionCandidateId::zero();
     int block_status = status_none;
     td::uint64 block_timestamp = 0;
+    std::string comment;
   };
   struct Round {
     td::uint64 timestamp = 0;
@@ -79,6 +87,9 @@ struct ValidatorSessionStats {
   td::uint32 first_round;
   std::vector<Round> rounds;
 
+  bool success = false;
+  ValidatorSessionId session_id = ValidatorSessionId::zero();
+  CatchainSeqno cc_seqno = 0;
   td::uint64 timestamp = 0;
   PublicKeyHash self = PublicKeyHash::zero();
   PublicKeyHash creator = PublicKeyHash::zero();

@@ -41,6 +41,7 @@ class ShardStateQ : virtual public ShardState {
   bool before_split_{false};
   bool fake_split_{false};
   bool fake_merge_{false};
+  td::optional<BlockIdExt> master_ref;
 
  protected:
   friend class Ref<ShardStateQ>;
@@ -79,6 +80,9 @@ class ShardStateQ : virtual public ShardState {
   }
   LogicalTime get_logical_time() const override {
     return lt;
+  }
+  td::optional<BlockIdExt> get_master_ref() const override {
+    return master_ref;
   }
   td::Status validate_deep() const override;
   ShardStateQ* make_copy() const override;
@@ -125,6 +129,10 @@ class MasterchainStateQ : public MasterchainState, public ShardStateQ {
   }
   ValidatorSessionConfig get_consensus_config() const override {
     return config_->get_consensus_config();
+  }
+  block::SizeLimitsConfig::ExtMsgLimits get_ext_msg_limits() const override {
+    auto R = config_->get_size_limits_config();
+    return R.is_error() ? block::SizeLimitsConfig::ExtMsgLimits() : R.ok_ref().ext_msg_limits;
   }
   BlockIdExt last_key_block_id() const override;
   BlockIdExt next_key_block_id(BlockSeqno seqno) const override;

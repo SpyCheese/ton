@@ -170,7 +170,7 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
   return ton::create_tl_object<ton::ton_api::engine_validator_config>(
       out_port, std::move(addrs_vec), std::move(adnl_vec), std::move(dht_vec), std::move(val_vec),
       ton::PublicKeyHash::zero().tl(), std::move(full_node_slaves_vec), std::move(full_node_masters_vec),
-      std::move(liteserver_vec), std::move(control_vec), std::move(gc_vec));
+      nullptr, std::move(liteserver_vec), std::move(control_vec), std::move(gc_vec));
 }
 
 td::Result<bool> Config::config_add_network_addr(td::IPAddress in_ip, td::IPAddress out_ip,
@@ -573,6 +573,12 @@ void DhtServer::load_config(td::Promise<td::Unit> promise) {
   }
   auto conf_data_R = td::read_file(config_file_);
   if (conf_data_R.is_error()) {
+    conf_data_R = td::read_file(temp_config_file());
+    if (conf_data_R.is_ok()) {
+      td::rename(temp_config_file(), config_file_).ensure();
+    }
+  }
+  if (conf_data_R.is_error()) {
     auto P = td::PromiseCreator::lambda(
         [name = local_config_, new_name = config_file_, promise = std::move(promise)](td::Result<td::Unit> R) {
           if (R.is_error()) {
@@ -620,12 +626,15 @@ void DhtServer::load_config(td::Promise<td::Unit> promise) {
 void DhtServer::write_config(td::Promise<td::Unit> promise) {
   auto s = td::json_encode<std::string>(td::ToJson(*config_.tl().get()), true);
 
-  auto S = td::write_file(config_file_, s);
-  if (S.is_ok()) {
-    promise.set_value(td::Unit());
-  } else {
+  auto S = td::write_file(temp_config_file(), s);
+  if (S.is_error()) {
+    td::unlink(temp_config_file()).ignore();
     promise.set_error(std::move(S));
+    return;
   }
+  td::unlink(config_file_).ignore();
+  TRY_STATUS_PROMISE(promise, td::rename(temp_config_file(), config_file_));
+  promise.set_value(td::Unit());
 }
 
 td::Promise<ton::PublicKey> DhtServer::get_key_promise(td::MultiPromise::InitGuard &ig) {

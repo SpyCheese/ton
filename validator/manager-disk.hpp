@@ -23,6 +23,7 @@
 #include "validator-group.hpp"
 #include "manager-init.h"
 #include "manager-disk.h"
+#include "queue-size-counter.hpp"
 
 #include <map>
 #include <set>
@@ -124,7 +125,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   //void get_block_description(BlockIdExt block_id, td::Promise<BlockDescription> promise) override;
 
   void new_external_message(td::BufferSlice data) override;
-  void check_external_message(td::BufferSlice data, td::Promise<td::Unit> promise) override {
+  void check_external_message(td::BufferSlice data, td::Promise<td::Ref<ExtMessage>> promise) override {
     UNREACHABLE();
   }
   void new_ihr_message(td::BufferSlice data) override;
@@ -224,6 +225,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   void get_top_masterchain_state(td::Promise<td::Ref<MasterchainState>> promise) override;
   void get_top_masterchain_block(td::Promise<BlockIdExt> promise) override;
   void get_top_masterchain_state_block(td::Promise<std::pair<td::Ref<MasterchainState>, BlockIdExt>> promise) override;
+  void get_last_liteserver_state_block(td::Promise<std::pair<td::Ref<MasterchainState>, BlockIdExt>> promise) override;
 
   void send_get_block_request(BlockIdExt id, td::uint32 priority, td::Promise<ReceivedBlock> promise) override;
   void send_get_zero_state_request(BlockIdExt id, td::uint32 priority, td::Promise<td::BufferSlice> promise) override;
@@ -351,7 +353,8 @@ class ValidatorManagerImpl : public ValidatorManager {
   }
   void update_last_known_key_block(BlockHandle handle, bool send_request) override {
   }
-  void update_shard_client_block_handle(BlockHandle handle, td::Promise<td::Unit> promise) override {
+  void update_shard_client_block_handle(BlockHandle handle, td::Ref<MasterchainState> state,
+                                        td::Promise<td::Unit> promise) override {
   }
 
   void prepare_stats(td::Promise<std::vector<std::pair<std::string, std::string>>> promise) override {
@@ -374,6 +377,28 @@ class ValidatorManagerImpl : public ValidatorManager {
   void log_validator_session_stats(BlockIdExt block_id, validatorsession::ValidatorSessionStats stats) override {
     UNREACHABLE();
   }
+  void get_out_msg_queue_size(BlockIdExt block_id, td::Promise<td::uint32> promise) override {
+    if (queue_size_counter_.empty()) {
+      queue_size_counter_ =
+          td::actor::create_actor<QueueSizeCounter>("queuesizecounter", td::Ref<MasterchainState>{}, actor_id(this));
+    }
+    td::actor::send_closure(queue_size_counter_, &QueueSizeCounter::get_queue_size, block_id, std::move(promise));
+  }
+  void get_block_handle_for_litequery(BlockIdExt block_id, td::Promise<ConstBlockHandle> promise) override {
+    get_block_handle(block_id, false, promise.wrap([](BlockHandle &&handle) -> ConstBlockHandle { return handle; }));
+  }
+  void get_block_by_lt_from_db_for_litequery(AccountIdPrefixFull account, LogicalTime lt,
+                                             td::Promise<ConstBlockHandle> promise) override {
+    get_block_by_lt_from_db(account, lt, std::move(promise));
+  }
+  void get_block_by_unix_time_from_db_for_litequery(AccountIdPrefixFull account, UnixTime ts,
+                                                    td::Promise<ConstBlockHandle> promise) override {
+    get_block_by_unix_time_from_db(account, ts, std::move(promise));
+  }
+  void get_block_by_seqno_from_db_for_litequery(AccountIdPrefixFull account, BlockSeqno seqno,
+                                                td::Promise<ConstBlockHandle> promise) override {
+    get_block_by_seqno_from_db(account, seqno, std::move(promise));
+  }
 
  private:
   PublicKeyHash local_id_;
@@ -391,6 +416,7 @@ class ValidatorManagerImpl : public ValidatorManager {
 
   int pending_new_shard_block_descr_{0};
   std::vector<td::Promise<std::vector<td::Ref<ShardTopBlockDescription>>>> waiting_new_shard_block_descr_;
+  td::actor::ActorOwn<QueueSizeCounter> queue_size_counter_;
 
   void update_shards();
   void update_shard_blocks();

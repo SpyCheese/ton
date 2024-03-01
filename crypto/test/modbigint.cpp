@@ -180,7 +180,7 @@ struct MixedRadix {
 
   template <int M>
   const MixedRadix<M>& as_shorter() const {
-    static_assert(M <= N);
+    static_assert(M <= N,"error");
     return *reinterpret_cast<const MixedRadix<M>*>(this);
   }
 
@@ -289,7 +289,7 @@ struct MixedRadix {
   }
 
   explicit operator long long() const {
-    long long acc = 0.;
+    unsigned long long acc = 0;
     for (int i = N - 1; i >= 0; --i) {
       acc = acc * mod[i] + a[i];
     }
@@ -458,7 +458,7 @@ struct ModArray {
   }
   template <int M>
   ModArray(const ModArray<M>& other) {
-    static_assert(M >= N);
+    static_assert(M >= N,"error");
     std::copy(other.a, other.a + N, a);
   }
   ModArray(const int* p) : a(p) {
@@ -819,7 +819,7 @@ struct ModArray {
 
   template <int M>
   const ModArray<M>& as_shorter() const {
-    static_assert(M <= N);
+    static_assert(M <= N,"error");
     return *reinterpret_cast<const ModArray<M>*>(this);
   }
 
@@ -903,7 +903,7 @@ struct ModArray {
     }
     for (; i < size; i++) {
       pow += 8;
-      acc = (acc << 8) + arr[i];
+      acc = (acc * 256) + arr[i];
       if (pow >= 56) {
         lshift_add(pow, acc);
         acc = pow = 0;

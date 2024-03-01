@@ -73,7 +73,9 @@ class ValidatorSessionImpl : public ValidatorSession {
   ValidatorSessionCandidateId signed_block_;
   td::BufferSlice signature_;
 
-  std::array<std::map<ValidatorSessionCandidateId, tl_object_ptr<ton_api::validatorSession_candidate>>, 100> blocks_;
+  std::map<ValidatorSessionCandidateId, tl_object_ptr<ton_api::validatorSession_candidate>> blocks_;
+  // src_round_candidate_[src_id][round] -> candidate id
+  std::vector<std::map<td::uint32, ValidatorSessionCandidateId>> src_round_candidate_;
 
   catchain::CatChainSessionId unique_hash_;
 
@@ -110,7 +112,8 @@ class ValidatorSessionImpl : public ValidatorSession {
         td::actor::send_closure(id_, &ValidatorSessionImpl::preprocess_block, block);
       }
       void process_broadcast(const PublicKeyHash &src, td::BufferSlice data) override {
-        td::actor::send_closure(id_, &ValidatorSessionImpl::process_broadcast, src, std::move(data));
+        td::actor::send_closure(id_, &ValidatorSessionImpl::process_broadcast, src, std::move(data),
+                                td::optional<ValidatorSessionCandidateId>(), true);
       }
       void process_message(const PublicKeyHash &src, td::BufferSlice data) override {
         td::actor::send_closure(id_, &ValidatorSessionImpl::process_message, src, std::move(data));
@@ -157,7 +160,8 @@ class ValidatorSessionImpl : public ValidatorSession {
   ValidatorSessionStats cur_stats_;
   void stats_init();
   void stats_add_round();
-  void stats_set_candidate_status(td::uint32 round, PublicKeyHash src, int status);
+  void stats_set_candidate_status(td::uint32 round, PublicKeyHash src, ValidatorSessionCandidateId candidate_id,
+                                  int status, std::string comment = "");
 
  public:
   ValidatorSessionImpl(catchain::CatChainSessionId session_id, ValidatorSessionOptions opts, PublicKeyHash local_id,
@@ -170,11 +174,14 @@ class ValidatorSessionImpl : public ValidatorSession {
 
   void start() override;
   void destroy() override;
+  void get_current_stats(td::Promise<ValidatorSessionStats> promise) override;
 
   void process_blocks(std::vector<catchain::CatChainBlock *> blocks);
   void finished_processing();
   void preprocess_block(catchain::CatChainBlock *block);
-  void process_broadcast(PublicKeyHash src, td::BufferSlice data);
+  bool ensure_candidate_unique(td::uint32 src_idx, td::uint32 round, ValidatorSessionCandidateId block_id);
+  void process_broadcast(PublicKeyHash src, td::BufferSlice data, td::optional<ValidatorSessionCandidateId> expected_id,
+                         bool is_overlay_broadcast);
   void process_message(PublicKeyHash src, td::BufferSlice data);
   void process_query(PublicKeyHash src, td::BufferSlice data, td::Promise<td::BufferSlice> promise);
 
@@ -204,6 +211,10 @@ class ValidatorSessionImpl : public ValidatorSession {
 
  private:
   static const size_t MAX_REJECT_REASON_SIZE = 1024;
+  static const td::int32 MAX_FUTURE_ROUND_BLOCK = 100;
+  static const td::int32 MAX_PAST_ROUND_BLOCK = 20;
+  constexpr static const double REQUEST_BROADCAST_P2P_DELAY = 2.0;
+  static const td::uint32 MAX_CANDIDATE_EXTRA_SIZE = 1024;
 };
 
 }  // namespace validatorsession

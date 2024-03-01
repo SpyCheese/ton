@@ -34,18 +34,20 @@
 #include "ton/ton-io.hpp"
 #include "liteserver.hpp"
 #include "validator/fabric.h"
+#include "liteserver-cache.hpp"
 
 namespace ton {
 
 namespace validator {
 
-td::actor::ActorOwn<Db> create_db_actor(td::actor::ActorId<ValidatorManager> manager, std::string db_root_) {
-  return td::actor::create_actor<RootDb>("db", manager, db_root_);
+td::actor::ActorOwn<Db> create_db_actor(td::actor::ActorId<ValidatorManager> manager, std::string db_root_,
+                                        td::Ref<ValidatorManagerOptions> opts) {
+  return td::actor::create_actor<RootDb>("db", manager, db_root_, opts);
 }
 
 td::actor::ActorOwn<LiteServerCache> create_liteserver_cache_actor(td::actor::ActorId<ValidatorManager> manager,
                                                                    std::string db_root) {
-  return td::actor::create_actor<LiteServerCache>("cache");
+  return td::actor::create_actor<LiteServerCacheImpl>("cache");
 }
 
 td::Result<td::Ref<BlockData>> create_block(BlockIdExt block_id, td::BufferSlice data) {
@@ -111,13 +113,16 @@ td::Ref<BlockSignatureSet> create_signature_set(std::vector<BlockSignature> sig_
   return td::Ref<BlockSignatureSetQ>{true, std::move(sig_set)};
 }
 
-td::Result<td::Ref<ExtMessage>> create_ext_message(td::BufferSlice data) {
-  TRY_RESULT(res, ExtMessageQ::create_ext_message(std::move(data)));
+td::Result<td::Ref<ExtMessage>> create_ext_message(td::BufferSlice data,
+                                                   block::SizeLimitsConfig::ExtMsgLimits limits) {
+  TRY_RESULT(res, ExtMessageQ::create_ext_message(std::move(data), limits));
   return std::move(res);
 }
 
-void run_check_external_message(td::BufferSlice data, td::actor::ActorId<ValidatorManager> manager, td::Promise<td::Unit> promise) {
-  ExtMessageQ::run_message(std::move(data), std::move(manager), std::move(promise));
+void run_check_external_message(td::BufferSlice data, block::SizeLimitsConfig::ExtMsgLimits limits,
+                                td::actor::ActorId<ValidatorManager> manager,
+                                td::Promise<td::Ref<ExtMessage>> promise) {
+  ExtMessageQ::run_message(std::move(data), limits, std::move(manager), std::move(promise));
 }
 
 td::Result<td::Ref<IhrMessage>> create_ihr_message(td::BufferSlice data) {
@@ -198,10 +203,12 @@ void run_validate_query(ShardIdFull shard, UnixTime min_ts, BlockIdExt min_maste
       seqno = p.seqno();
     }
   }
-  td::actor::create_actor<ValidateQuery>(
-      PSTRING() << (is_fake ? "fakevalidate" : "validateblock") << shard.to_str() << ":" << (seqno + 1), shard, min_ts,
-      min_masterchain_block_id, std::move(prev), std::move(candidate), std::move(validator_set), std::move(manager),
-      timeout, std::move(promise), is_fake)
+  static std::atomic<size_t> idx;
+  td::actor::create_actor<ValidateQuery>(PSTRING() << (is_fake ? "fakevalidate" : "validateblock") << shard.to_str()
+                                                   << ":" << (seqno + 1) << "#" << idx.fetch_add(1),
+                                         shard, min_ts, min_masterchain_block_id, std::move(prev), std::move(candidate),
+                                         std::move(validator_set), std::move(manager), timeout, std::move(promise),
+                                         is_fake)
       .release();
 }
 
@@ -238,7 +245,7 @@ void run_collate_hardfork(ShardIdFull shard, const BlockIdExt& min_masterchain_b
 
 void run_liteserver_query(td::BufferSlice data, td::actor::ActorId<ValidatorManager> manager,
                           td::actor::ActorId<LiteServerCache> cache, td::Promise<td::BufferSlice> promise) {
-  LiteQuery::run_query(std::move(data), std::move(manager), std::move(promise));
+  LiteQuery::run_query(std::move(data), std::move(manager), std::move(cache), std::move(promise));
 }
 
 void run_fetch_account_state(WorkchainId wc, StdSmcAddress  addr, td::actor::ActorId<ValidatorManager> manager,

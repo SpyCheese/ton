@@ -53,7 +53,7 @@ void TorrentHeader::parse(ParserT &parser) {
   td::uint32 got_type;
   parse(got_type, parser);
   if (got_type != type) {
-    parser.set_error("Unknown fec type");
+    parser.set_error("Unknown type");
     return;
   }
   parse(files_count, parser);
@@ -68,13 +68,23 @@ void TorrentHeader::parse(ParserT &parser) {
     parser.set_error("Unknown fec type");
     return;
   }
-  name_index.resize(files_count);
-  for (auto &x : name_index) {
+  name_index.clear();
+  for (size_t i = 0; i < files_count; ++i) {
+    td::uint64 x;
     parse(x, parser);
+    if (parser.get_error()) {
+      return;
+    }
+    name_index.push_back(x);
   }
-  data_index.resize(files_count);
-  for (auto &x : data_index) {
+  data_index.clear();
+  for (size_t i = 0; i < files_count; ++i) {
+    td::uint64 x;
     parse(x, parser);
+    if (parser.get_error()) {
+      return;
+    }
+    data_index.push_back(x);
   }
   names = parser.template fetch_string_raw<std::string>(tot_names_size);
 }

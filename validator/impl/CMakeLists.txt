@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 if (NOT OPENSSL_FOUND)
   find_package(OpenSSL REQUIRED)
@@ -32,6 +32,7 @@ set(TON_VALIDATOR_SOURCE
   external-message.hpp
   ihr-message.hpp
   liteserver.hpp
+  liteserver-cache.hpp
   message-queue.hpp
   proof.hpp
   shard.hpp

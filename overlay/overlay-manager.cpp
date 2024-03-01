@@ -84,21 +84,21 @@ void OverlayManager::delete_overlay(adnl::AdnlNodeIdShort local_id, OverlayIdSho
 }
 
 void OverlayManager::create_public_overlay(adnl::AdnlNodeIdShort local_id, OverlayIdFull overlay_id,
-                                           std::unique_ptr<Callback> callback, OverlayPrivacyRules rules, td::string scope) {
-  auto id = overlay_id.compute_short_id();
-  register_overlay(local_id, id,
-                   Overlay::create(keyring_, adnl_, actor_id(this), local_id, std::move(overlay_id),
-                                   std::move(callback), std::move(rules), scope));
+                                           std::unique_ptr<Callback> callback, OverlayPrivacyRules rules,
+                                           td::string scope) {
+  create_public_overlay_ex(local_id, std::move(overlay_id), std::move(callback), std::move(rules), std::move(scope),
+                           {});
 }
 
-void OverlayManager::create_public_overlay_external(adnl::AdnlNodeIdShort local_id, OverlayIdFull overlay_id,
-                                                    std::unique_ptr<Callback> callback, OverlayPrivacyRules rules,
-                                                    td::string scope) {
+void OverlayManager::create_public_overlay_ex(adnl::AdnlNodeIdShort local_id, OverlayIdFull overlay_id,
+                                              std::unique_ptr<Callback> callback, OverlayPrivacyRules rules,
+                                              td::string scope, OverlayOptions opts) {
   auto id = overlay_id.compute_short_id();
   register_overlay(local_id, id,
                    Overlay::create(keyring_, adnl_, actor_id(this), local_id, std::move(overlay_id),
-                                   std::move(callback), std::move(rules), scope, true));
+                                   std::move(callback), std::move(rules), scope, std::move(opts)));
 }
+
 
 void OverlayManager::create_private_overlay(adnl::AdnlNodeIdShort local_id, OverlayIdFull overlay_id,
                                             std::vector<adnl::AdnlNodeIdShort> nodes,

@@ -79,7 +79,22 @@ class OverlayPeer {
   td::int32 get_version() const {
     return node_.version();
   }
-  
+  void on_ping_result(bool success) {
+    if (success) {
+      missed_pings_ = 0;
+      last_ping_at_ = td::Timestamp::now();
+      is_alive_ = true;
+    } else {
+      ++missed_pings_;
+      if (missed_pings_ >= 3 && last_ping_at_.is_in_past(td::Timestamp::in(-15.0))) {
+        is_alive_ = false;
+      }
+    }
+  }
+  bool is_alive() const {
+    return is_alive_;
+  }
+
   td::uint32 throughput_out_bytes = 0;
   td::uint32 throughput_in_bytes = 0;
   
@@ -105,14 +120,18 @@ class OverlayPeer {
   adnl::AdnlNodeIdShort id_;
 
   bool is_neighbour_ = false;
+  size_t missed_pings_ = 0;
+  bool is_alive_ = true;
+  td::Timestamp last_ping_at_ = td::Timestamp::now();
 };
 
 class OverlayImpl : public Overlay {
  public:
   OverlayImpl(td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
-              td::actor::ActorId<OverlayManager> manager, adnl::AdnlNodeIdShort local_id, OverlayIdFull overlay_id,
-              bool pub, std::vector<adnl::AdnlNodeIdShort> nodes, std::unique_ptr<Overlays::Callback> callback,
-              OverlayPrivacyRules rules, td::string scope = "{ \"type\": \"undefined\" }", bool is_external = false);
+              td::actor::ActorId<OverlayManager> manager, td::actor::ActorId<dht::Dht> dht_node,
+              adnl::AdnlNodeIdShort local_id, OverlayIdFull overlay_id, bool pub,
+              std::vector<adnl::AdnlNodeIdShort> nodes, std::unique_ptr<Overlays::Callback> callback,
+              OverlayPrivacyRules rules, td::string scope = "{ \"type\": \"undefined\" }", OverlayOptions opts = {});
 
   void receive_message(adnl::AdnlNodeIdShort src, td::BufferSlice data) override;
   void receive_query(adnl::AdnlNodeIdShort src, td::BufferSlice data, td::Promise<td::BufferSlice> promise) override;
@@ -134,7 +153,8 @@ class OverlayImpl : public Overlay {
     alarm_timestamp() = td::Timestamp::in(1);
   }
 
-  void receive_random_peers(adnl::AdnlNodeIdShort src, td::BufferSlice data);
+  void on_ping_result(adnl::AdnlNodeIdShort peer, bool success);
+  void receive_random_peers(adnl::AdnlNodeIdShort src, td::Result<td::BufferSlice> R);
   void send_random_peers(adnl::AdnlNodeIdShort dst, td::Promise<td::BufferSlice> promise);
   void send_random_peers_cont(adnl::AdnlNodeIdShort dst, OverlayNode node, td::Promise<td::BufferSlice> promise);
   void get_overlay_random_peers(td::uint32 max_peers, td::Promise<std::vector<adnl::AdnlNodeIdShort>> promise) override;
@@ -279,7 +299,18 @@ class OverlayImpl : public Overlay {
   void add_peers(std::vector<OverlayNode> nodes);
   void del_some_peers();
   void del_peer(adnl::AdnlNodeIdShort id);
-  OverlayPeer *get_random_peer();
+  OverlayPeer *get_random_peer(bool only_alive = false);
+
+  void finish_dht_query() {
+    if (!next_dht_store_query_) {
+      next_dht_store_query_ = td::Timestamp::in(td::Random::fast(60.0, 100.0));
+    }
+    if (frequent_dht_lookup_ && peers_.size() == bad_peers_.size()) {
+      next_dht_query_ = td::Timestamp::in(td::Random::fast(6.0, 10.0));
+    } else {
+      next_dht_query_ = next_dht_store_query_;
+    }
+  }
   std::vector<OverlayPeer*> get_overlay_random_peers_impl(td::uint32 max_peers);
 
   td::actor::ActorId<keyring::Keyring> keyring_;
@@ -291,10 +322,13 @@ class OverlayImpl : public Overlay {
 
   td::DecTree<adnl::AdnlNodeIdShort, OverlayPeer> peers_;
   td::Timestamp next_dht_query_ = td::Timestamp::in(1.0);
+  td::Timestamp next_dht_store_query_ = td::Timestamp::in(1.0);
   td::Timestamp retry_dht_before_ = td::Timestamp::in(8.0);
   td::Timestamp update_db_at_;
   td::Timestamp update_throughput_at_;
   td::Timestamp last_throughput_update_;
+  std::set<adnl::AdnlNodeIdShort> bad_peers_;
+  adnl::AdnlNodeIdShort next_bad_peer_ = adnl::AdnlNodeIdShort::zero();
 
   std::unique_ptr<Overlays::Callback> callback_;
 
@@ -351,7 +385,8 @@ class OverlayImpl : public Overlay {
   bool semi_public_ = false;
   OverlayPrivacyRules rules_;
   td::string scope_;
-  bool is_external_ = false;
+  bool announce_self_ = true;
+  bool frequent_dht_lookup_ = false;
   std::map<PublicKeyHash, std::shared_ptr<Certificate>> certs_;
 
   class CachedEncryptor : public td::ListNode {

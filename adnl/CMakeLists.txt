@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 #BEGIN internal
 if (NOT TON_ONLY_TONLIB)
@@ -100,6 +100,8 @@ target_include_directories(adnltest PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOU
 target_link_libraries(adnltest PUBLIC adnl )
 
 add_subdirectory(garlic)
+
+install(TARGETS adnl-proxy RUNTIME DESTINATION bin)
 endif()
 #END internal
 

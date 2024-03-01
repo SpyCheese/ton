@@ -261,7 +261,8 @@ struct BlockLimitStatus {
   ton::LogicalTime cur_lt;
   td::uint64 gas_used{};
   vm::NewCellStorageStat st_stat;
-  unsigned accounts{}, transactions{};
+  unsigned accounts{}, transactions{}, extra_out_msgs{};
+  unsigned public_library_diff{};
   BlockLimitStatus(const BlockLimits& limits_, ton::LogicalTime lt = 0)
       : limits(limits_), cur_lt(std::max(limits_.start_lt, lt)) {
   }
@@ -270,6 +271,8 @@ struct BlockLimitStatus {
     st_stat.set_zero();
     transactions = accounts = 0;
     gas_used = 0;
+    extra_out_msgs = 0;
+    public_library_diff = 0;
   }
   td::uint64 estimate_block_size(const vm::NewCellStorageStat::Stat* extra = nullptr) const;
   int classify() const;
@@ -430,10 +433,11 @@ struct ShardState {
                               ton::BlockSeqno prev_mc_block_seqno, bool after_split, bool clear_history,
                               std::function<bool(ton::BlockSeqno)> for_each_mcseqno);
   td::Status merge_with(ShardState& sib);
-  td::Result<std::unique_ptr<vm::AugmentedDictionary>> compute_split_out_msg_queue(ton::ShardIdFull subshard);
+  td::Result<std::unique_ptr<vm::AugmentedDictionary>> compute_split_out_msg_queue(ton::ShardIdFull subshard,
+                                                                                   td::uint32* queue_size = nullptr);
   td::Result<std::shared_ptr<block::MsgProcessedUptoCollection>> compute_split_processed_upto(
       ton::ShardIdFull subshard);
-  td::Status split(ton::ShardIdFull subshard);
+  td::Status split(ton::ShardIdFull subshard, td::uint32* queue_size = nullptr);
   td::Status unpack_out_msg_queue_info(Ref<vm::Cell> out_msg_queue_info);
   bool clear_load_history() {
     overload_history_ = underload_history_ = 0;
@@ -455,7 +459,7 @@ struct ShardState {
 struct ValueFlow {
   struct SetZero {};
   CurrencyCollection from_prev_blk, to_next_blk, imported, exported, fees_collected, fees_imported, recovered, created,
-      minted;
+      minted, burned;
   ValueFlow() = default;
   ValueFlow(SetZero)
       : from_prev_blk{0}
@@ -466,7 +470,8 @@ struct ValueFlow {
       , fees_imported{0}
       , recovered{0}
       , created{0}
-      , minted{0} {
+      , minted{0}
+      , burned{0} {
   }
   bool is_valid() const {
     return from_prev_blk.is_valid() && minted.is_valid();
@@ -652,7 +657,8 @@ class MtCarloComputeShare {
   void gen_vset();
 };
 
-int filter_out_msg_queue(vm::AugmentedDictionary& out_queue, ton::ShardIdFull old_shard, ton::ShardIdFull subshard);
+int filter_out_msg_queue(vm::AugmentedDictionary& out_queue, ton::ShardIdFull old_shard, ton::ShardIdFull subshard,
+                         td::uint32* queue_size = nullptr);
 
 std::ostream& operator<<(std::ostream& os, const ShardId& shard_id);
 

@@ -621,12 +621,14 @@ td::Result<std::vector<StoragePrices>> Config::get_storage_prices() const {
   }
   vm::Dictionary dict{std::move(cell), 32};
   if (!dict.check_for_each([&res](Ref<vm::CellSlice> cs_ref, td::ConstBitPtr key, int n) -> bool {
-        block::gen::StoragePrices::Record data;
-        if (!tlb::csr_unpack(std::move(cs_ref), data) || data.utime_since != key.get_uint(n)) {
+        auto r_prices = do_get_one_storage_prices(*cs_ref);
+        if (r_prices.is_error()) {
           return false;
         }
-        res.emplace_back(data.utime_since, data.bit_price_ps, data.cell_price_ps, data.mc_bit_price_ps,
-                         data.mc_cell_price_ps);
+        res.push_back(r_prices.move_as_ok());
+        if (res.back().valid_since != key.get_uint(n)) {
+          return false;
+        }
         return true;
       })) {
     return td::Status::Error("invalid storage prices dictionary in configuration parameter 18");
@@ -634,16 +636,25 @@ td::Result<std::vector<StoragePrices>> Config::get_storage_prices() const {
   return std::move(res);
 }
 
-td::Result<GasLimitsPrices> Config::do_get_gas_limits_prices(td::Ref<vm::Cell> cell, int id) {
+td::Result<StoragePrices> Config::do_get_one_storage_prices(vm::CellSlice cs) {
+  block::gen::StoragePrices::Record data;
+  if (!tlb::unpack(cs, data)) {
+    return td::Status::Error("invalid storage prices dictionary in configuration parameter 18");
+  }
+  return StoragePrices{data.utime_since, data.bit_price_ps, data.cell_price_ps, data.mc_bit_price_ps,
+                       data.mc_cell_price_ps};
+}
+
+td::Result<GasLimitsPrices> Config::do_get_gas_limits_prices(vm::CellSlice cs, int id) {
   GasLimitsPrices res;
-  auto cs = vm::load_cell_slice(cell);
+  vm::CellSlice cs0 = cs;
   block::gen::GasLimitsPrices::Record_gas_flat_pfx flat;
   if (tlb::unpack(cs, flat)) {
     cs = *flat.other;
     res.flat_gas_limit = flat.flat_gas_limit;
     res.flat_gas_price = flat.flat_gas_price;
   } else {
-    cs = vm::load_cell_slice(cell);
+    cs = cs0;
   }
   auto f = [&](const auto& r, td::uint64 spec_limit) {
     res.gas_limit = r.gas_limit;
@@ -658,7 +669,7 @@ td::Result<GasLimitsPrices> Config::do_get_gas_limits_prices(td::Ref<vm::Cell> c
     f(rec, rec.special_gas_limit);
   } else {
     block::gen::GasLimitsPrices::Record_gas_prices rec0;
-    if (tlb::unpack(cs, rec0)) {
+    if (tlb::unpack(cs = cs0, rec0)) {
       f(rec0, rec0.gas_limit);
     } else {
       return td::Status::Error(PSLICE() << "configuration parameter " << id
@@ -688,7 +699,7 @@ td::Result<GasLimitsPrices> Config::get_gas_limits_prices(bool is_masterchain) c
   if (cell.is_null()) {
     return td::Status::Error(PSLICE() << "configuration parameter " << id << " with gas prices is absent");
   }
-  return do_get_gas_limits_prices(std::move(cell), id);
+  return do_get_gas_limits_prices(vm::load_cell_slice(cell), id);
 }
 
 td::Result<MsgPrices> Config::get_msg_prices(bool is_masterchain) const {
@@ -697,7 +708,10 @@ td::Result<MsgPrices> Config::get_msg_prices(bool is_masterchain) const {
   if (cell.is_null()) {
     return td::Status::Error(PSLICE() << "configuration parameter " << id << " with msg prices is absent");
   }
-  auto cs = vm::load_cell_slice(std::move(cell));
+  return do_get_msg_prices(vm::load_cell_slice(cell), id);
+}
+
+td::Result<MsgPrices> Config::do_get_msg_prices(vm::CellSlice cs, int id) {
   block::gen::MsgForwardPrices::Record rec;
   if (!tlb::unpack(cs, rec)) {
     return td::Status::Error(PSLICE() << "configuration parameter " << id
@@ -855,11 +869,12 @@ Ref<McShardHash> McShardHash::from_block(Ref<vm::Cell> block_root, const ton::Fi
   ton::RootHash rhash = block_root->get_hash().bits();
   CurrencyCollection fees_collected, funds_created;
   if (init_fees) {
-    block::gen::ValueFlow::Record flow;
-    if (!(tlb::unpack_cell(rec.value_flow, flow) && fees_collected.unpack(flow.fees_collected) &&
-          funds_created.unpack(flow.r2.created))) {
+    block::ValueFlow flow;
+    if (!flow.unpack(vm::load_cell_slice_ref(rec.value_flow))) {
       return {};
     }
+    fees_collected = flow.fees_collected;
+    funds_created = flow.created;
   }
   return Ref<McShardHash>(true, ton::BlockId{ton::ShardIdFull(shard), (unsigned)info.seq_no}, info.start_lt,
                           info.end_lt, info.gen_utime, rhash, fhash, fees_collected, funds_created, ~0U,
@@ -909,11 +924,12 @@ Ref<McShardDescr> McShardDescr::from_block(Ref<vm::Cell> block_root, Ref<vm::Cel
   ton::RootHash rhash = block_root->get_hash().bits();
   CurrencyCollection fees_collected, funds_created;
   if (init_fees) {
-    block::gen::ValueFlow::Record flow;
-    if (!(tlb::unpack_cell(rec.value_flow, flow) && fees_collected.unpack(flow.fees_collected) &&
-          funds_created.unpack(flow.r2.created))) {
+    block::ValueFlow flow;
+    if (!flow.unpack(vm::load_cell_slice_ref(rec.value_flow))) {
       return {};
     }
+    fees_collected = flow.fees_collected;
+    funds_created = flow.created;
   }
   auto res = Ref<McShardDescr>(true, ton::BlockId{ton::ShardIdFull(shard), (unsigned)info.seq_no}, info.start_lt,
                                info.end_lt, info.gen_utime, rhash, fhash, fees_collected, funds_created, ~0U,
@@ -1913,6 +1929,109 @@ std::vector<ton::ValidatorDescr> Config::compute_total_validator_set(int next) c
   return res.move_as_ok()->export_validator_set();
 }
 
+td::Result<SizeLimitsConfig> Config::get_size_limits_config() const {
+  td::Ref<vm::Cell> param = get_config_param(43);
+  if (param.is_null()) {
+    return do_get_size_limits_config({});
+  }
+  return do_get_size_limits_config(vm::load_cell_slice_ref(param));
+}
+
+td::Result<SizeLimitsConfig> Config::do_get_size_limits_config(td::Ref<vm::CellSlice> cs) {
+  SizeLimitsConfig limits;
+  if (cs.is_null()) {
+    return limits; // default values
+  }
+  auto unpack_v1 = [&](auto& rec) {
+    limits.max_msg_bits = rec.max_msg_bits;
+    limits.max_msg_cells = rec.max_msg_cells;
+    limits.max_library_cells = rec.max_library_cells;
+    limits.max_vm_data_depth = static_cast<td::uint16>(rec.max_vm_data_depth);
+    limits.ext_msg_limits.max_size = rec.max_ext_msg_size;
+    limits.ext_msg_limits.max_depth = static_cast<td::uint16>(rec.max_ext_msg_depth);
+  };
+
+  auto unpack_v2 = [&](auto& rec) {
+    unpack_v1(rec);
+    limits.max_acc_state_bits = rec.max_acc_state_bits;
+    limits.max_acc_state_cells = rec.max_acc_state_cells;
+    limits.max_acc_public_libraries = rec.max_acc_public_libraries;
+  };
+  gen::SizeLimitsConfig::Record_size_limits_config rec_v1;
+  gen::SizeLimitsConfig::Record_size_limits_config_v2 rec_v2;
+  if (tlb::csr_unpack(cs, rec_v1)) {
+    unpack_v1(rec_v1);
+  } else if (tlb::csr_unpack(cs, rec_v2)) {
+    unpack_v2(rec_v2);
+  } else {
+    return td::Status::Error("configuration parameter 43 is invalid");
+  }
+  return limits;
+}
+
+std::unique_ptr<vm::Dictionary> Config::get_suspended_addresses(ton::UnixTime now) const {
+  td::Ref<vm::Cell> param = get_config_param(44);
+  gen::SuspendedAddressList::Record rec;
+  if (param.is_null() || !tlb::unpack_cell(param, rec) || rec.suspended_until <= now) {
+    return {};
+  }
+  return std::make_unique<vm::Dictionary>(rec.addresses->prefetch_ref(), 288);
+}
+
+BurningConfig Config::get_burning_config() const {
+  td::Ref<vm::Cell> param = get_config_param(5);
+  gen::BurningConfig::Record rec;
+  if (param.is_null() || !tlb::unpack_cell(param, rec)) {
+    return {};
+  }
+  BurningConfig c;
+  c.fee_burn_num = rec.fee_burn_num;
+  c.fee_burn_denom = rec.fee_burn_denom;
+  vm::CellSlice& addr = rec.blackhole_addr.write();
+  if (addr.fetch_long(1)) {
+    td::Bits256 x;
+    addr.fetch_bits_to(x.bits(), 256);
+    c.blackhole_addr = x;
+  }
+  return c;
+}
+
+td::Ref<vm::Tuple> Config::get_unpacked_config_tuple(ton::UnixTime now) const {
+  auto get_param = [&](td::int32 idx) -> vm::StackEntry {
+    auto cell = get_config_param(idx);
+    if (cell.is_null()) {
+      return {};
+    }
+    return vm::load_cell_slice_ref(cell);
+  };
+  auto get_current_storage_prices = [&]() -> vm::StackEntry {
+    auto cell = get_config_param(18);
+    if (cell.is_null()) {
+      return {};
+    }
+    vm::StackEntry res;
+    vm::Dictionary dict{std::move(cell), 32};
+    dict.check_for_each([&](Ref<vm::CellSlice> cs_ref, td::ConstBitPtr key, int n) -> bool {
+      auto utime_since = key.get_uint(n);
+      if (now >= utime_since) {
+        res = std::move(cs_ref);
+        return true;
+      }
+      return false;
+    });
+    return res;
+  };
+  std::vector<vm::StackEntry> tuple;
+  tuple.push_back(get_current_storage_prices());  // storage_prices
+  tuple.push_back(get_param(19));                 // global_id
+  tuple.push_back(get_param(20));                 // config_mc_gas_prices
+  tuple.push_back(get_param(21));                 // config_gas_prices
+  tuple.push_back(get_param(24));                 // config_mc_fwd_prices
+  tuple.push_back(get_param(25));                 // config_fwd_prices
+  tuple.push_back(get_param(43));                 // size_limits_config
+  return td::make_cnt_ref<std::vector<vm::StackEntry>>(std::move(tuple));
+}
+
 td::Result<std::pair<ton::UnixTime, ton::UnixTime>> Config::unpack_validator_set_start_stop(Ref<vm::Cell> vset_root) {
   if (vset_root.is_null()) {
     return td::Status::Error("validator set absent");
@@ -1942,31 +2061,58 @@ bool WorkchainInfo::unpack(ton::WorkchainId wc, vm::CellSlice& cs) {
   if (wc == ton::workchainInvalid) {
     return false;
   }
-  block::gen::WorkchainDescr::Record info;
-  if (!tlb::unpack(cs, info)) {
-    return false;
-  }
-  enabled_since = info.enabled_since;
-  actual_min_split = info.actual_min_split;
-  min_split = info.min_split;
-  max_split = info.max_split;
-  basic = info.basic;
-  active = info.active;
-  accept_msgs = info.accept_msgs;
-  flags = info.flags;
-  zerostate_root_hash = info.zerostate_root_hash;
-  zerostate_file_hash = info.zerostate_file_hash;
-  version = info.version;
-  if (basic) {
-    min_addr_len = max_addr_len = addr_len_step = 256;
-  } else {
-    block::gen::WorkchainFormat::Record_wfmt_ext ext;
-    if (!tlb::type_unpack(cs, block::gen::WorkchainFormat{basic}, ext)) {
+  auto unpack_v1 = [this](auto& info) {
+    enabled_since = info.enabled_since;
+    actual_min_split = info.actual_min_split;
+    min_split = info.min_split;
+    max_split = info.max_split;
+    basic = info.basic;
+    active = info.active;
+    accept_msgs = info.accept_msgs;
+    flags = info.flags;
+    zerostate_root_hash = info.zerostate_root_hash;
+    zerostate_file_hash = info.zerostate_file_hash;
+    version = info.version;
+    if (basic) {
+      min_addr_len = max_addr_len = addr_len_step = 256;
+    } else {
+      block::gen::WorkchainFormat::Record_wfmt_ext ext;
+      if (!tlb::csr_type_unpack(info.format, block::gen::WorkchainFormat{basic}, ext)) {
+        return false;
+      }
+      min_addr_len = ext.min_addr_len;
+      max_addr_len = ext.max_addr_len;
+      addr_len_step = ext.addr_len_step;
+    }
+    return true;
+  };
+  auto unpack_v2 = [&, this](auto& info) {
+    if (!unpack_v1(info)) {
       return false;
     }
-    min_addr_len = ext.min_addr_len;
-    max_addr_len = ext.max_addr_len;
-    addr_len_step = ext.addr_len_step;
+    block::gen::WcSplitMergeTimings::Record rec;
+    if (!tlb::csr_unpack(info.split_merge_timings, rec)) {
+      return false;
+    }
+    split_merge_delay = rec.split_merge_delay;
+    split_merge_interval = rec.split_merge_interval;
+    min_split_merge_interval = rec.min_split_merge_interval;
+    max_split_merge_delay = rec.max_split_merge_delay;
+    return true;
+  };
+  block::gen::WorkchainDescr::Record_workchain info_v1;
+  block::gen::WorkchainDescr::Record_workchain_v2 info_v2;
+  vm::CellSlice cs0 = cs;
+  if (tlb::unpack(cs, info_v1)) {
+    if (!unpack_v1(info_v1)) {
+      return false;
+    }
+  } else if (tlb::unpack(cs = cs0, info_v2)) {
+    if (!unpack_v2(info_v2)) {
+      return false;
+    }
+  } else {
+    return false;
   }
   workchain = wc;
   LOG(DEBUG) << "unpacked info for workchain " << wc << ": basic=" << basic << ", active=" << active
@@ -2130,6 +2276,44 @@ Ref<vm::Cell> ConfigInfo::lookup_library(td::ConstBitPtr root_hash) const {
     return {};
   }
   return lib;
+}
+
+td::Result<Ref<vm::Tuple>> ConfigInfo::get_prev_blocks_info() const {
+  // [ wc:Integer shard:Integer seqno:Integer root_hash:Integer file_hash:Integer] = BlockId;
+  // [ last_mc_blocks:[BlockId...]
+  //   prev_key_block:BlockId ] : PrevBlocksInfo
+  auto block_id_to_tuple = [](const ton::BlockIdExt& block_id) -> vm::Ref<vm::Tuple> {
+    td::RefInt256 shard = td::make_refint(block_id.id.shard);
+    if (shard->sgn() < 0) {
+      shard &= ((td::make_refint(1) << 64) - 1);
+    }
+    return vm::make_tuple_ref(
+        td::make_refint(block_id.id.workchain),
+        std::move(shard),
+        td::make_refint(block_id.id.seqno),
+        td::bits_to_refint(block_id.root_hash.bits(), 256),
+        td::bits_to_refint(block_id.file_hash.bits(), 256));
+  };
+  std::vector<vm::StackEntry> last_mc_blocks;
+
+  last_mc_blocks.push_back(block_id_to_tuple(block_id));
+  for (ton::BlockSeqno seqno = block_id.id.seqno; seqno > 0 && last_mc_blocks.size() < 16; ) {
+    --seqno;
+    ton::BlockIdExt block_id;
+    if (!get_old_mc_block_id(seqno, block_id)) {
+      return td::Status::Error("cannot fetch old mc block");
+    }
+    last_mc_blocks.push_back(block_id_to_tuple(block_id));
+  }
+
+  ton::BlockIdExt last_key_block;
+  ton::LogicalTime last_key_block_lt;
+  if (!get_last_key_block(last_key_block, last_key_block_lt)) {
+    return td::Status::Error("cannot fetch last key block");
+  }
+  return vm::make_tuple_ref(
+      td::make_cnt_ref<std::vector<vm::StackEntry>>(std::move(last_mc_blocks)),
+      block_id_to_tuple(last_key_block));
 }
 
 }  // namespace block

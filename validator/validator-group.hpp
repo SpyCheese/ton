@@ -24,6 +24,8 @@
 
 #include "rldp/rldp.h"
 
+#include <list>
+
 namespace ton {
 
 namespace validator {
@@ -41,7 +43,7 @@ class ValidatorGroup : public td::actor::Actor {
   void skip_round(td::uint32 round);
   void retry_accept_block_query(BlockIdExt block_id, td::Ref<BlockData> block, std::vector<BlockIdExt> prev,
                                 td::Ref<BlockSignatureSet> sigs, td::Ref<BlockSignatureSet> approve_sigs,
-                                td::Promise<td::Unit> promise);
+                                bool send_broadcast, td::Promise<td::Unit> promise);
   void get_approved_candidate(PublicKey source, RootHash root_hash, FileHash file_hash,
                               FileHash collated_data_file_hash, td::Promise<BlockCandidate> promise);
   BlockIdExt create_next_block_id(RootHash root_hash, FileHash file_hash) const;
@@ -116,6 +118,23 @@ class ValidatorGroup : public td::actor::Actor {
   bool started_ = false;
   bool allow_unsafe_self_blocks_resync_;
   td::uint32 last_known_round_id_ = 0;
+
+  struct CachedCollatedBlock {
+    td::optional<BlockCandidate> result;
+    std::vector<td::Promise<BlockCandidate>> promises;
+  };
+  std::shared_ptr<CachedCollatedBlock> cached_collated_block_;
+
+  void generated_block_candidate(std::shared_ptr<CachedCollatedBlock> cache, td::Result<BlockCandidate> R);
+
+  typedef std::tuple<td::Bits256, BlockIdExt, FileHash, FileHash> CacheKey;
+  std::map<CacheKey, UnixTime> approved_candidates_cache_;
+
+  void update_approve_cache(CacheKey key, UnixTime value);
+
+  static CacheKey block_to_cache_key(const BlockCandidate& block) {
+    return std::make_tuple(block.pubkey.as_bits256(), block.id, sha256_bits256(block.data), block.collated_file_hash);
+  }
 };
 
 }  // namespace validator

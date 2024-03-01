@@ -151,7 +151,7 @@ void ValidatorManagerImpl::get_key_block_proof_link(BlockIdExt block_id, td::Pro
 }
 
 void ValidatorManagerImpl::new_external_message(td::BufferSlice data) {
-  auto R = create_ext_message(std::move(data));
+  auto R = create_ext_message(std::move(data), block::SizeLimitsConfig::ExtMsgLimits());
   if (R.is_ok()) {
     ext_messages_.emplace_back(R.move_as_ok());
   }
@@ -549,7 +549,7 @@ void ValidatorManagerImpl::register_block_handle(BlockHandle handle, td::Promise
 }
 
 void ValidatorManagerImpl::start_up() {
-  db_ = create_db_actor(actor_id(this), db_root_);
+  db_ = create_db_actor(actor_id(this), db_root_, opts_);
 }
 
 void ValidatorManagerImpl::try_get_static_file(FileHash file_hash, td::Promise<td::BufferSlice> promise) {

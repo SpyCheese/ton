@@ -260,7 +260,10 @@ void ValidatorManagerImpl::get_key_block_proof_link(BlockIdExt block_id, td::Pro
 }
 
 void ValidatorManagerImpl::new_external_message(td::BufferSlice data) {
-  auto R = create_ext_message(std::move(data));
+  if (last_masterchain_state_.is_null()) {
+    return;
+  }
+  auto R = create_ext_message(std::move(data), last_masterchain_state_->get_ext_msg_limits());
   if (R.is_ok()) {
     ext_messages_.emplace_back(R.move_as_ok());
   }
@@ -872,6 +875,11 @@ void ValidatorManagerImpl::get_top_masterchain_state_block(
       std::pair<td::Ref<MasterchainState>, BlockIdExt>{last_masterchain_state_, last_masterchain_block_id_});
 }
 
+void ValidatorManagerImpl::get_last_liteserver_state_block(
+    td::Promise<std::pair<td::Ref<MasterchainState>, BlockIdExt>> promise) {
+  return get_top_masterchain_state_block(std::move(promise));
+}
+
 void ValidatorManagerImpl::send_get_block_request(BlockIdExt id, td::uint32 priority,
                                                   td::Promise<ReceivedBlock> promise) {
   UNREACHABLE();
@@ -893,7 +901,7 @@ void ValidatorManagerImpl::send_top_shard_block_description(td::Ref<ShardTopBloc
 }
 
 void ValidatorManagerImpl::start_up() {
-  db_ = create_db_actor(actor_id(this), db_root_);
+  db_ = create_db_actor(actor_id(this), db_root_, opts_);
 
   auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<ValidatorManagerInitResult> R) {
     R.ensure();

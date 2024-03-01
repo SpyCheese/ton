@@ -350,7 +350,11 @@ struct GasLimitsPrices {
   td::uint64 freeze_due_limit{0};
   td::uint64 delete_due_limit{0};
 
-  td::RefInt256 compute_gas_price(td::uint64 gas_used) const;
+  td::RefInt256 compute_gas_price(td::uint64 gas_used) const {
+    return gas_used <= flat_gas_limit
+               ? td::make_refint(flat_gas_price)
+               : td::rshift(td::make_refint(gas_price) * (gas_used - flat_gas_limit), 16, 1) + flat_gas_price;
+  }
 };
 
 // msg_fwd_fees = (lump_price + ceil((bit_price * msg.bits + cell_price * msg.cells)/2^16)) nanograms
@@ -365,6 +369,7 @@ struct MsgPrices {
   td::uint32 first_frac;
   td::uint32 next_frac;
   td::uint64 compute_fwd_fees(td::uint64 cells, td::uint64 bits) const;
+  td::RefInt256 compute_fwd_fees256(td::uint64 cells, td::uint64 bits) const;
   std::pair<td::uint64, td::uint64> compute_fwd_ihr_fees(td::uint64 cells, td::uint64 bits,
                                                          bool ihr_disabled = false) const;
   MsgPrices() = default;
@@ -374,6 +379,22 @@ struct MsgPrices {
   td::RefInt256 get_first_part(td::RefInt256 total) const;
   td::uint64 get_first_part(td::uint64 total) const;
   td::RefInt256 get_next_part(td::RefInt256 total) const;
+};
+
+struct SizeLimitsConfig {
+  // Default values are used when not present in global config
+  struct ExtMsgLimits {
+    td::uint32 max_size = 65535;
+    td::uint16 max_depth = 512;
+  };
+  td::uint32 max_msg_bits = 1 << 21;
+  td::uint32 max_msg_cells = 1 << 13;
+  td::uint32 max_library_cells = 1000;
+  td::uint16 max_vm_data_depth = 512;
+  ExtMsgLimits ext_msg_limits;
+  td::uint32 max_acc_state_cells = 1 << 16;
+  td::uint32 max_acc_state_bits = (1 << 16) * 1023;
+  td::uint32 max_acc_public_libraries = 256;
 };
 
 struct CatchainValidatorsConfig {
@@ -402,6 +423,13 @@ struct WorkchainInfo : public td::CntObject {
   ton::RootHash zerostate_root_hash;
   ton::FileHash zerostate_file_hash;
   int min_addr_len, max_addr_len, addr_len_step;
+
+  // Default values are used when split_merge_timings is not set in config
+  unsigned split_merge_delay = 100;       // prepare (delay) split/merge for 100 seconds
+  unsigned split_merge_interval = 100;    // split/merge is enabled during 60 second interval
+  unsigned min_split_merge_interval = 30; // split/merge interval must be at least 30 seconds
+  unsigned max_split_merge_delay = 1000;  // end of split/merge interval must be at most 1000 seconds in the future
+
   bool is_valid() const {
     return workchain != ton::workchainInvalid;
   }
@@ -480,6 +508,22 @@ class ShardConfig {
   bool do_update_shard_info(Ref<McShardHash> new_info);
   bool do_update_shard_info2(Ref<McShardHash> new_info1, Ref<McShardHash> new_info2);
   bool set_shard_info(ton::ShardIdFull shard, Ref<vm::Cell> value);
+};
+
+struct BurningConfig {
+  td::optional<td::Bits256> blackhole_addr;
+  td::uint32 fee_burn_num = 0, fee_burn_denom = 1;
+
+  td::RefInt256 calculate_burned_fees(const td::RefInt256& x) const {
+    if (x.is_null()) {
+      return x;
+    }
+    return x * fee_burn_num / td::make_refint(fee_burn_denom);
+  }
+
+  CurrencyCollection calculate_burned_fees(const CurrencyCollection& x) const {
+    return CurrencyCollection{calculate_burned_fees(x.grams)};
+  }
 };
 
 class Config {
@@ -565,9 +609,11 @@ class Config {
   bool is_special_smartcontract(const ton::StdSmcAddress& addr) const;
   static td::Result<std::unique_ptr<ValidatorSet>> unpack_validator_set(Ref<vm::Cell> valset_root);
   td::Result<std::vector<StoragePrices>> get_storage_prices() const;
+  static td::Result<StoragePrices> do_get_one_storage_prices(vm::CellSlice cs);
   td::Result<GasLimitsPrices> get_gas_limits_prices(bool is_masterchain = false) const;
-  static td::Result<GasLimitsPrices> do_get_gas_limits_prices(td::Ref<vm::Cell> cell, int id);
+  static td::Result<GasLimitsPrices> do_get_gas_limits_prices(vm::CellSlice cs, int id);
   td::Result<MsgPrices> get_msg_prices(bool is_masterchain = false) const;
+  static td::Result<MsgPrices> do_get_msg_prices(vm::CellSlice cs, int id);
   static CatchainValidatorsConfig unpack_catchain_validators_config(Ref<vm::Cell> cell);
   CatchainValidatorsConfig get_catchain_validators_config() const;
   td::Status visit_validator_params() const;
@@ -593,6 +639,11 @@ class Config {
   std::vector<ton::ValidatorDescr> compute_validator_set(ton::ShardIdFull shard, ton::UnixTime time,
                                                          ton::CatchainSeqno cc_seqno) const;
   std::vector<ton::ValidatorDescr> compute_total_validator_set(int next) const;
+  td::Result<SizeLimitsConfig> get_size_limits_config() const;
+  static td::Result<SizeLimitsConfig> do_get_size_limits_config(td::Ref<vm::CellSlice> cs);
+  std::unique_ptr<vm::Dictionary> get_suspended_addresses(ton::UnixTime now) const;
+  BurningConfig get_burning_config() const;
+  td::Ref<vm::Tuple> get_unpacked_config_tuple(ton::UnixTime now) const;
   static std::vector<ton::ValidatorDescr> do_compute_validator_set(const block::CatchainValidatorsConfig& ccv_conf,
                                                                    ton::ShardIdFull shard,
                                                                    const block::ValidatorSet& vset, ton::UnixTime time,
@@ -608,7 +659,6 @@ class Config {
   static td::Result<std::vector<int>> unpack_param_dict(vm::Dictionary& dict);
   static td::Result<std::vector<int>> unpack_param_dict(Ref<vm::Cell> dict_root);
 
- protected:
   Config(int _mode) : mode(_mode) {
     config_addr.set_zero();
   }
@@ -698,6 +748,7 @@ class ConfigInfo : public Config, public ShardConfig {
                                                             ton::CatchainSeqno* cc_seqno_delta = nullptr) const;
   std::vector<ton::ValidatorDescr> compute_validator_set_cc(ton::ShardIdFull shard, ton::UnixTime time,
                                                             ton::CatchainSeqno* cc_seqno_delta = nullptr) const;
+  td::Result<Ref<vm::Tuple>> get_prev_blocks_info() const;
   static td::Result<std::unique_ptr<ConfigInfo>> extract_config(std::shared_ptr<vm::StaticBagOfCellsDb> static_boc,
                                                                 int mode = 0);
   static td::Result<std::unique_ptr<ConfigInfo>> extract_config(Ref<vm::Cell> mc_state_root, int mode = 0);

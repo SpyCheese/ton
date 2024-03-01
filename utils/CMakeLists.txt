@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 if (NOT OPENSSL_FOUND)
   find_package(OpenSSL REQUIRED)
@@ -19,5 +19,10 @@ add_executable(pack-viewer pack-viewer.cpp )
 target_link_libraries(pack-viewer tl_api ton_crypto keys validator tddb)
 target_include_directories(pack-viewer PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/..)
+
+add_executable(opcode-timing opcode-timing.cpp )
+target_link_libraries(opcode-timing ton_crypto)
+target_include_directories(pack-viewer PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/..)
 
 install(TARGETS generate-random-id RUNTIME DESTINATION bin)
