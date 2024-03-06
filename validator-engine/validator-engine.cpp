@@ -58,6 +58,7 @@
 #include "memprof/memprof.h"
 
 #include "dht/dht.hpp"
+#include "validator/impl/liteserver.hpp"
 
 #if TD_DARWIN || TD_LINUX
 #include <unistd.h>
@@ -3816,6 +3817,9 @@ int main(int argc, char *argv[]) {
   p.add_option('\0', "enable-precompiled-smc",
                "enable exectuion of precompiled contracts (experimental, disabled by default)",
                []() { block::precompiled::set_precompiled_execution_enabled(true); });
+  p.add_option('\0', "ls-dump",
+               "dump all liteserver queries to the specified directory",
+               [](td::Slice s) { ton::validator::liteserver_dump_path = s.str(); });
   auto S = p.run(argc, argv);
   if (S.is_error()) {
     LOG(ERROR) << "failed to parse options: " << S.move_as_error();

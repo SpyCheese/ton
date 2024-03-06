@@ -42,12 +42,64 @@
 #include "signature-set.hpp"
 #include "fabric.h"
 #include <ctime>
+#include "td/utils/port/path.h"
 
 namespace ton {
 
 namespace validator {
 using td::Ref;
 using namespace std::literals::string_literals;
+
+std::string liteserver_dump_path = "";
+
+class QueryDumper : public td::actor::Actor {
+ public:
+  void start_up() override {
+    td::mkpath(liteserver_dump_path + "/").ensure();
+  }
+
+  void dump(td::BufferSlice query, td::BufferSlice response) {
+    open_file();
+    td::uint32 sizes[2] = {(td::uint32)query.size(), (td::uint32)response.size()};
+    CHECK(fd_.write(td::Slice((td::uint8*)sizes, 8)).move_as_ok() == 8);
+    for (td::Slice slice : {query.as_slice(), response.as_slice()}) {
+      while (slice.size() != 0) {
+        auto x = fd_.write(slice).move_as_ok();
+        CHECK(x > 0);
+        slice.remove_prefix(x);
+      }
+    }
+  }
+
+  static td::actor::ActorId<QueryDumper> get() {
+    static td::actor::ActorOwn<QueryDumper> actor = td::actor::create_actor<QueryDumper>("ls-dump");
+    return actor.get();
+  }
+
+ private:
+  td::uint32 cur_time_ = 0;
+  td::FileFd fd_;
+
+  void open_file() {
+    auto now = (td::uint32)td::Clocks::system();
+    if (cur_time_ != 0 && now < cur_time_ + TIME_STEP) {
+      return;
+    }
+    if (cur_time_ == 0) {
+      cur_time_ = (td::uint32)td::Clocks::system();
+    } else {
+      fd_.close();
+      while (now >= cur_time_ + TIME_STEP) {
+        cur_time_ += TIME_STEP;
+      }
+    }
+    fd_ = td::FileFd::open(PSTRING() << liteserver_dump_path << "/queries-" << cur_time_,
+                           td::FileFd::Create | td::FileFd::Write)
+              .move_as_ok();
+  }
+
+  const td::uint32 TIME_STEP = 60;
+};
 
 td::int32 get_tl_tag(td::Slice slice) {
   return slice.size() >= 4 ? td::as<td::int32>(slice.data()) : -1;
@@ -116,6 +168,10 @@ void LiteQuery::alarm() {
 bool LiteQuery::finish_query(td::BufferSlice result, bool skip_cache_update) {
   if (use_cache_ && !skip_cache_update) {
     td::actor::send_closure(cache_, &LiteServerCache::update, cache_key_, result.clone());
+  }
+  if (dump_query_ && !liteserver_dump_path.empty()) {
+    td::actor::send_closure(QueryDumper::get(), &QueryDumper::dump, serialize_tl_object(query_obj_, true),
+                            result.clone());
   }
   if (promise_) {
     promise_.set_result(std::move(result));
@@ -273,6 +329,7 @@ void LiteQuery::perform() {
 }
 
 void LiteQuery::perform_getTime() {
+  dump_query_ = false;
   LOG(INFO) << "started a getTime() liteserver query";
   td::int32 now = static_cast<td::int32>(std::time(nullptr));
   auto b = ton::create_serialize_tl_object<ton::lite_api::liteServer_currentTime>(now);
@@ -280,6 +337,7 @@ void LiteQuery::perform_getTime() {
 }
 
 void LiteQuery::perform_getVersion() {
+  dump_query_ = false;
   LOG(INFO) << "started a getVersion() liteserver query";
   td::int32 now = static_cast<td::int32>(std::time(nullptr));
   auto b = ton::create_serialize_tl_object<ton::lite_api::liteServer_version>(0, ls_version, ls_capabilities, now);
@@ -287,6 +345,7 @@ void LiteQuery::perform_getVersion() {
 }
 
 void LiteQuery::perform_getMasterchainInfo(int mode) {
+  dump_query_ = false;
   LOG(INFO) << "started a getMasterchainInfo(" << mode << ") liteserver query";
   if (mode > 0) {
     fatal_error("unsupported getMasterchainInfo mode");
@@ -543,6 +602,7 @@ void LiteQuery::continue_getZeroState(BlockIdExt blkid, td::BufferSlice state) {
 }
 
 void LiteQuery::perform_sendMessage(td::BufferSlice data) {
+  dump_query_ = false;
   LOG(INFO) << "started a sendMessage(<" << data.size() << " bytes>) liteserver query";
   auto copy = data.clone();
   td::actor::send_closure_later(
@@ -843,6 +903,7 @@ void LiteQuery::perform_getAccountState(BlockIdExt blkid, WorkchainId workchain,
 }
 
 void LiteQuery::continue_getAccountState_0(Ref<ton::validator::MasterchainState> mc_state, BlockIdExt blkid) {
+  ((lite_api::liteServer_getAccountState&)*query_obj_).id_ = create_tl_lite_block_id(blkid);
   LOG(INFO) << "obtained last masterchain block = " << blkid.to_str();
   base_blk_id_ = blkid;
   CHECK(mc_state.not_null());
@@ -898,6 +959,7 @@ void LiteQuery::perform_runSmcMethod(BlockIdExt blkid, WorkchainId workchain, St
 }
 
 void LiteQuery::perform_getLibraries(std::vector<td::Bits256> library_list) {
+  dump_query_ = false;
   LOG(INFO) << "started a getLibraries(<list of " << library_list.size() << " parameters>) liteserver query";
   if (library_list.size() > 16) {
     LOG(INFO) << "too many libraries requested, returning only first 16";
@@ -1760,6 +1822,7 @@ void LiteQuery::perform_getConfigParams(BlockIdExt blkid, int mode, std::vector<
     });
     request_mc_block_data_state(blkid);
   } else {
+    dump_query_ = false;
     // get configuration from previous key block
     load_prevKeyBlock(blkid, [this, blkid, mode, param_list = std::move(param_list)](
                                  td::Result<std::pair<BlockIdExt, Ref<BlockQ>>> res) mutable {
@@ -2200,6 +2263,7 @@ void LiteQuery::finish_listBlockTransactionsExt(int mode, int req_count) {
 
 void LiteQuery::perform_getBlockProof(ton::BlockIdExt from, ton::BlockIdExt to, int mode) {
   if (!(mode & 1)) {
+    dump_query_ = false;
     to.invalidate_clear();
   }
   LOG(INFO) << "performing a getBlockProof(" << mode << ", " << from.to_str() << ", " << to.to_str() << ") query";

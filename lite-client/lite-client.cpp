@@ -63,6 +63,7 @@
 #include "crypto/vm/utils.h"
 #include "crypto/common/util.h"
 #include "common/checksum.h"
+#include "td/utils/port/path.h"
 
 #if TD_DARWIN || TD_LINUX
 #include <unistd.h>
@@ -1124,6 +1125,9 @@ bool TestNode::do_parse_line() {
     return true;
   } else if (word == "help") {
     return show_help(get_line_tail());
+  } else if (word == "runlsdump") {
+    std::string filename;
+    return get_word_to(filename) && seekeoln() && run_ls_dump(filename);
   } else {
     td::TerminalIO::out() << "unknown command: " << word << " ; type `help` to get help" << '\n';
     return false;
@@ -4236,6 +4240,90 @@ td::Status TestNode::ValidatorLoadInfo::init_check_proofs() {
   } catch (vm::VmVirtError& err) {
     return err.as_status("virtualization error:");
   }
+}
+
+
+bool TestNode::run_ls_dump(std::string filename) {
+  std::vector<std::string> files;
+  auto r_stat = td::stat(filename);
+  if (r_stat.is_error()) {
+    return set_error(r_stat.move_as_error_prefix("cannot stat file: "));
+  }
+  auto stat = r_stat.move_as_ok();
+  if (stat.is_dir_) {
+    auto status = td::WalkPath::run(filename, [&](td::CSlice name, td::WalkPath::Type type) {
+      if (type == td::WalkPath::Type::NotDir) {
+        files.push_back(name.c_str());
+      }
+      return td::WalkPath::Action::Continue;
+    });
+    if (status.is_error()) {
+      return set_error(r_stat.move_as_error_prefix("cannot walk dir: "));
+    }
+    std::sort(files.begin(), files.end());
+  } else {
+    files = {filename};
+  }
+  std::vector<std::pair<td::BufferSlice, td::BufferSlice>> queries;
+  for (const auto &fname : files) {
+    LOG(INFO) << "Reading " << fname;
+    auto r_data = td::read_file(fname);
+    if (r_data.is_error()) {
+      return set_error(r_data.move_as_error_prefix("cannot read file: "));
+    }
+    td::BufferSlice data = r_data.move_as_ok();
+    td::Slice slice = data.as_slice();
+    while (slice.size() >= 8) {
+      td::uint32 sizes[2];
+      td::MutableSlice((td::uint8*)sizes, 8).copy_from(slice.substr(0, 8));
+      slice.remove_prefix(8);
+      if (slice.size() < (size_t)sizes[0] + sizes[1]) {
+        break;
+      }
+      td::BufferSlice s1{slice.substr(0, sizes[0])};
+      slice.remove_prefix(sizes[0]);
+      td::BufferSlice s2{slice.substr(0, sizes[1])};
+      slice.remove_prefix(sizes[1]);
+      queries.emplace_back(std::move(s1), std::move(s2));
+    }
+  }
+  td::TerminalIO::out() << "Running " << queries.size() << " queries:" << std::endl;
+  run_ls_dump_cont(std::move(queries), 0, 0);
+  return true;
+}
+
+void TestNode::run_ls_dump_cont(std::vector<std::pair<td::BufferSlice, td::BufferSlice>> queries, size_t idx,
+                                size_t errs) {
+  if (idx >= queries.size()) {
+    td::TerminalIO::out() << "Done running " << queries.size() << " queries: " << errs << " errors" << std::endl;
+    return;
+  }
+  td::BufferSlice query = std::move(queries[idx].first);
+  td::BufferSlice expected_response = std::move(queries[idx].second);
+  int qid = query.size() < 4 ? 0 : *(int*)query.data();
+  std::string qname = ton::lite_query_name_by_id(qid);
+
+  envelope_send_query(
+      std::move(query),
+      [=, Self = actor_id(this), queries = std::move(queries),
+       expected_response = std::move(expected_response)](td::Result<td::BufferSlice> R) mutable -> void {
+        td::StringBuilder sb;
+        sb << "#" << idx + 1 << "/" << queries.size() << " " << qname << " : ";
+        if (R.is_error()) {
+          ++errs;
+          sb << "Error: " << R.error().message() << "";
+        } else {
+          auto response = R.move_as_ok();
+          if (response != expected_response) {
+            ++errs;
+            sb << "Error: unexpected response";
+          } else {
+            sb << "OK";
+          }
+        }
+        td::TerminalIO::out() << sb.as_cslice() << std::endl;
+        td::actor::send_closure(Self, &TestNode::run_ls_dump_cont, std::move(queries), idx + 1, errs);
+      });
 }
 
 int main(int argc, char* argv[]) {

@@ -358,6 +358,9 @@ class TestNode : public td::actor::Actor {
   }
   static const tlb::TypenameLookup& get_tlb_dict();
 
+  bool run_ls_dump(std::string filename);
+  void run_ls_dump_cont(std::vector<std::pair<td::BufferSlice, td::BufferSlice>> queries, size_t idx, size_t errs);
+
  public:
   void conn_ready() {
     LOG(ERROR) << "conn ready";

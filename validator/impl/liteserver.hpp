@@ -47,6 +47,8 @@ class LiteQuery : public td::actor::Actor {
   bool use_cache_{false};
   td::Bits256 cache_key_;
 
+  bool dump_query_ = true;
+
   int pending_{0};
   int mode_{0};
   WorkchainId acc_workchain_;
@@ -201,6 +203,8 @@ class LiteQuery : public td::actor::Actor {
   bool make_shard_info_proof(Ref<vm::Cell>& proof, BlockIdExt& blkid, AccountIdPrefixFull prefix);
   bool make_ancestor_block_proof(Ref<vm::Cell>& proof, Ref<vm::Cell> state_root, const BlockIdExt& old_blkid);
 };
+
+extern std::string liteserver_dump_path;
 
 }  // namespace validator
 }  // namespace ton
