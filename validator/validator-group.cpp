@@ -22,6 +22,7 @@
 #include "td/utils/overloaded.h"
 #include "common/delay.h"
 #include "ton/lite-tl.hpp"
+#include "td/utils/Random.h"
 
 namespace ton {
 
@@ -45,6 +46,15 @@ void ValidatorGroup::generate_block_candidate(td::uint32 round_id, td::Promise<B
   }
   cached_collated_block_ = std::make_shared<CachedCollatedBlock>();
   cached_collated_block_->promises.push_back(std::move(promise));
+
+  double x = opts_->get_bench_duplicate_collate_queries();
+  int bench_dup_cnt = (int)floor(x) + (td::Random::fast(0.0, 1.0) < x - floor(x) ? 1 : 0);
+  for (int i = 0; i < bench_dup_cnt; ++i) {
+    run_collate_query(shard_, min_ts_, min_masterchain_block_id_, prev_block_ids_,
+                      Ed25519_PublicKey{local_id_full_.ed25519_value().raw()}, validator_set_, manager_,
+                      td::Timestamp::in(10.0), [](td::Result<BlockCandidate>) {});
+  }
+
   run_collate_query(
       shard_, min_ts_, min_masterchain_block_id_, prev_block_ids_,
       Ed25519_PublicKey{local_id_full_.ed25519_value().raw()}, validator_set_, manager_, td::Timestamp::in(10.0),

@@ -66,6 +66,8 @@ set(VALIDATOR_HEADERS
   validator-group.hpp
   validator-options.hpp
   validator.h
+
+  bench/bench-simulate-serializer.h
 )
 set(VALIDATOR_SOURCE
   apply-block.cpp
@@ -88,6 +90,8 @@ set(VALIDATOR_SOURCE
 
   manager-init.cpp
   manager.cpp
+
+  bench/bench-simulate-serializer.cpp
 
   ${VALIDATOR_DB_SOURCE}
 

@@ -73,6 +73,7 @@
 #include "block-parse.h"
 #include "common/delay.h"
 #include "block/precompiled-smc/PrecompiledSmartContract.h"
+#include "validator/bench/bench-simulate-serializer.h"
 
 Config::Config() {
   out_port = 3278;
@@ -1369,6 +1370,7 @@ td::Status ValidatorEngine::load_global_config() {
   validator_options_.write().set_archive_preload_period(archive_preload_period_);
   validator_options_.write().set_disable_rocksdb_stats(disable_rocksdb_stats_);
   validator_options_.write().set_nonfinal_ls_queries_enabled(nonfinal_ls_queries_enabled_);
+  validator_options_.write().set_bench_duplicate_collate_queries(bench_duplicate_collate_queries_);
 
   std::vector<ton::BlockIdExt> h;
   for (auto &x : conf.validator_->hardforks_) {
@@ -1952,6 +1954,13 @@ void ValidatorEngine::started_full_node_masters() {
 
 void ValidatorEngine::started() {
   started_ = true;
+
+  if (bench_simulate_serializer_) {
+    td::actor::create_actor<ton::validator::BenchSimulateSerializer>(
+        "BenchSerializer", td::actor::actor_dynamic_cast<ton::validator::ValidatorManager>(validator_manager_.get()),
+        db_root_)
+        .release();
+  }
 }
 
 void ValidatorEngine::try_add_adnl_node(ton::PublicKeyHash key, AdnlCategory cat, td::Promise<td::Unit> promise) {
@@ -3974,6 +3983,17 @@ int main(int argc, char *argv[]) {
   });
   p.add_option('\0', "nonfinal-ls", "enable special LS queries to non-finalized blocks", [&]() {
     acts.push_back([&x]() { td::actor::send_closure(x, &ValidatorEngine::set_nonfinal_ls_queries_enabled); });
+  });
+  p.add_option('\0', "bench-simulate-serializer", "", [&]() {
+    acts.push_back([&x]() { td::actor::send_closure(x, &ValidatorEngine::set_bench_simulate_serializer); });
+  });
+  p.add_checked_option('\0', "bench-duplicate-collate-query", "", [&](td::Slice s) -> td::Status {
+    double v = td::to_double(s);
+    if (v < 0) {
+      return td::Status::Error("value should be non-negative");
+    }
+    acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_bench_duplicate_collate_queries, v); });
+    return td::Status::OK();
   });
   auto S = p.run(argc, argv);
   if (S.is_error()) {

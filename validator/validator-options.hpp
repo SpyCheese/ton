@@ -129,6 +129,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   bool nonfinal_ls_queries_enabled() const override {
     return nonfinal_ls_queries_enabled_;
   }
+  double get_bench_duplicate_collate_queries() const override {
+    return bench_duplicate_collate_queries_;
+  }
 
   void set_zero_block_id(BlockIdExt block_id) override {
     zero_block_id_ = block_id;
@@ -197,6 +200,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_nonfinal_ls_queries_enabled(bool value) override {
     nonfinal_ls_queries_enabled_ = value;
   }
+  void set_bench_duplicate_collate_queries(double value) override {
+    bench_duplicate_collate_queries_ = value;
+  }
 
   ValidatorManagerOptionsImpl *make_copy() const override {
     return new ValidatorManagerOptionsImpl(*this);
@@ -244,6 +250,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   double archive_preload_period_ = 0.0;
   bool disable_rocksdb_stats_;
   bool nonfinal_ls_queries_enabled_ = false;
+  double bench_duplicate_collate_queries_ = 0.0;
 };
 
 }  // namespace validator

@@ -209,6 +209,8 @@ class ValidatorEngine : public td::actor::Actor {
   double archive_preload_period_ = 0.0;
   bool disable_rocksdb_stats_ = false;
   bool nonfinal_ls_queries_enabled_ = false;
+  bool bench_simulate_serializer_ = false;
+  double bench_duplicate_collate_queries_ = 0.0;
   bool read_config_ = false;
   bool started_keyring_ = false;
   bool started_ = false;
@@ -280,6 +282,12 @@ class ValidatorEngine : public td::actor::Actor {
   }
   void set_nonfinal_ls_queries_enabled() {
     nonfinal_ls_queries_enabled_ = true;
+  }
+  void set_bench_simulate_serializer() {
+    bench_simulate_serializer_ = true;
+  }
+  void set_bench_duplicate_collate_queries(double value) {
+    bench_duplicate_collate_queries_ = value;
   }
   void start_up() override;
   ValidatorEngine() {
