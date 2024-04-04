@@ -224,8 +224,16 @@ set(BLOCK_SOURCE
   block/check-proof.h
   block/output-queue-merger.h
   block/transaction.h
+
   block/precompiled-smc/PrecompiledSmartContract.h
   block/precompiled-smc/common.h
+
+  block/precompiled-smc/stablecoin/StablecoinWallet.h
+  block/precompiled-smc/stablecoin/StablecoinWallet.cpp
+  block/precompiled-smc/stablecoin/messages.h
+  block/precompiled-smc/stablecoin/jetton-utils.h
+  block/precompiled-smc/stablecoin/opcodes.h
+  block/precompiled-smc/stablecoin/gas.cpp
 )
 
 set(SMC_ENVELOPE_SOURCE

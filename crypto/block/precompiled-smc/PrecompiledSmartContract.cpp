@@ -15,6 +15,7 @@
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "common.h"
+#include "stablecoin/StablecoinWallet.h"
 #include <memory>
 #include "vm/memo.h"
 
@@ -156,7 +157,7 @@ std::unique_ptr<PrecompiledSmartContract> get_implementation(td::Bits256 code_ha
     std::map<td::Bits256, std::unique_ptr<PrecompiledSmartContract> (*)()> map;
 #define CONTRACT(hash, cls) \
   map[from_hex(hash)] = []() -> std::unique_ptr<PrecompiledSmartContract> { return std::make_unique<cls>(); };
-    // CONTRACT("CODE_HASH_HEX", ClassName);
+    CONTRACT("89468F02C78E570802E39979C8516FC38DF07EA76A48357E0536F2BA7B3EE37B", stablecoin::StablecoinWallet);
     return map;
   }();
   auto it = map.find(code_hash);
