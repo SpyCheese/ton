@@ -1,17 +1,15 @@
-## 2024.02 Update
+## 2024.04 Update
 
-1. Improvement of validator synchronisation:
-   * Better handling of block broadcasts -> faster sync
-   * Additional separate overlay among validators as second option for synchronisation
-2. Improvements in LS:
-   * c7 and library context is fully filled up for server-side rungetmethod
-   * Cache for runmethods and successfull external messages
-   * Logging of LS requests statistic
-3. Precise control of open files:
-   * almost instantaneous validator start
-   * `--max-archive-fd` option
-   * autoremoval of not used temp archive files
-   * `--archive-preload-period` option
-4. Preparatory (not enabled yet) code for addition on new TVM instructions for cheaper fee calculation onchain.
+1. Emulator: Single call optimized runGetMethod added
+2. Tonlib: a series of proof improvements, also breaking Change in `liteServer.getAllShardsInfo` method (see below)
+3. DB: usage statistics now collected, outdated persistent states are not serialized
+4. LS: fast `getOutMsgQueueSizes` added, preliminary support of non-final block requests
+5. Network: lz4 compression of block candidates (disabled by default).
+
+
+
+---
+
+* `liteServer.getAllShardsInfo` method was updated for better efficiency. Previously, field proof contained BoC with two roots: one for BlockState from block's root and another for ShardHashes from BlockState. Now, it returns a single-root proof BoC, specifically the merkle proof of ShardHashes directly from the block's root, streamlining data access and integrity. Checking of the proof requires to check that ShardHashes in the `data` correspond to ShardHashes from the block.
 
 
