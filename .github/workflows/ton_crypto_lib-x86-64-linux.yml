@@ -1,12 +1,16 @@
-name: MacOS TON build (portable, x86-64)
+name: Ubuntu ton_crypto_lib build (portable, x86-64)
 
 on: [push,workflow_dispatch,workflow_call]
 
 jobs:
   build:
-    runs-on: macos-12
+    runs-on: ubuntu-22.04
 
     steps:
+    - run: |
+        sudo apt update
+        sudo apt install -y apt-utils 
+
     - uses: actions/checkout@v3
       with:
         submodules: 'recursive'
@@ -18,20 +22,12 @@ jobs:
 
     - name: Build TON
       run: |
-        cp assembly/nix/build-macos-nix.sh .
-        chmod +x build-macos-nix.sh
-        ./build-macos-nix.sh -t
-
-    - name: Simple binaries test
-      run: |
-        sudo mv /nix/store /nix/store2
-        artifacts/validator-engine -V
-        artifacts/lite-client -V
-        artifacts/fift -V
-        artifacts/func -V
+        cp assembly/nix/build-toncryptolib-linux-x86-64-nix.sh .
+        chmod +x build-toncryptolib-linux-x86-64-nix.sh
+        ./build-toncryptolib-linux-x86-64-nix.sh
 
     - name: Upload artifacts
       uses: actions/upload-artifact@master
       with:
-        name: ton-x86_64-macos-binaries
+        name: ton_crypto_lib-x86_64-linux
         path: artifacts

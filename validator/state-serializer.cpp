@@ -21,6 +21,7 @@
 #include "adnl/utils.hpp"
 #include "ton/ton-io.hpp"
 #include "common/delay.h"
+#include "vm/large-boc-serializer.h"
 
 namespace ton {
 

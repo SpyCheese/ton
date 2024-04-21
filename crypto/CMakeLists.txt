@@ -20,7 +20,6 @@ set(TON_CRYPTO_CORE_SOURCE
   openssl/residue.cpp
   openssl/rand.cpp
   vm/boc.cpp
-  vm/large-boc-serializer.cpp
   tl/tlblib.cpp
 
   Ed25519.h
@@ -87,15 +86,7 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cellslice.h
 
   vm/db/StaticBagOfCellsDb.h
-  vm/db/StaticBagOfCellsDb.cpp
-
-  vm/Hasher.h
-  vm/Hasher.cpp
-
-  ellcurve/secp256k1.h
-  ellcurve/secp256k1.cpp
-  ellcurve/p256.h
-  ellcurve/p256.cpp)
+  vm/db/StaticBagOfCellsDb.cpp)
 
 set(TON_CRYPTO_SOURCE
   vm/stack.cpp
@@ -140,7 +131,18 @@ set(TON_CRYPTO_SOURCE
   vm/vmstate.h
   vm/utils.h
   vm/vm.h
-  vm/bls.h)
+  vm/bls.h
+
+  vm/Hasher.h
+  vm/Hasher.cpp
+
+  ellcurve/secp256k1.h
+  ellcurve/secp256k1.cpp
+  ellcurve/p256.h
+  ellcurve/p256.cpp
+
+  vm/large-boc-serializer.h
+  vm/large-boc-serializer.cpp)
 
 set(TON_DB_SOURCE
   vm/db/DynamicBagOfCellsDb.cpp
@@ -563,3 +565,55 @@ endif()
 install(TARGETS fift func create-state tlbc RUNTIME DESTINATION bin)
 install(DIRECTORY fift/lib/ DESTINATION lib/fift)
 install(DIRECTORY smartcont DESTINATION share/ton)
+
+string(REPLACE "-Wl,--exclude-libs,ALL" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
+add_library(ton_crypto_lib SHARED ${TLB_BLOCK_AUTO})
+if (MSVC)
+  set_target_properties(ton_crypto_lib PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+  target_link_libraries(ton_crypto_lib PUBLIC ton_crypto_core tdutils)
+  target_sources(ton_crypto_lib PUBLIC $<TARGET_OBJECTS:ton_crypto_core> $<TARGET_OBJECTS:tdutils>)
+elseif (APPLE)
+  target_link_libraries(ton_crypto_lib PUBLIC "-force_load" ton_crypto_core)
+  target_link_libraries(ton_crypto_lib PUBLIC "-force_load" tdutils)
+else()
+  target_link_libraries(ton_crypto_lib PUBLIC -Wl,--whole-archive ton_crypto_core tdutils -Wl,--no-whole-archive)
+endif()
+
+install(TARGETS ton_crypto_lib LIBRARY DESTINATION lib)
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/crypto/block/
+  DESTINATION include/crypto/block
+  FILES_MATCHING PATTERN "block-auto.h")
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/crypto/common/
+  DESTINATION include/crypto/common
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/crypto/tl/
+  DESTINATION include/crypto/tl
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/crypto/vm/
+  DESTINATION include/crypto/vm
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+  PATTERN "db" EXCLUDE
+  PATTERN "atom.h" EXCLUDE
+  PATTERN "box.hpp" EXCLUDE
+  PATTERN "continuation.h" EXCLUDE
+  PATTERN "cp0.h" EXCLUDE
+  PATTERN "dispatch.h" EXCLUDE
+  PATTERN "fmt.hpp" EXCLUDE
+  PATTERN "Hasher.h" EXCLUDE
+  PATTERN "log.h" EXCLUDE
+  PATTERN "memo.h" EXCLUDE
+  PATTERN "opctable.h" EXCLUDE
+  PATTERN "stack.hpp" EXCLUDE
+  PATTERN "utils.h" EXCLUDE
+  PATTERN "vm.h" EXCLUDE
+  PATTERN "bls.h" EXCLUDE
+  PATTERN "*ops.h" EXCLUDE)
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/common/
+  DESTINATION include/common
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/tdutils/
+  DESTINATION include/tdutils
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+install(DIRECTORY ${CMAKE_BINARY_DIR}/tdutils/
+  DESTINATION include/tdutils
+  FILES_MATCHING PATTERN "config.h")

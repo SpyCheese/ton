@@ -15,7 +15,7 @@
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include <map>
-#include "vm/boc.h"
+#include "vm/large-boc-serializer.h"
 #include "vm/boc-writers.h"
 #include "vm/cellslice.h"
 #include "td/utils/misc.h"

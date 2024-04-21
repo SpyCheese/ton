@@ -1,4 +1,4 @@
-name: Windows TON build (portable, x86-64)
+name: Windows ton_crypto_lib build (portable, x86-64)
 
 on: [push,workflow_dispatch,workflow_call]
 
@@ -23,12 +23,12 @@ jobs:
 
       - name: Build TON
         run: |
-          copy assembly\native\build-windows-github.bat .
-          copy assembly\native\build-windows.bat .
-          build-windows-github.bat Enterprise
+          copy assembly\native\build-toncryptolib-windows-github.bat .
+          copy assembly\native\build-toncryptolib-windows.bat .
+          build-toncryptolib-windows-github.bat Enterprise
 
       - name: Upload artifacts
         uses: actions/upload-artifact@master
         with:
-          name: ton-win-binaries
+          name: toncryptolib-win
           path: artifacts
