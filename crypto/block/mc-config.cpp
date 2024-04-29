@@ -2343,4 +2343,72 @@ td::optional<PrecompiledContractsConfig::Contract> PrecompiledContractsConfig::g
   return c;
 }
 
+bool check_one_config_param(Ref<vm::CellSlice> cs_ref, td::ConstBitPtr key, td::ConstBitPtr addr, bool relax_par0) {
+  if (cs_ref->size_ext() != 0x10000) {
+    return false;
+  }
+  Ref<vm::Cell> cell = cs_ref->prefetch_ref();
+  int idx = (int)key.get_int(32);
+  if (!idx) {
+    auto cs = load_cell_slice(std::move(cell));
+    return cs.size_ext() == 256 && (relax_par0 || cs.fetch_bits(256) == addr);
+  } else if (idx < 0) {
+    return true;
+  }
+  bool ok = block::gen::ConfigParam{idx}.validate_ref(1024, std::move(cell));
+  if (!ok) {
+    LOG(ERROR) << "configuration parameter #" << idx << " is invalid";
+  }
+  return ok;
+}
+
+const int mandatory_config_params[] = {18, 20, 21, 22, 23, 24, 25, 28, 34};
+
+
+bool valid_config_data(Ref<vm::Cell> cell, const td::BitArray<256>& addr, bool catch_errors, bool relax_par0,
+                       Ref<vm::Cell> old_mparams) {
+  using namespace std::placeholders;
+  if (cell.is_null()) {
+    return false;
+  }
+  if (catch_errors) {
+    try {
+      return valid_config_data(std::move(cell), addr, false, relax_par0, std::move(old_mparams));
+    } catch (vm::VmError&) {
+      return false;
+    }
+  }
+  vm::Dictionary dict{std::move(cell), 32};
+  if (!dict.check_for_each(std::bind(check_one_config_param, _1, _2, addr.cbits(), relax_par0))) {
+    return false;
+  }
+  for (int x : mandatory_config_params) {
+    if (!dict.int_key_exists(x)) {
+      LOG(ERROR) << "mandatory configuration parameter #" << x << " is missing";
+      return false;
+    }
+  }
+  return config_params_present(dict, dict.lookup_ref(td::BitArray<32>{9})) &&
+         config_params_present(dict, std::move(old_mparams));
+}
+
+bool config_params_present(vm::Dictionary& dict, Ref<vm::Cell> param_dict_root) {
+  auto res = block::Config::unpack_param_dict(std::move(param_dict_root));
+  if (res.is_error()) {
+    LOG(ERROR)
+        << "invalid mandatory parameters dictionary while checking existence of all mandatory configuration parameters";
+    return false;
+  }
+  for (int x : res.move_as_ok()) {
+    // LOG(DEBUG) << "checking whether mandatory configuration parameter #" << x << " exists";
+    if (!dict.int_key_exists(x)) {
+      LOG(ERROR) << "configuration parameter #" << x
+                 << " (declared as mandatory in configuration parameter #9) is missing";
+      return false;
+    }
+  }
+  // LOG(DEBUG) << "all mandatory configuration parameters present";
+  return true;
+}
+
 }  // namespace block

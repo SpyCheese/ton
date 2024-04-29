@@ -22,7 +22,7 @@
 #include "vm/cellslice.h"
 #include "vm/dict.h"
 #include "vm/boc.h"
-#include "vm/stack.hpp"
+#include "vm/excno.hpp"
 #include <ostream>
 #include "tl/tlblib.hpp"
 #include "td/utils/bits.h"
@@ -682,10 +682,6 @@ bool fetch_CurrencyCollection(vm::CellSlice& cs, td::RefInt256& value, Ref<vm::C
 bool unpack_CurrencyCollection(Ref<vm::CellSlice> csr, td::RefInt256& value, Ref<vm::Cell>& extra);
 
 bool valid_library_collection(Ref<vm::Cell> cell, bool catch_errors = true);
-
-bool valid_config_data(Ref<vm::Cell> cell, const td::BitArray<256>& addr, bool catch_errors = true,
-                       bool relax_par0 = false, Ref<vm::Cell> old_mparams = {});
-bool config_params_present(vm::Dictionary& dict, Ref<vm::Cell> param_dict_root);
 
 bool add_extra_currency(Ref<vm::Cell> extra1, Ref<vm::Cell> extra2, Ref<vm::Cell>& res);
 bool sub_extra_currency(Ref<vm::Cell> extra1, Ref<vm::Cell> extra2, Ref<vm::Cell>& res);

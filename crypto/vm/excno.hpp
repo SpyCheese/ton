@@ -84,6 +84,20 @@ class VmError {
   td::Status as_status(T pfx) const {
     return td::Status::Error(PSLICE() << pfx << get_msg());
   }
+
+ private:
+  static const char* get_exception_msg(Excno exc_no) {
+    static const char* exception_messages[(int)(Excno::total)] = {
+        "normal termination",   "alternative termination", "stack underflow",  "stack overflow", "integer overflow",
+        "integer out of range", "invalid opcode",          "type check error", "cell overflow",  "cell underflow",
+        "dictionary error",     "unknown error",           "fatal error"};
+
+    if (exc_no >= Excno::none && exc_no < Excno::total) {
+      return exception_messages[static_cast<int>(exc_no)];
+    } else {
+      return "unknown vm exception";
+    }
+  }
 };
 
 struct VmNoGas {

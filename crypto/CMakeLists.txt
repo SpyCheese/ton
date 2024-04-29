@@ -567,7 +567,7 @@ install(DIRECTORY fift/lib/ DESTINATION lib/fift)
 install(DIRECTORY smartcont DESTINATION share/ton)
 
 string(REPLACE "-Wl,--exclude-libs,ALL" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
-add_library(ton_crypto_lib SHARED ${TLB_BLOCK_AUTO})
+add_library(ton_crypto_lib SHARED ${TLB_BLOCK_AUTO} block/block-parse.cpp block/block.cpp)
 if (MSVC)
   set_target_properties(ton_crypto_lib PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
   target_link_libraries(ton_crypto_lib PUBLIC ton_crypto_core tdutils)
@@ -582,7 +582,10 @@ endif()
 install(TARGETS ton_crypto_lib LIBRARY DESTINATION lib)
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/crypto/block/
   DESTINATION include/crypto/block
-  FILES_MATCHING PATTERN "block-auto.h")
+  FILES_MATCHING
+  PATTERN "block-auto.h"
+  PATTERN "block-parse.h"
+  PATTERN "block.h")
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/crypto/common/
   DESTINATION include/crypto/common
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
@@ -603,7 +606,6 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/crypto/vm/
   PATTERN "log.h" EXCLUDE
   PATTERN "memo.h" EXCLUDE
   PATTERN "opctable.h" EXCLUDE
-  PATTERN "stack.hpp" EXCLUDE
   PATTERN "utils.h" EXCLUDE
   PATTERN "vm.h" EXCLUDE
   PATTERN "bls.h" EXCLUDE
@@ -617,3 +619,6 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/tdutils/
 install(DIRECTORY ${CMAKE_BINARY_DIR}/tdutils/
   DESTINATION include/tdutils
   FILES_MATCHING PATTERN "config.h")
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/ton/
+  DESTINATION include/ton
+  FILES_MATCHING PATTERN "ton-types.h")

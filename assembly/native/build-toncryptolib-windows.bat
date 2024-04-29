@@ -169,16 +169,20 @@ mkdir artifacts\include
 
 copy build\crypto\ton_crypto_lib.dll artifacts\
 copy build\crypto\ton_crypto_lib.lib artifacts\
+mkdir artifacts\include\ton
 mkdir artifacts\include\crypto
 mkdir artifacts\include\crypto\block
 copy crypto\block\block-auto.h artifacts\include\crypto\block
+copy crypto\block\block-parse.h artifacts\include\crypto\block
+copy crypto\block\block.h artifacts\include\crypto\block
 xcopy /s /k /h /i crypto\common\*.h* artifacts\include\crypto\common
 xcopy /s /k /h /i crypto\tl\*.h* artifacts\include\crypto\tl
 xcopy /s /k /h /i crypto\vm\*.h* artifacts\include\crypto\vm
 cd artifacts\include\crypto\vm
-del atom.h cp0.h dispatch.h fmt.hpp Hasher.h log.h memo.h opctable.h stack.hpp utils.h vm.h bls.h *ops.h
+del atom.h cp0.h dispatch.h fmt.hpp Hasher.h log.h memo.h opctable.h utils.h vm.h bls.h *ops.h
 rmdir /s /q db
 cd ..\..\..\..
+copy ton\ton-types.h artifacts\include\ton
 xcopy /s /k /h /i common\*.h* artifacts\include\common
 xcopy /s /k /h /i tdutils\*.h* artifacts\include\tdutils
 copy build\tdutils\td\utils\config.h artifacts\include\tdutils\td\utils\

@@ -771,4 +771,8 @@ class ConfigInfo : public Config, public ShardConfig {
   void cleanup();
 };
 
+bool valid_config_data(Ref<vm::Cell> cell, const td::BitArray<256>& addr, bool catch_errors = true,
+                       bool relax_par0 = false, Ref<vm::Cell> old_mparams = {});
+bool config_params_present(vm::Dictionary& dict, Ref<vm::Cell> param_dict_root);
+
 }  // namespace block

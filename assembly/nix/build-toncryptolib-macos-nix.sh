@@ -13,4 +13,5 @@ mkdir -p artifacts/include/
 cp ./result/lib/libton_crypto_lib.dylib artifacts/libton_crypto_lib.dylib
 cp -r ./result/include/crypto/ artifacts/include/crypto
 cp -r ./result/include/common/ artifacts/include/common
+cp -r ./result/include/ton/ artifacts/include/ton
 cp -r ./result/include/tdutils/ artifacts/include/tdutils
