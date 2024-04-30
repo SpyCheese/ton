@@ -52,6 +52,15 @@ int VERBOSITY_NAME(actor) = VERBOSITY_NAME(DEBUG) + 10;
 int VERBOSITY_NAME(sqlite) = VERBOSITY_NAME(DEBUG) + 10;
 
 LogOptions log_options;
+LogOptions& get_log_options() {
+  return log_options;
+}
+int set_verbosity_level(int level) {
+  return log_options.set_level(level);
+}
+int get_verbosity_level() {
+  return log_options.get_level();
+}
 
 TD_THREAD_LOCAL const char *Logger::tag_ = nullptr;
 TD_THREAD_LOCAL const char *Logger::tag2_ = nullptr;
@@ -265,6 +274,9 @@ static DefaultLog default_log;
 
 LogInterface *const default_log_interface = &default_log;
 LogInterface *log_interface = default_log_interface;
+LogInterface* get_log_interface() {
+  return log_interface;
+}
 
 static OnFatalErrorCallback on_fatal_error_callback = nullptr;
 

@@ -29,8 +29,8 @@
 
 namespace vm {
 struct VmLog {
-  td::LogInterface *log_interface{td::log_interface};
-  td::LogOptions log_options{td::log_options};
+  td::LogInterface *log_interface{td::get_log_interface()};
+  td::LogOptions log_options{td::get_log_options()};
   enum { DumpStack = 2, ExecLocation = 4, GasRemaining = 8, DumpStackVerbose = 16 };
   int log_mask{1};
   static VmLog Null() {
@@ -43,12 +43,12 @@ struct VmLog {
 
 template <class State>
 td::LogInterface &get_log_interface(State *st) {
-  return st ? *st->get_log().log_interface : *::td::log_interface;
+  return st ? *st->get_log().log_interface : *::td::get_log_interface();
 }
 
 template <class State>
 auto get_log_options(State *st) {
-  return st ? st->get_log().log_options : ::td::log_options;
+  return st ? st->get_log().log_options : ::td::get_log_options();
 }
 
 template <class State>

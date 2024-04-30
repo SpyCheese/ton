@@ -69,7 +69,7 @@
       : ::td::detail::Voidify() & LOGGER(interface, options, runtime_level, comment)
 
 #define LOG_IMPL(strip_level, level, condition, comment) \
-  LOG_IMPL_FULL(*::td::log_interface, ::td::log_options, strip_level, VERBOSITY_NAME(level), condition, comment)
+  LOG_IMPL_FULL(*::td::get_log_interface(), ::td::get_log_options(), strip_level, VERBOSITY_NAME(level), condition, comment)
 
 #define LOG(level) LOG_IMPL(level, level, true, ::td::Slice())
 #define LOG_IF(level, condition) LOG_IMPL(level, level, condition, #condition)
@@ -77,7 +77,7 @@
 #define VLOG(level) LOG_IMPL(DEBUG, level, true, TD_DEFINE_STR(level))
 #define VLOG_IF(level, condition) LOG_IMPL(DEBUG, level, condition, TD_DEFINE_STR(level) " " #condition)
 
-#define LOG_ROTATE() ::td::log_interface->rotate()
+#define LOG_ROTATE() ::td::get_log_interface()->rotate()
 
 #define LOG_TAG ::td::Logger::tag_
 #define LOG_TAG2 ::td::Logger::tag2_
@@ -164,13 +164,9 @@ struct LogOptions {
   }
 };
 
-extern LogOptions log_options;
-inline int set_verbosity_level(int level) {
-  return log_options.set_level(level);
-}
-inline int get_verbosity_level() {
-  return log_options.get_level();
-}
+LogOptions& get_log_options();
+int set_verbosity_level(int level);
+int get_verbosity_level();
 
 class ScopedDisableLog {
  public:
@@ -212,6 +208,7 @@ class NullLog : public LogInterface {
 
 extern LogInterface *const default_log_interface;
 extern LogInterface *log_interface;
+LogInterface* get_log_interface();
 
 using OnFatalErrorCallback = void (*)(CSlice message);
 void set_log_fatal_error_callback(OnFatalErrorCallback callback);

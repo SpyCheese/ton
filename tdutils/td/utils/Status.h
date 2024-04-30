@@ -415,11 +415,9 @@ class Status {
     tmp.error_type = error_type;
 
     if (error_code < MIN_ERROR_CODE) {
-      LOG(ERROR) << "Error code value is altered from " << error_code;
       error_code = MIN_ERROR_CODE;
     }
     if (error_code > MAX_ERROR_CODE) {
-      LOG(ERROR) << "Error code value is altered from " << error_code;
       error_code = MAX_ERROR_CODE;
     }
 
@@ -556,19 +554,19 @@ class Result {
     return status_.move_as_error_suffix(suffix);
   }
   const T &ok() const {
-    LOG_CHECK(status_.is_ok()) << status_;
+    status_.ensure();
     return value_;
   }
   T &ok_ref() {
-    LOG_CHECK(status_.is_ok()) << status_;
+    status_.ensure();
     return value_;
   }
   const T &ok_ref() const {
-    LOG_CHECK(status_.is_ok()) << status_;
+    status_.ensure();
     return value_;
   }
   T move_as_ok() {
-    LOG_CHECK(status_.is_ok()) << status_;
+    status_.ensure();
     return std::move(value_);
   }
 
