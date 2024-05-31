@@ -120,7 +120,16 @@ void OverlayManager::receive_message(adnl::AdnlNodeIdShort src, adnl::AdnlNodeId
   auto R = fetch_tl_prefix<ton_api::overlay_message>(data, true);
 
   if (R.is_error()) {
-    VLOG(OVERLAY_WARNING) << this << ": can not parse overlay message: " << R.move_as_error();
+    td::actor::send_closure(adnl_, &adnl::Adnl::get_conn_ip_str, dst, src,
+                            [data = std::move(data), src, err = R.move_as_error()](td::Result<std::string> R) {
+                              std::string addr = R.is_ok() ? R.move_as_ok() : "unknown";
+                              size_t size = data.size();
+                              VLOG(OVERLAY_WARNING)
+                                  << "can not parse overlay message from " << src << " (" << addr
+                                  << "), size=" << data.size()
+                                  << ", prefix=" << buffer_to_hex(data.as_slice().substr(0, std::min<size_t>(size, 12)))
+                                  << ": " << err;
+                            });
     return;
   }
 
@@ -146,8 +155,16 @@ void OverlayManager::receive_query(adnl::AdnlNodeIdShort src, adnl::AdnlNodeIdSh
   auto R = fetch_tl_prefix<ton_api::overlay_query>(data, true);
 
   if (R.is_error()) {
-    VLOG(OVERLAY_WARNING) << this << ": can not parse overlay query [" << src << "->" << dst
-                          << "]: " << R.move_as_error();
+    td::actor::send_closure(adnl_, &adnl::Adnl::get_conn_ip_str, dst, src,
+                            [data = std::move(data), src, err = R.move_as_error()](td::Result<std::string> R) {
+                              std::string addr = R.is_ok() ? R.move_as_ok() : "unknown";
+                              size_t size = data.size();
+                              VLOG(OVERLAY_WARNING)
+                                  << "can not parse overlay query from " << src << " (" << addr
+                                  << "), size=" << data.size()
+                                  << ", prefix=" << buffer_to_hex(data.as_slice().substr(0, std::min<size_t>(size, 12)))
+                                  << ": " << err;
+                            });
     promise.set_error(td::Status::Error(ErrorCode::protoviolation, "bad overlay query header"));
     return;
   }
