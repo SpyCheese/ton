@@ -42,6 +42,7 @@
 #include "td/utils/JsonBuilder.h"
 
 #include "common/delay.h"
+#include "td/utils/filesystem.h"
 
 #include "validator/stats-merger.h"
 
@@ -2713,13 +2714,18 @@ void ValidatorManagerImpl::log_validator_session_stats(BlockIdExt block_id,
   for (const auto &round : stats.rounds) {
     std::vector<tl_object_ptr<ton_api::validatorSession_statsProducer>> producers;
     for (const auto &producer : round.producers) {
+      BlockIdExt cur_block_id{block_id.id, producer.root_hash, producer.file_hash};
+      auto it = recorded_block_stats_.find(cur_block_id);
       producers.push_back(create_tl_object<ton_api::validatorSession_statsProducer>(
-          producer.id.bits256_value(), producer.candidate_id, producer.block_status, producer.comment,
-          producer.block_timestamp, producer.is_accepted, producer.is_ours, producer.got_submit_at,
-          producer.collation_time, producer.collated_at, producer.collation_cached, producer.validation_time,
-          producer.validated_at, producer.validation_cached, producer.gen_utime, producer.approved_weight,
-          producer.approved_33pct_at, producer.approved_66pct_at, producer.signed_weight, producer.signed_33pct_at,
-          producer.signed_66pct_at, producer.serialize_time, producer.deserialize_time, producer.serialized_size));
+          producer.id.bits256_value(), producer.candidate_id, producer.block_status, producer.root_hash,
+          producer.file_hash, producer.comment, producer.block_timestamp, producer.is_accepted, producer.is_ours,
+          producer.got_submit_at, producer.collation_time, producer.collated_at, producer.collation_cached,
+          it == recorded_block_stats_.end() ? -1.0 : it->second.collator_work_time_, producer.validation_time,
+          producer.validated_at, producer.validation_cached,
+          it == recorded_block_stats_.end() ? -1.0 : it->second.validator_work_time_, producer.gen_utime,
+          producer.approved_weight, producer.approved_33pct_at, producer.approved_66pct_at, producer.signed_weight,
+          producer.signed_33pct_at, producer.signed_66pct_at, producer.serialize_time, producer.deserialize_time,
+          producer.serialized_size));
     }
     rounds.push_back(create_tl_object<ton_api::validatorSession_statsRound>(round.timestamp, std::move(producers)));
   }
@@ -3031,6 +3037,43 @@ td::actor::ActorOwn<ValidatorManagerInterface> ValidatorManagerFactory::create(
     td::actor::ActorId<overlay::Overlays> overlays) {
   return td::actor::create_actor<validator::ValidatorManagerImpl>("manager", std::move(opts), db_root, keyring, adnl,
                                                                   rldp, overlays);
+}
+
+void ValidatorManagerImpl::record_collate_query_stats(BlockIdExt block_id, double work_time,
+                                                      td::optional<BlockCandidate> dump_candidate) {
+  new_block_stats_record(block_id).collator_work_time_ = work_time;
+  if (dump_candidate) {
+    LOG(WARNING) << "Dumping block candidate " << block_id.to_str();
+    td::mkpath(db_root_ + "/dumped-candidates/").ensure();
+    td::write_file(PSTRING() << db_root_ << "/dumped-candidates/" << (td::uint32)td::Clocks::system() << "_"
+                             << block_id.to_str() << "_long-collate=" << work_time,
+                   dump_candidate.value().data)
+        .ensure();
+  }
+}
+
+void ValidatorManagerImpl::record_validate_query_stats(BlockIdExt block_id, double work_time,
+                                                       td::optional<BlockCandidate> dump_candidate) {
+  new_block_stats_record(block_id).validator_work_time_ = work_time;
+  if (dump_candidate) {
+    LOG(WARNING) << "Dumping block candidate " << block_id.to_str();
+    td::mkpath(db_root_ + "/dumped-candidates/").ensure();
+    td::write_file(PSTRING() << db_root_ << "/dumped-candidates/" << (td::uint32)td::Clocks::system() << "_"
+                             << block_id.to_str() << "_long-validate=" << work_time,
+                   dump_candidate.value().data)
+        .ensure();
+  }
+}
+
+ValidatorManagerImpl::RecordedBlockStats &ValidatorManagerImpl::new_block_stats_record(BlockIdExt block_id) {
+  if (!recorded_block_stats_.count(block_id)) {
+    recorded_block_stats_lru_.push(block_id);
+    if (recorded_block_stats_lru_.size() > 4096) {
+      recorded_block_stats_.erase(recorded_block_stats_lru_.front());
+      recorded_block_stats_lru_.pop();
+    }
+  }
+  return recorded_block_stats_[block_id];
 }
 
 }  // namespace validator

@@ -73,6 +73,8 @@
 #include "block-parse.h"
 #include "common/delay.h"
 #include "block/precompiled-smc/PrecompiledSmartContract.h"
+#include "collator-impl.h"
+#include "validate-query.hpp"
 
 Config::Config() {
   out_port = 3278;
@@ -3964,6 +3966,17 @@ int main(int argc, char *argv[]) {
           return td::Status::Error("sync-before should be non-negative");
         }
         acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_archive_preload_period, v); });
+        return td::Status::OK();
+      });
+  p.add_checked_option(
+      '\0', "dump-candidates-above", "dump block candidates if collation/validation takes longer than X seconds",
+      [&](td::Slice s) -> td::Status {
+        auto v = td::to_double(s);
+        if (v < 0) {
+          return td::Status::Error("dump-candidates-above should be non-negative");
+        }
+        ton::validator::Collator::set_dump_candidates_above(v);
+        ton::validator::ValidateQuery::set_dump_candidates_above(v);
         return td::Status::OK();
       });
   p.add_option('\0', "enable-precompiled-smc",

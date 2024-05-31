@@ -118,6 +118,7 @@ bool ValidateQuery::reject_query(std::string error, td::BufferSlice reason) {
   error = error_ctx() + error;
   LOG(ERROR) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
+    finalize_work_time();
     errorlog::ErrorLog::log(PSTRING() << "REJECT: aborting validation of block candidate for " << shard_.to_str()
                                       << " : " << error << ": data=" << block_candidate.id.file_hash.to_hex()
                                       << " collated_data=" << block_candidate.collated_file_hash.to_hex());
@@ -155,6 +156,7 @@ bool ValidateQuery::soft_reject_query(std::string error, td::BufferSlice reason)
   error = error_ctx() + error;
   LOG(ERROR) << "SOFT REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
+    finalize_work_time();
     errorlog::ErrorLog::log(PSTRING() << "SOFT REJECT: aborting validation of block candidate for " << shard_.to_str()
                                       << " : " << error << ": data=" << block_candidate.id.file_hash.to_hex()
                                       << " collated_data=" << block_candidate.collated_file_hash.to_hex());
@@ -177,6 +179,7 @@ bool ValidateQuery::fatal_error(td::Status error) {
   error.ensure_error();
   LOG(ERROR) << "aborting validation of block candidate for " << shard_.to_str() << " : " << error.to_string();
   if (main_promise) {
+    finalize_work_time();
     auto c = error.code();
     if (c <= -667 && c >= -670) {
       errorlog::ErrorLog::log(PSTRING() << "FATAL ERROR: aborting validation of block candidate for " << shard_.to_str()
@@ -234,6 +237,7 @@ bool ValidateQuery::fatal_error(std::string err_msg, int err_code) {
  */
 void ValidateQuery::finish_query() {
   if (main_promise) {
+    finalize_work_time();
     LOG(WARNING) << "validate query done";
     main_promise.set_result(now_);
   }
@@ -6213,6 +6217,7 @@ bool ValidateQuery::try_validate() {
   if (pending) {
     return true;
   }
+  work_timer_ = td::Timer();
   try {
     if (!stage_) {
       LOG(WARNING) << "try_validate stage 0";
@@ -6242,6 +6247,8 @@ bool ValidateQuery::try_validate() {
       }
       stage_ = 1;
       if (pending) {
+        work_time_ += work_timer_.value().elapsed();
+        work_timer_ = {};
         return true;
       }
     }
@@ -6313,6 +6320,8 @@ bool ValidateQuery::try_validate() {
   } catch (vm::VmVirtError& err) {
     return fatal_error(-666, err.get_msg());
   }
+  work_time_ += work_timer_.value().elapsed();
+  work_timer_ = {};
   return save_candidate();
 }
 
@@ -6340,6 +6349,26 @@ bool ValidateQuery::save_candidate() {
  */
 void ValidateQuery::written_candidate() {
   finish_query();
+}
+
+static double dump_candidates_above = -1.0;
+
+void ValidateQuery::finalize_work_time() {
+  if (work_timer_) {
+    work_time_ += work_timer_.value().elapsed();
+    work_timer_ = {};
+  }
+  LOG(WARNING) << "Validate query work time = " << work_time_ << "s";
+  td::optional<BlockCandidate> dump_candidate;
+  if (dump_candidates_above >= 0.0 && work_time_ >= dump_candidates_above) {
+    dump_candidate = block_candidate.clone();
+  }
+  td::actor::send_closure(manager, &ValidatorManager::record_validate_query_stats, block_candidate.id, work_time_,
+                          std::move(dump_candidate));
+}
+
+void ValidateQuery::set_dump_candidates_above(double value) {
+  dump_candidates_above = value;
 }
 
 }  // namespace validator

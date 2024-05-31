@@ -51,6 +51,8 @@ static const td::uint32 MERGE_MAX_QUEUE_SIZE = 2047;
 static const td::uint32 SKIP_EXTERNALS_QUEUE_SIZE = 8000;
 static const int HIGH_PRIORITY_EXTERNAL = 10;  // don't skip high priority externals when queue is big
 
+static double dump_candidates_above = -1.0;
+
 #define DBG(__n) dbg(__n)&&
 #define DSTART int __dcnt = 0;
 #define DEB DBG(++__dcnt)
@@ -1761,6 +1763,7 @@ bool Collator::register_shard_block_creators(std::vector<td::Bits256> creator_li
  * @returns True if collation is successful, false otherwise.
  */
 bool Collator::try_collate() {
+  work_timer_ = td::Timer();
   if (!preinit_complete) {
     LOG(WARNING) << "running do_preinit()";
     if (!do_preinit()) {
@@ -1769,6 +1772,8 @@ bool Collator::try_collate() {
     preinit_complete = true;
   }
   if (pending) {
+    work_time_ += work_timer_.value().elapsed();
+    work_timer_ = {};
     return true;
   }
   CHECK(config_);
@@ -5024,6 +5029,18 @@ bool Collator::create_block_candidate() {
     td::actor::send_closure_later(manager, &ValidatorManager::complete_external_messages, std::move(delay_ext_msgs_),
                                   std::move(bad_ext_msgs_));
   }
+
+  if (work_timer_) {
+    work_time_ += work_timer_.value().elapsed();
+    work_timer_ = {};
+  }
+  LOG(WARNING) << "Collate query work time = " << work_time_ << "s";
+  td::optional<BlockCandidate> dump_candidate;
+  if (dump_candidates_above >= 0.0 && work_time_ >= dump_candidates_above) {
+    dump_candidate = block_candidate->clone();
+  }
+  td::actor::send_closure(manager, &ValidatorManager::record_collate_query_stats, block_candidate->id, work_time_,
+                          std::move(dump_candidate));
   return true;
 }
 
@@ -5149,6 +5166,10 @@ void Collator::after_get_external_messages(td::Result<std::vector<std::pair<Ref<
 
 td::uint32 Collator::get_skip_externals_queue_size() {
   return SKIP_EXTERNALS_QUEUE_SIZE;
+}
+
+void Collator::set_dump_candidates_above(double value) {
+  dump_candidates_above = value;
 }
 
 }  // namespace validator

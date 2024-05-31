@@ -191,6 +191,13 @@ class ValidatorManager : public ValidatorManagerInterface {
   virtual void add_lite_query_stats(int lite_query_id) {
   }
 
+  virtual void record_collate_query_stats(BlockIdExt block_id, double work_time,
+                                          td::optional<BlockCandidate> dump_candidate) {
+  }
+  virtual void record_validate_query_stats(BlockIdExt block_id, double work_time,
+                                           td::optional<BlockCandidate> dump_candidate) {
+  }
+
   static bool is_persistent_state(UnixTime ts, UnixTime prev_ts) {
     return ts / (1 << 17) != prev_ts / (1 << 17);
   }

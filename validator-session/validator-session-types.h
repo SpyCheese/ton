@@ -77,6 +77,8 @@ struct ValidatorSessionStats {
     ValidatorSessionCandidateId candidate_id = ValidatorSessionCandidateId::zero();
     int block_status = status_none;
     double block_timestamp = -1.0;
+    td::Bits256 root_hash = td::Bits256::zero();
+    td::Bits256 file_hash = td::Bits256::zero();
     std::string comment;
 
     bool is_accepted = false;

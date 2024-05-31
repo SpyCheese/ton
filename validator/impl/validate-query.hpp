@@ -378,6 +378,13 @@ class ValidateQuery : public td::actor::Actor {
     }
     return true;
   }
+
+  double work_time_ = 0.0;
+  td::optional<td::Timer> work_timer_;
+  void finalize_work_time();
+
+ public:
+  static void set_dump_candidates_above(double value);
 };
 
 }  // namespace validator
