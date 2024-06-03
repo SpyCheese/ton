@@ -191,10 +191,10 @@ class ValidatorManager : public ValidatorManagerInterface {
   virtual void add_lite_query_stats(int lite_query_id) {
   }
 
-  virtual void record_collate_query_stats(BlockIdExt block_id, double work_time,
+  virtual void record_collate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
                                           td::optional<BlockCandidate> dump_candidate) {
   }
-  virtual void record_validate_query_stats(BlockIdExt block_id, double work_time,
+  virtual void record_validate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
                                            td::optional<BlockCandidate> dump_candidate) {
   }
 

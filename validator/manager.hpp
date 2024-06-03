@@ -678,14 +678,16 @@ class ValidatorManagerImpl : public ValidatorManager {
 
   struct RecordedBlockStats {
     double collator_work_time_ = -1.0;
+    double collator_cpu_work_time_ = -1.0;
     double validator_work_time_ = -1.0;
+    double validator_cpu_work_time_ = -1.0;
   };
   std::map<BlockIdExt, RecordedBlockStats> recorded_block_stats_;
   std::queue<BlockIdExt> recorded_block_stats_lru_;
 
-  void record_collate_query_stats(BlockIdExt block_id, double work_time,
+  void record_collate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
                                   td::optional<BlockCandidate> dump_candidate) override;
-  void record_validate_query_stats(BlockIdExt block_id, double work_time,
+  void record_validate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
                                    td::optional<BlockCandidate> dump_candidate) override;
   RecordedBlockStats &new_block_stats_record(BlockIdExt block_id);
 };

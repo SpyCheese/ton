@@ -333,9 +333,8 @@ class Collator final : public td::actor::Actor {
   static td::uint32 get_skip_externals_queue_size();
 
  private:
-  double work_time_ = 0.0;
-  td::optional<td::Timer> work_timer_;
-  void finalize_work_time();
+  td::Timer work_timer_{true};
+  td::CpuTimer cpu_work_timer_{true};
 
  public:
   static void set_dump_candidates_above(double value);

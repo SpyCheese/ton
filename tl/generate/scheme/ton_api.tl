@@ -755,9 +755,9 @@ http.server.config dhs:(vector http.server.dnsEntry) local_hosts:(vector http.se
 validatorSession.statsProducer id:int256 candidate_id:int256 block_status:int root_hash:int256 file_hash:int256
   comment:string block_timestamp:double is_accepted:Bool is_ours:Bool got_submit_at:double
   collation_time:double collated_at:double collation_cached:Bool
-  collation_work_time:double
+  collation_work_time:double collation_cpu_work_time:double
   validation_time:double validated_at:double validation_cached:Bool
-  validation_work_time:double
+  validation_work_time:double validation_cpu_work_time:double
   gen_utime:double
   approved_weight:long approved_33pct_at:double approved_66pct_at:double
   signed_weight:long signed_33pct_at:double signed_66pct_at:double

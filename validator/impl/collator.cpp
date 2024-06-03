@@ -1763,7 +1763,8 @@ bool Collator::register_shard_block_creators(std::vector<td::Bits256> creator_li
  * @returns True if collation is successful, false otherwise.
  */
 bool Collator::try_collate() {
-  work_timer_ = td::Timer();
+  work_timer_.resume();
+  cpu_work_timer_.resume();
   if (!preinit_complete) {
     LOG(WARNING) << "running do_preinit()";
     if (!do_preinit()) {
@@ -1772,8 +1773,8 @@ bool Collator::try_collate() {
     preinit_complete = true;
   }
   if (pending) {
-    work_time_ += work_timer_.value().elapsed();
-    work_timer_ = {};
+    work_timer_.pause();
+    cpu_work_timer_.pause();
     return true;
   }
   CHECK(config_);
@@ -5030,17 +5031,15 @@ bool Collator::create_block_candidate() {
                                   std::move(bad_ext_msgs_));
   }
 
-  if (work_timer_) {
-    work_time_ += work_timer_.value().elapsed();
-    work_timer_ = {};
-  }
-  LOG(WARNING) << "Collate query work time = " << work_time_ << "s";
+  double work_time = work_timer_.elapsed();
+  double cpu_work_time = cpu_work_timer_.elapsed();
+  LOG(WARNING) << "Collate query work time = " << work_time << "s, cpu time = " << cpu_work_time << "s";
   td::optional<BlockCandidate> dump_candidate;
-  if (dump_candidates_above >= 0.0 && work_time_ >= dump_candidates_above) {
+  if (dump_candidates_above >= 0.0 && work_time >= dump_candidates_above) {
     dump_candidate = block_candidate->clone();
   }
-  td::actor::send_closure(manager, &ValidatorManager::record_collate_query_stats, block_candidate->id, work_time_,
-                          std::move(dump_candidate));
+  td::actor::send_closure(manager, &ValidatorManager::record_collate_query_stats, block_candidate->id, work_time,
+                          cpu_work_time, std::move(dump_candidate));
   return true;
 }
 

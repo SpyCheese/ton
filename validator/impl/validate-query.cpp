@@ -6217,7 +6217,8 @@ bool ValidateQuery::try_validate() {
   if (pending) {
     return true;
   }
-  work_timer_ = td::Timer();
+  work_timer_.resume();
+  cpu_work_timer_.resume();
   try {
     if (!stage_) {
       LOG(WARNING) << "try_validate stage 0";
@@ -6247,8 +6248,8 @@ bool ValidateQuery::try_validate() {
       }
       stage_ = 1;
       if (pending) {
-        work_time_ += work_timer_.value().elapsed();
-        work_timer_ = {};
+        work_timer_.pause();
+        cpu_work_timer_.pause();
         return true;
       }
     }
@@ -6320,8 +6321,8 @@ bool ValidateQuery::try_validate() {
   } catch (vm::VmVirtError& err) {
     return fatal_error(-666, err.get_msg());
   }
-  work_time_ += work_timer_.value().elapsed();
-  work_timer_ = {};
+  work_timer_.pause();
+  cpu_work_timer_.pause();
   return save_candidate();
 }
 
@@ -6354,17 +6355,15 @@ void ValidateQuery::written_candidate() {
 static double dump_candidates_above = -1.0;
 
 void ValidateQuery::finalize_work_time() {
-  if (work_timer_) {
-    work_time_ += work_timer_.value().elapsed();
-    work_timer_ = {};
-  }
-  LOG(WARNING) << "Validate query work time = " << work_time_ << "s";
+  double work_time = work_timer_.elapsed();
+  double cpu_work_time = cpu_work_timer_.elapsed();
+  LOG(WARNING) << "Validate query work time = " << work_time << "s, cpu time = " << cpu_work_time << "s";
   td::optional<BlockCandidate> dump_candidate;
-  if (dump_candidates_above >= 0.0 && work_time_ >= dump_candidates_above) {
+  if (dump_candidates_above >= 0.0 && work_time >= dump_candidates_above) {
     dump_candidate = block_candidate.clone();
   }
-  td::actor::send_closure(manager, &ValidatorManager::record_validate_query_stats, block_candidate.id, work_time_,
-                          std::move(dump_candidate));
+  td::actor::send_closure(manager, &ValidatorManager::record_validate_query_stats, block_candidate.id, work_time,
+                          cpu_work_time, std::move(dump_candidate));
 }
 
 void ValidateQuery::set_dump_candidates_above(double value) {

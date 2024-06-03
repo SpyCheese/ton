@@ -22,6 +22,8 @@
 #include "td/utils/logging.h"
 #include "td/utils/Time.h"
 
+#include <ctime>
+
 namespace td {
 
 Timer::Timer(bool is_paused) : is_paused_(is_paused) {
@@ -89,6 +91,49 @@ void PerfWarningTimer::reset() {
 
 double PerfWarningTimer::elapsed() const {
   return Time::now() - start_at_;
+}
+
+static double cpu_clock() {
+#if defined(CLOCK_THREAD_CPUTIME_ID)
+  timespec ts;
+  int result = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+  CHECK(result == 0);
+  return (double)ts.tv_sec + ts.tv_nsec * 1e-9;
+#else
+  return 0.0;
+#endif
+}
+
+CpuTimer::CpuTimer(bool is_paused) : is_paused_(is_paused) {
+  if (is_paused_) {
+    start_time_ = 0;
+  } else {
+    start_time_ = cpu_clock();
+  }
+}
+
+void CpuTimer::pause() {
+  if (is_paused_) {
+    return;
+  }
+  elapsed_ += cpu_clock() - start_time_;
+  is_paused_ = true;
+}
+
+void CpuTimer::resume() {
+  if (!is_paused_) {
+    return;
+  }
+  start_time_ = cpu_clock();
+  is_paused_ = false;
+}
+
+double CpuTimer::elapsed() const {
+  double res = elapsed_;
+  if (!is_paused_) {
+    res += cpu_clock() - start_time_;
+  }
+  return res;
 }
 
 }  // namespace td

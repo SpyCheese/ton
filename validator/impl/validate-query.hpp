@@ -379,8 +379,8 @@ class ValidateQuery : public td::actor::Actor {
     return true;
   }
 
-  double work_time_ = 0.0;
-  td::optional<td::Timer> work_timer_;
+  td::Timer work_timer_{true};
+  td::CpuTimer cpu_work_timer_{true};
   void finalize_work_time();
 
  public:
