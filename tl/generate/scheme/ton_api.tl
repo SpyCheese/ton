@@ -761,10 +761,14 @@ http.server.config dhs:(vector http.server.dnsEntry) local_hosts:(vector http.se
 
 ---types---
 
+validatorSession.statsCollationLimits bytes:int gas:int lt_delta:int cat_bytes:int cat_gas:int cat_lt_delta:int
+  = validadorSession.StatsCollationLimits;
+
 validatorSession.statsProducer id:int256 candidate_id:int256 block_status:int root_hash:int256 file_hash:int256
   comment:string block_timestamp:double is_accepted:Bool is_ours:Bool got_submit_at:double
   collation_time:double collated_at:double collation_cached:Bool
   collation_work_time:double collation_cpu_work_time:double
+  collation_limits:validatorSession.statsCollationLimits
   validation_time:double validated_at:double validation_cached:Bool
   validation_work_time:double validation_cpu_work_time:double
   gen_utime:double

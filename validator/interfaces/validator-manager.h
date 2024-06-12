@@ -52,6 +52,11 @@ struct AsyncSerializerState {
   UnixTime last_written_block_ts;
 };
 
+struct CollationLimitsStats {
+  td::uint32 bytes, gas, lt_delta;
+  int cat_bytes, cat_gas, cat_lt_delta;
+};
+
 using ValidateCandidateResult = td::Variant<UnixTime, CandidateReject>;
 
 class ValidatorManager : public ValidatorManagerInterface {
@@ -193,6 +198,7 @@ class ValidatorManager : public ValidatorManagerInterface {
   }
 
   virtual void record_collate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
+                                          CollationLimitsStats limits_stats,
                                           td::optional<BlockCandidate> dump_candidate) {
   }
   virtual void record_validate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,

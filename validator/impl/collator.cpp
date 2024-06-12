@@ -5039,8 +5039,15 @@ bool Collator::create_block_candidate() {
   if (dump_candidates_above >= 0.0 && work_time >= dump_candidates_above) {
     dump_candidate = block_candidate->clone();
   }
+  CollationLimitsStats limits_stats;
+  limits_stats.bytes = block_limit_status_->estimate_block_size();
+  limits_stats.gas = block_limit_status_->gas_used;
+  limits_stats.lt_delta = block_limit_status_->cur_lt - block_limit_status_->limits.start_lt;
+  limits_stats.cat_bytes = block_limit_status_->limits.classify_size(limits_stats.bytes);
+  limits_stats.cat_gas = block_limit_status_->limits.classify_gas(limits_stats.gas);
+  limits_stats.cat_lt_delta = block_limit_status_->limits.classify_lt(block_limit_status_->cur_lt);
   td::actor::send_closure(manager, &ValidatorManager::record_collate_query_stats, block_candidate->id, work_time,
-                          cpu_work_time, std::move(dump_candidate));
+                          cpu_work_time, limits_stats, std::move(dump_candidate));
   return true;
 }
 
