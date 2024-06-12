@@ -2827,7 +2827,7 @@ void ValidatorManagerImpl::log_validator_session_stats(BlockIdExt block_id,
       if (it != recorded_block_stats_.end() && it->second.collator_limits_stats_) {
         auto &stats = it->second.collator_limits_stats_.value();
         collation_limits = create_tl_object<ton_api::validatorSession_statsCollationLimits>(
-            stats.bytes, stats.gas, stats.lt_delta, stats.cat_bytes, stats.cat_gas, stats.cat_lt_delta);
+            stats.bytes, stats.gas, stats.lt_delta, stats.cat_bytes, stats.cat_gas, stats.cat_lt_delta, stats.log);
       }
       producers.push_back(create_tl_object<ton_api::validatorSession_statsProducer>(
           producer.id.bits256_value(), producer.candidate_id, producer.block_status, producer.root_hash,
@@ -3168,7 +3168,7 @@ void ValidatorManagerImpl::record_collate_query_stats(BlockIdExt block_id, doubl
   auto& record = new_block_stats_record(block_id);
   record.collator_work_time_ = work_time;
   record.collator_cpu_work_time_ = cpu_work_time;
-  record.collator_limits_stats_ = limits_stats;
+  record.collator_limits_stats_ = std::move(limits_stats);
   if (dump_candidate) {
     LOG(WARNING) << "Dumping block candidate " << block_id.to_str();
     td::mkpath(db_root_ + "/dumped-candidates/").ensure();

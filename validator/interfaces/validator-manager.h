@@ -55,6 +55,7 @@ struct AsyncSerializerState {
 struct CollationLimitsStats {
   td::uint32 bytes, gas, lt_delta;
   int cat_bytes, cat_gas, cat_lt_delta;
+  std::string log;
 };
 
 using ValidateCandidateResult = td::Variant<UnixTime, CandidateReject>;

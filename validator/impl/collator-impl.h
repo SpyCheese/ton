@@ -335,6 +335,7 @@ class Collator final : public td::actor::Actor {
  private:
   td::Timer work_timer_{true};
   td::CpuTimer cpu_work_timer_{true};
+  std::string limits_log_;
 
  public:
   static void set_dump_candidates_above(double value);
