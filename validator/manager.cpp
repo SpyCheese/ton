@@ -2823,18 +2823,20 @@ void ValidatorManagerImpl::log_validator_session_stats(BlockIdExt block_id,
     for (const auto &producer : round.producers) {
       BlockIdExt cur_block_id{block_id.id, producer.root_hash, producer.file_hash};
       auto it = recorded_block_stats_.find(cur_block_id);
-      tl_object_ptr<ton_api::validatorSession_statsCollationLimits> collation_limits;
-      if (it != recorded_block_stats_.end() && it->second.collator_limits_stats_) {
-        auto &stats = it->second.collator_limits_stats_.value();
-        collation_limits = create_tl_object<ton_api::validatorSession_statsCollationLimits>(
-            stats.bytes, stats.gas, stats.lt_delta, stats.cat_bytes, stats.cat_gas, stats.cat_lt_delta, stats.log);
+      tl_object_ptr<ton_api::validatorSession_collationStats> collation_stats;
+      if (it != recorded_block_stats_.end() && it->second.collator_stats_) {
+        auto &stats = it->second.collator_stats_.value();
+        collation_stats = create_tl_object<ton_api::validatorSession_collationStats>(
+            stats.bytes, stats.gas, stats.lt_delta, stats.cat_bytes, stats.cat_gas, stats.cat_lt_delta,
+            stats.limits_log, stats.ext_msgs_total, stats.ext_msgs_filtered, stats.ext_msgs_accepted,
+            stats.ext_msgs_rejected);
       }
       producers.push_back(create_tl_object<ton_api::validatorSession_statsProducer>(
           producer.id.bits256_value(), producer.candidate_id, producer.block_status, producer.root_hash,
           producer.file_hash, producer.comment, producer.block_timestamp, producer.is_accepted, producer.is_ours,
           producer.got_submit_at, producer.collation_time, producer.collated_at, producer.collation_cached,
           it == recorded_block_stats_.end() ? -1.0 : it->second.collator_work_time_,
-          it == recorded_block_stats_.end() ? -1.0 : it->second.collator_cpu_work_time_, std::move(collation_limits),
+          it == recorded_block_stats_.end() ? -1.0 : it->second.collator_cpu_work_time_, std::move(collation_stats),
           producer.validation_time, producer.validated_at, producer.validation_cached,
           it == recorded_block_stats_.end() ? -1.0 : it->second.validator_work_time_,
           it == recorded_block_stats_.end() ? -1.0 : it->second.validator_cpu_work_time_, producer.gen_utime,
@@ -3163,12 +3165,12 @@ td::actor::ActorOwn<ValidatorManagerInterface> ValidatorManagerFactory::create(
 }
 
 void ValidatorManagerImpl::record_collate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
-                                                      CollationLimitsStats limits_stats,
+                                                      CollationStats stats,
                                                       td::optional<BlockCandidate> dump_candidate) {
-  auto& record = new_block_stats_record(block_id);
+  auto &record = new_block_stats_record(block_id);
   record.collator_work_time_ = work_time;
   record.collator_cpu_work_time_ = cpu_work_time;
-  record.collator_limits_stats_ = std::move(limits_stats);
+  record.collator_stats_ = std::move(stats);
   if (dump_candidate) {
     LOG(WARNING) << "Dumping block candidate " << block_id.to_str();
     td::mkpath(db_root_ + "/dumped-candidates/").ensure();

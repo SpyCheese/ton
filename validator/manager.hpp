@@ -711,7 +711,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   struct RecordedBlockStats {
     double collator_work_time_ = -1.0;
     double collator_cpu_work_time_ = -1.0;
-    td::optional<CollationLimitsStats> collator_limits_stats_;
+    td::optional<CollationStats> collator_stats_;
     double validator_work_time_ = -1.0;
     double validator_cpu_work_time_ = -1.0;
   };
@@ -719,8 +719,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   std::queue<BlockIdExt> recorded_block_stats_lru_;
 
   void record_collate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
-                                  CollationLimitsStats limits_stats,
-                                  td::optional<BlockCandidate> dump_candidate) override;
+                                  CollationStats stats, td::optional<BlockCandidate> dump_candidate) override;
   void record_validate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
                                    td::optional<BlockCandidate> dump_candidate) override;
   RecordedBlockStats &new_block_stats_record(BlockIdExt block_id);
