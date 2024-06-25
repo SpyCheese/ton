@@ -286,12 +286,12 @@ void FullNodeImpl::update_shard_configuration(td::Ref<MasterchainState> state, s
       my_adnl_ids.insert(it->second);
     }
   }
-  if (use_old_private_overlays_) {
+  /*if (use_old_private_overlays_) {
     private_block_overlays_v2_.destroy_overlays();
   } else {
     private_block_overlays_v2_.update_overlays(state, std::move(my_adnl_ids), zero_state_file_hash_, keyring_, adnl_,
                                                rldp_, rldp2_, overlays_, validator_manager_, actor_id(this));
-  }
+  }*/
 }
 
 void FullNodeImpl::add_shard_actor(ShardIdFull shard, FullNodeShardMode mode) {
@@ -736,9 +736,9 @@ void FullNodeImpl::update_private_overlays() {
 }
 
 void FullNodeImpl::create_private_block_overlay(PublicKeyHash key) {
-  if (!use_old_private_overlays_) {
+  //if (!use_old_private_overlays_) {
     return;
-  }
+  //}
   CHECK(local_keys_.count(key));
   if (current_validators_.count(key)) {
     std::vector<adnl::AdnlNodeIdShort> nodes;
