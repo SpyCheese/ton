@@ -95,18 +95,19 @@ class FullNodePrivateBlockOverlay : public td::actor::Actor {
 
 class FullNodeCustomOverlay : public td::actor::Actor {
  public:
-  void process_broadcast(PublicKeyHash src, ton_api::tonNode_blockBroadcast &query);
-  void process_broadcast(PublicKeyHash src, ton_api::tonNode_blockBroadcastCompressed &query);
-  void process_block_broadcast(PublicKeyHash src, ton_api::tonNode_Broadcast &query);
+  void process_broadcast(PublicKeyHash src, ton_api::tonNode_blockBroadcast &query, td::BufferSlice &raw);
+  void process_broadcast(PublicKeyHash src, ton_api::tonNode_blockBroadcastCompressed &query, td::BufferSlice &raw);
+  void process_block_broadcast(PublicKeyHash src, ton_api::tonNode_Broadcast &query, td::BufferSlice &raw);
 
-  void process_broadcast(PublicKeyHash src, ton_api::tonNode_externalMessageBroadcast &query);
+  void process_broadcast(PublicKeyHash src, ton_api::tonNode_externalMessageBroadcast &query, td::BufferSlice &raw);
 
-  void process_broadcast(PublicKeyHash src, ton_api::tonNode_newBlockCandidateBroadcast &query);
-  void process_broadcast(PublicKeyHash src, ton_api::tonNode_newBlockCandidateBroadcastCompressed &query);
-  void process_block_candidate_broadcast(PublicKeyHash src, ton_api::tonNode_Broadcast &query);
+  void process_broadcast(PublicKeyHash src, ton_api::tonNode_newBlockCandidateBroadcast &query, td::BufferSlice &raw);
+  void process_broadcast(PublicKeyHash src, ton_api::tonNode_newBlockCandidateBroadcastCompressed &query,
+                         td::BufferSlice &raw);
+  void process_block_candidate_broadcast(PublicKeyHash src, ton_api::tonNode_Broadcast &query, td::BufferSlice &raw);
 
   template <class T>
-  void process_broadcast(PublicKeyHash, T &) {
+  void process_broadcast(PublicKeyHash, T &, td::BufferSlice &) {
     VLOG(FULL_NODE_WARNING) << "dropping unknown broadcast";
   }
   void receive_broadcast(PublicKeyHash src, td::BufferSlice query);
