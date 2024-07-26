@@ -72,6 +72,12 @@ const MsgAddressExt t_MsgAddressExt;
 
 const Anycast t_Anycast;
 
+int Anycast::get_size(const vm::CellSlice& cs) const {
+  return cs.have(5) ? 5 + (int)cs.prefetch_ulong(5) : -1;
+}
+bool Anycast::skip_get_depth(vm::CellSlice& cs, int& depth) const {
+  return cs.fetch_uint_leq(30, depth) && cs.advance(depth);
+}
 bool Maybe_Anycast::skip_get_depth(vm::CellSlice& cs, int& depth) const {
   depth = 0;
   bool have;
@@ -295,6 +301,9 @@ bool MsgAddress::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
 
 const MsgAddress t_MsgAddress;
 
+VarUInteger::VarUInteger(int _n) : n(_n) {
+  ln = 32 - td::count_leading_zeroes32(n - 1);
+}
 bool VarUInteger::skip(vm::CellSlice& cs) const {
   int len = (int)cs.fetch_ulong(ln);
   return len >= 0 && len < n && cs.advance(len * 8);
@@ -315,6 +324,9 @@ unsigned long long VarUInteger::as_uint(const vm::CellSlice& cs) const {
   return len >= 0 && len <= 8 && cs.have(ln + len * 8) ? td::bitstring::bits_load_ulong(cs.data_bits() + ln, len * 8)
                                                        : std::numeric_limits<td::uint64>::max();
 }
+bool VarUInteger::null_value(vm::CellBuilder& cb) const {
+  return cb.store_zeroes_bool(ln);
+}
 
 bool VarUInteger::store_integer_value(vm::CellBuilder& cb, const td::BigInt256& value) const {
   int k = value.bit_size(false);
@@ -333,9 +345,15 @@ unsigned VarUInteger::precompute_integer_size(td::RefInt256 value) const {
   int k = value->bit_size(false);
   return k <= (n - 1) * 8 ? ln + ((k + 7) & -8) : 0xfff;
 }
+std::ostream& VarUInteger::print_type(std::ostream& os) const {
+  return os << "(VarUInteger " << n << ")";
+}
 
 const VarUInteger t_VarUInteger_3{3}, t_VarUInteger_7{7}, t_VarUInteger_16{16}, t_VarUInteger_32{32};
 
+VarUIntegerPos::VarUIntegerPos(int _n, bool relaxed) : n(_n), store_pos_only(!relaxed) {
+  ln = 32 - td::count_leading_zeroes32(n - 1);
+}
 bool VarUIntegerPos::skip(vm::CellSlice& cs) const {
   int len = (int)cs.fetch_ulong(ln);
   return len > 0 && len < n && cs.advance(len * 8);
@@ -362,6 +380,12 @@ bool VarUIntegerPos::store_integer_value(vm::CellBuilder& cb, const td::BigInt25
   int k = value.bit_size(false);
   return k <= (n - 1) * 8 && value.sgn() >= (int)store_pos_only && cb.store_long_bool((k + 7) >> 3, ln) &&
          cb.store_int256_bool(value, (k + 7) & -8, false);
+}
+std::ostream& VarUIntegerPos::print_type(std::ostream& os) const {
+  return os << "(VarUIntegerPos " << n << ")";
+}
+VarInteger::VarInteger(int _n) : n(_n) {
+  ln = 32 - td::count_leading_zeroes32(n - 1);
 }
 
 const VarUIntegerPos t_VarUIntegerPos_16{16}, t_VarUIntegerPos_32{32}, t_VarUIntegerPosRelaxed_32{32, true};
@@ -390,6 +414,356 @@ long long VarInteger::as_int(const vm::CellSlice& cs) const {
   int len = (int)cs.prefetch_ulong(ln);
   return len >= 0 && len <= 8 && cs.have(ln + len * 8) ? td::bitstring::bits_load_long(cs.data_bits() + ln, len * 8)
                                                        : (1ULL << 63);
+}
+bool VarInteger::null_value(vm::CellBuilder& cb) const {
+  return cb.store_zeroes_bool(ln);
+}
+std::ostream& VarInteger::print_type(std::ostream& os) const {
+  return os << "(VarInteger " << n << ")";
+}
+VarIntegerNz::VarIntegerNz(int _n) : n(_n) {
+  ln = 32 - td::count_leading_zeroes32(n - 1);
+}
+std::ostream& VarIntegerNz::print_type(std::ostream& os) const {
+  return os << "(VarIntegerNz " << n << ")";
+}
+int Unary::get_size(const vm::CellSlice& cs) const {
+  return cs.count_leading(1) + 1;
+}
+bool Unary::validate_skip(vm::CellSlice& cs, bool weak, int& n) const {
+  return cs.advance((n = cs.count_leading(1)) + 1);
+}
+bool Unary::skip(vm::CellSlice& cs, int& n) const {
+  return validate_skip(cs, false, n);
+}
+bool Unary::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  return skip(cs);
+}
+bool Unary::skip(vm::CellSlice& cs) const {
+  return cs.advance(get_size(cs));
+}
+bool Unary::validate(int* ops, const vm::CellSlice& cs, bool weak) const {
+  return cs.have(get_size(cs));
+}
+HmLabel::HmLabel(int _m) : m(_m) {
+}
+bool HmLabel::skip(vm::CellSlice& cs, int& n) const {
+  return validate_skip(cs, false, n);
+}
+bool HmLabel::skip(vm::CellSlice& cs) const {
+  int n;
+  return skip(cs, n);
+}
+bool HmLabel::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  int n;
+  return validate_skip(cs, weak, n);
+}
+Hashmap::Hashmap(int _n, const TLB& _val_type) : value_type(_val_type), n(_n) {
+}
+HashmapNode::HashmapNode(int _n, const TLB& _val_type) : value_type(_val_type), n(_n) {
+}
+int HashmapNode::get_tag(const vm::CellSlice& cs) const {
+  return n > 0 ? hmn_fork : n;
+}
+HashmapE::HashmapE(int _n, const TLB& _val_type) : root_type(_n, _val_type) {
+}
+int HashmapE::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(1);
+}
+bool HashmapE::null_value(vm::CellBuilder& cb) const {
+  return cb.store_zeroes_bool(1);
+}
+AugmentationCheckData::AugmentationCheckData(const TLB& val_type, const TLB& ex_type)
+    : value_type(val_type), extra_type(ex_type) {
+}
+bool AugmentationCheckData::skip_extra(vm::CellSlice& cs) const {
+  return extra_type.skip(cs);
+}
+bool AugmentationCheckData::eval_fork(vm::CellBuilder& cb, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const {
+  return extra_type.add_values(cb, left_cs, right_cs);
+}
+bool AugmentationCheckData::eval_empty(vm::CellBuilder& cb) const {
+  return extra_type.null_value(cb);
+}
+HashmapAug::HashmapAug(int _n, const AugmentationCheckData& _aug) : aug(_aug), n(_n) {
+}
+HashmapAugNode::HashmapAugNode(int _n, const AugmentationCheckData& _aug) : aug(_aug), n(_n) {
+}
+int HashmapAugNode::get_tag(const vm::CellSlice& cs) const {
+  return n > 0 ? ahmn_fork : n;
+}
+HashmapAugE::HashmapAugE(int _n, const AugmentationCheckData& _aug) : root_type(_n, std::move(_aug)) {
+}
+int HashmapAugE::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(1);
+}
+int MsgAddressInt::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(2);
+}
+bool MsgAddressInt::get_prefix_to(vm::CellSlice&& cs, ton::AccountIdPrefixFull& pfx) {
+  return (pfx = get_prefix(std::move(cs))).is_valid();
+}
+bool MsgAddressInt::get_prefix_to(const vm::CellSlice& cs, ton::AccountIdPrefixFull& pfx) {
+  return (pfx = get_prefix(cs)).is_valid();
+}
+bool MsgAddressInt::get_prefix_to(Ref<vm::CellSlice> cs_ref, ton::AccountIdPrefixFull& pfx) {
+  return cs_ref.not_null() && (pfx = get_prefix(std::move(cs_ref))).is_valid();
+}
+int MsgAddressExt::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(2);
+}
+int MsgAddress::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(2);
+}
+ExtraCurrencyCollection::ExtraCurrencyCollection()
+    : dict_type(32, t_VarUIntegerPos_32), dict_type2(32, t_VarUIntegerPosRelaxed_32) {
+}
+int ExtraCurrencyCollection::get_size(const vm::CellSlice& cs) const {
+  return dict_type.get_size(cs);
+}
+bool ExtraCurrencyCollection::validate(int* ops, const vm::CellSlice& cs, bool weak) const {
+  return dict_type.validate(ops, cs, weak);
+}
+bool ExtraCurrencyCollection::null_value(vm::CellBuilder& cb) const {
+  return cb.store_zeroes_bool(1);
+}
+bool ExtraCurrencyCollection::add_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const {
+  return dict_type.add_values(cb, cs1, cs2);
+}
+int ExtraCurrencyCollection::sub_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const {
+  return dict_type2.sub_values(cb, cs1, cs2);
+}
+bool ExtraCurrencyCollection::add_values_ref(Ref<vm::Cell>& res, Ref<vm::Cell> arg1, Ref<vm::Cell> arg2) const {
+  return dict_type.add_values_ref(res, std::move(arg1), std::move(arg2));
+}
+int ExtraCurrencyCollection::sub_values_ref(Ref<vm::Cell>& res, Ref<vm::Cell> arg1, Ref<vm::Cell> arg2) const {
+  return dict_type2.sub_values_ref(res, std::move(arg1), std::move(arg2));
+}
+bool ExtraCurrencyCollection::store_ref(vm::CellBuilder& cb, Ref<vm::Cell> arg) const {
+  return dict_type.store_ref(cb, std::move(arg));
+}
+unsigned ExtraCurrencyCollection::precompute_size(Ref<vm::Cell> arg) const {
+  return arg.is_null() ? 1 : 0x10001;
+}
+bool CurrencyCollection::null_value(vm::CellBuilder& cb) const {
+  return cb.store_bits_same_bool(1 + 4, false);
+}
+unsigned CurrencyCollection::precompute_size(td::RefInt256 balance, Ref<vm::Cell> extra) const {
+  return t_Grams.precompute_size(std::move(balance)) + t_ExtraCurrencyCollection.precompute_size(std::move(extra));
+}
+int CommonMsgInfo::get_tag(const vm::CellSlice& cs) const {
+  int v = (int)cs.prefetch_ulong(2);
+  return v == 1 ? int_msg_info : v;
+}
+bool CommonMsgInfo::is_internal(const vm::CellSlice& cs) const {
+  return get_tag(cs) == int_msg_info;
+}
+int TickTock::get_size(const vm::CellSlice& cs) const {
+  return 2;
+}
+bool Message::is_internal(const vm::CellSlice& cs) const {
+  return t_CommonMsgInfo.is_internal(cs);
+}
+bool IntermediateAddress::fetch_regular(vm::CellSlice& cs, int& use_dst_bits) const {
+  return cs.fetch_uint_to(8, use_dst_bits) && use_dst_bits <= 96;
+}
+int IntermediateAddress::get_tag(const vm::CellSlice& cs) const {
+  int v = (int)cs.prefetch_ulong(2);
+  return v == 1 ? interm_addr_regular : v;
+}
+int AccountState::get_tag(const vm::CellSlice& cs) const {
+  int t = (int)cs.prefetch_ulong(2);
+  return t == 3 ? account_active : t;
+}
+Account::Account(bool _allow_empty) : allow_empty(_allow_empty) {
+}
+int Account::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(1);
+}
+int AccountStatus::get_size(const vm::CellSlice& cs) const {
+  return 2;
+}
+int AccountStatus::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(2);
+}
+bool ShardAccount::Record::invalidate() {
+  return valid = false;
+}
+int ShardAccount::get_size(const vm::CellSlice& cs) const {
+  return 0x10140;
+}
+bool ShardAccount::skip(vm::CellSlice& cs) const {
+  return cs.advance_ext(0x140, 1);
+}
+bool ShardAccount::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  return cs.advance(0x140) && t_Ref_AccountE.validate_skip(ops, cs, weak);
+}
+bool ShardAccount::unpack(vm::CellSlice& cs, Record& info) {
+  return info.unpack(cs);
+}
+bool ShardAccount::unpack(Ref<vm::CellSlice> cs_ref, Record& info) {
+  return info.unpack(std::move(cs_ref));
+}
+Aug_ShardAccounts::Aug_ShardAccounts() : AugmentationCheckData(t_ShardAccount, t_DepthBalanceInfo) {
+}
+ShardAccounts::ShardAccounts() : dict_type(256, aug_ShardAccounts) {
+}
+bool ShardAccounts::skip(vm::CellSlice& cs) const {
+  return dict_type.skip(cs);
+}
+bool ShardAccounts::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  return dict_type.validate_skip(ops, cs, weak);
+}
+int AccStatusChange::get_size(const vm::CellSlice& cs) const {
+  return cs.prefetch_ulong(1) ? 2 : 1;
+}
+int AccStatusChange::get_tag(const vm::CellSlice& cs) const {
+  if (cs.size() == 1) {
+    return (int)cs.prefetch_ulong(1) ? -1 : acst_unchanged;
+  }
+  int v = (int)cs.prefetch_ulong(2);
+  return v == 1 ? acst_unchanged : v;
+}
+int ComputeSkipReason::get_size(const vm::CellSlice& cs) const {
+  return cs.prefetch_ulong(2) == 3 ? 3 : 2;
+}
+bool ComputeSkipReason::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  int tag = get_tag(cs);
+  return tag >= 0 && cs.advance(tag == 3 ? 3 : 2);
+}
+int ComputeSkipReason::get_tag(const vm::CellSlice& cs) const {
+  int t = (int)cs.prefetch_ulong(2);
+  if (t == 3 && cs.prefetch_ulong(3) != 0b110) {
+    return -1;
+  }
+  return t;
+}
+int TrComputePhase::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(1);
+}
+Aug_AccountTransactions::Aug_AccountTransactions() : AugmentationCheckData(t_Ref_Transaction, t_CurrencyCollection) {
+}
+bool HashUpdate::skip(vm::CellSlice& cs) const {
+  return cs.advance(8 + 256 * 2);
+}
+bool HashUpdate::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  return cs.fetch_ulong(8) == 0x72 && cs.advance(256 * 2);
+}
+Aug_ShardAccountBlocks::Aug_ShardAccountBlocks() : AugmentationCheckData(t_AccountBlock, t_CurrencyCollection) {
+}
+bool ImportFees::null_value(vm::CellBuilder& cb) const {
+  return cb.store_bits_same_bool(4 + 4 + 1, false);
+}
+int InMsg::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(3);
+}
+int OutMsg::get_tag(const vm::CellSlice& cs) const {
+  int t = (int)cs.prefetch_ulong(3);
+  return t != 6 ? t : (int)cs.prefetch_ulong(4);
+}
+Aug_InMsgDescr::Aug_InMsgDescr() : AugmentationCheckData(t_InMsg, t_ImportFees) {
+}
+bool Aug_InMsgDescr::eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const {
+  return t_InMsg.get_import_fees(cb, cs);
+}
+InMsgDescr::InMsgDescr() : dict_type(256, aug_InMsgDescr) {
+}
+bool InMsgDescr::skip(vm::CellSlice& cs) const {
+  return dict_type.skip(cs);
+}
+bool InMsgDescr::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  return dict_type.validate_skip(ops, cs, weak);
+}
+Aug_OutMsgDescr::Aug_OutMsgDescr() : AugmentationCheckData(t_OutMsg, t_CurrencyCollection) {
+}
+bool Aug_OutMsgDescr::eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const {
+  return t_OutMsg.get_export_value(cb, cs);
+}
+OutMsgDescr::OutMsgDescr() : dict_type(256, aug_OutMsgDescr) {
+}
+bool OutMsgDescr::skip(vm::CellSlice& cs) const {
+  return dict_type.skip(cs);
+}
+bool OutMsgDescr::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  return dict_type.validate_skip(ops, cs, weak);
+}
+int EnqueuedMsg::get_size(const vm::CellSlice& cs) const {
+  return 0x10040;
+}
+bool EnqueuedMsg::skip(vm::CellSlice& cs) const {
+  return cs.advance_ext(0x10040);
+}
+bool EnqueuedMsg::unpack(vm::CellSlice& cs, EnqueuedMsgDescr& descr) const {
+  return descr.unpack(cs);
+}
+Aug_OutMsgQueue::Aug_OutMsgQueue() : AugmentationCheckData(t_EnqueuedMsg, t_uint64) {
+}
+OutMsgQueue::OutMsgQueue() : dict_type(32 + 64 + 256, aug_OutMsgQueue) {
+}
+bool OutMsgQueue::skip(vm::CellSlice& cs) const {
+  return dict_type.skip(cs);
+}
+bool OutMsgQueue::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
+  return dict_type.validate_skip(ops, cs, weak);
+}
+int ProcessedUpto::get_size(const vm::CellSlice& cs) const {
+  return 64 + 256;
+}
+int ExtBlkRef::get_size(const vm::CellSlice& cs) const {
+  return fixed_size;
+}
+int BlkMasterInfo::get_size(const vm::CellSlice& cs) const {
+  return t_ExtBlkRef.get_size(cs);
+}
+int ShardIdent::get_size(const vm::CellSlice& cs) const {
+  return 2 + 6 + 32 + 64;
+}
+bool ShardIdent::skip(vm::CellSlice& cs) const {
+  return cs.advance(get_size(cs));
+}
+int ShardIdent::get_tag(const vm::CellSlice& cs) const {
+  return 0;
+}
+ShardIdent::Record::Record() : shard_pfx_bits(-1), workchain_id(ton::workchainInvalid), shard_prefix(0) {
+}
+ShardIdent::Record::Record(int _pfxlen, int _wcid, unsigned long long _pfx)
+    : shard_pfx_bits(_pfxlen), workchain_id(_wcid), shard_prefix(_pfx) {
+}
+bool ShardIdent::Record::is_valid() const {
+  return shard_pfx_bits >= 0;
+}
+void ShardIdent::Record::invalidate() {
+  shard_pfx_bits = -1;
+}
+int BlockIdExt::get_size(const vm::CellSlice& cs) const {
+  return 2 + 6 + 32 + 64 + 32 + 256 * 2;
+}
+bool BlockIdExt::skip(vm::CellSlice& cs) const {
+  return cs.advance(get_size(cs));
+}
+int ShardState::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(32) == shard_state ? shard_state : -1;
+}
+int ShardState_aux::get_tag(const vm::CellSlice& cs) const {
+  return 0;
+}
+int LibDescr::get_tag(const vm::CellSlice& cs) const {
+  return (int)cs.prefetch_ulong(2);
+}
+BlkPrevInfo::BlkPrevInfo(bool _merged) : merged(_merged) {
+}
+int KeyExtBlkRef::get_size(const vm::CellSlice& cs) const {
+  return fixed_size;
+}
+int KeyMaxLt::get_size(const vm::CellSlice& cs) const {
+  return fixed_size;
+}
+bool KeyMaxLt::null_value(vm::CellBuilder& cb) const {
+  return cb.store_bits_same_bool(fixed_size, false);
+}
+Aug_OldMcBlocksInfo::Aug_OldMcBlocksInfo() : AugmentationCheckData(t_KeyExtBlkRef, t_KeyMaxLt) {
+}
+Aug_ShardFees::Aug_ShardFees() : AugmentationCheckData(t_ShardFeeCreated, t_ShardFeeCreated) {
 }
 
 bool VarInteger::store_integer_value(vm::CellBuilder& cb, const td::BigInt256& value) const {

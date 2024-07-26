@@ -37,12 +37,8 @@ namespace tlb {
 using namespace ::tlb;
 
 struct Anycast final : TLB {
-  int get_size(const vm::CellSlice& cs) const override {
-    return cs.have(5) ? 5 + (int)cs.prefetch_ulong(5) : -1;
-  }
-  bool skip_get_depth(vm::CellSlice& cs, int& depth) const {
-    return cs.fetch_uint_leq(30, depth) && cs.advance(depth);
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  bool skip_get_depth(vm::CellSlice& cs, int& depth) const;
 };
 
 extern const Anycast t_Anycast;
@@ -55,22 +51,16 @@ extern const Maybe_Anycast t_Maybe_Anycast;
 
 struct VarUInteger final : TLB_Complex {
   int n, ln;
-  VarUInteger(int _n) : n(_n) {
-    ln = 32 - td::count_leading_zeroes32(n - 1);
-  }
+  VarUInteger(int _n);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   td::RefInt256 as_integer_skip(vm::CellSlice& cs) const override;
   unsigned long long as_uint(const vm::CellSlice& cs) const override;
-  bool null_value(vm::CellBuilder& cb) const override {
-    return cb.store_zeroes_bool(ln);
-  }
+  bool null_value(vm::CellBuilder& cb) const override;
   bool store_integer_value(vm::CellBuilder& cb, const td::BigInt256& value) const override;
   unsigned precompute_integer_size(const td::BigInt256& value) const;
   unsigned precompute_integer_size(td::RefInt256 value) const;
-  std::ostream& print_type(std::ostream& os) const override {
-    return os << "(VarUInteger " << n << ")";
-  }
+  std::ostream& print_type(std::ostream& os) const override;
 };
 
 extern const VarUInteger t_VarUInteger_3, t_VarUInteger_7, t_VarUInteger_16, t_VarUInteger_32;
@@ -78,73 +68,47 @@ extern const VarUInteger t_VarUInteger_3, t_VarUInteger_7, t_VarUInteger_16, t_V
 struct VarUIntegerPos final : TLB_Complex {
   int n, ln;
   bool store_pos_only;
-  VarUIntegerPos(int _n, bool relaxed = false) : n(_n), store_pos_only(!relaxed) {
-    ln = 32 - td::count_leading_zeroes32(n - 1);
-  }
+  VarUIntegerPos(int _n, bool relaxed = false);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   td::RefInt256 as_integer_skip(vm::CellSlice& cs) const override;
   unsigned long long as_uint(const vm::CellSlice& cs) const override;
   bool store_integer_value(vm::CellBuilder& cb, const td::BigInt256& value) const override;
-  std::ostream& print_type(std::ostream& os) const override {
-    return os << "(VarUIntegerPos " << n << ")";
-  }
+  std::ostream& print_type(std::ostream& os) const override;
 };
 
 extern const VarUIntegerPos t_VarUIntegerPos_16, t_VarUIntegerPos_32, t_VarUIntegerPosRelaxed_32;
 
 struct VarInteger final : TLB_Complex {
   int n, ln;
-  VarInteger(int _n) : n(_n) {
-    ln = 32 - td::count_leading_zeroes32(n - 1);
-  }
+  VarInteger(int _n);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   td::RefInt256 as_integer_skip(vm::CellSlice& cs) const override;
   long long as_int(const vm::CellSlice& cs) const override;
-  bool null_value(vm::CellBuilder& cb) const override {
-    return cb.store_zeroes_bool(ln);
-  }
+  bool null_value(vm::CellBuilder& cb) const override;
   bool store_integer_value(vm::CellBuilder& cb, const td::BigInt256& value) const override;
-  std::ostream& print_type(std::ostream& os) const override {
-    return os << "(VarInteger " << n << ")";
-  }
+  std::ostream& print_type(std::ostream& os) const override;
 };
 
 struct VarIntegerNz final : TLB_Complex {
   int n, ln;
-  VarIntegerNz(int _n) : n(_n) {
-    ln = 32 - td::count_leading_zeroes32(n - 1);
-  }
+  VarIntegerNz(int _n);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   td::RefInt256 as_integer_skip(vm::CellSlice& cs) const override;
   long long as_int(const vm::CellSlice& cs) const override;
   bool store_integer_value(vm::CellBuilder& cb, const td::BigInt256& value) const override;
-  std::ostream& print_type(std::ostream& os) const override {
-    return os << "(VarIntegerNz " << n << ")";
-  }
+  std::ostream& print_type(std::ostream& os) const override;
 };
 
 struct Unary final : TLB {
-  int get_size(const vm::CellSlice& cs) const override {
-    return cs.count_leading(1) + 1;
-  }
-  bool validate_skip(vm::CellSlice& cs, bool weak, int& n) const {
-    return cs.advance((n = cs.count_leading(1)) + 1);
-  }
-  bool skip(vm::CellSlice& cs, int& n) const {
-    return validate_skip(cs, false, n);
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    return skip(cs);
-  }
-  bool skip(vm::CellSlice& cs) const override {
-    return cs.advance(get_size(cs));
-  }
-  bool validate(int* ops, const vm::CellSlice& cs, bool weak = false) const override {
-    return cs.have(get_size(cs));
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  bool validate_skip(vm::CellSlice& cs, bool weak, int& n) const;
+  bool skip(vm::CellSlice& cs, int& n) const;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
+  bool skip(vm::CellSlice& cs) const override;
+  bool validate(int* ops, const vm::CellSlice& cs, bool weak = false) const override;
 };
 
 extern const Unary t_Unary;
@@ -152,28 +116,18 @@ extern const Unary t_Unary;
 struct HmLabel final : TLB_Complex {
   enum { hml_short = 0, hml_long = 2, hml_same = 3 };
   int m;  // max size
-  HmLabel(int _m) : m(_m) {
-  }
+  HmLabel(int _m);
   bool validate_skip(vm::CellSlice& cs, bool weak, int& n) const;
-  bool skip(vm::CellSlice& cs, int& n) const {
-    return validate_skip(cs, false, n);
-  }
-  bool skip(vm::CellSlice& cs) const override {
-    int n;
-    return skip(cs, n);
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    int n;
-    return validate_skip(cs, weak, n);
-  }
+  bool skip(vm::CellSlice& cs, int& n) const;
+  bool skip(vm::CellSlice& cs) const override;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   int get_tag(const vm::CellSlice& cs) const override;
 };
 
 struct Hashmap final : TLB_Complex {
   const TLB& value_type;
   int n;
-  Hashmap(int _n, const TLB& _val_type) : value_type(_val_type), n(_n) {
-  }
+  Hashmap(int _n, const TLB& _val_type);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
 };
@@ -182,29 +136,21 @@ struct HashmapNode final : TLB_Complex {
   enum { hmn_leaf = 0, hmn_fork = 1 };
   const TLB& value_type;
   int n;
-  HashmapNode(int _n, const TLB& _val_type) : value_type(_val_type), n(_n) {
-  }
+  HashmapNode(int _n, const TLB& _val_type);
   int get_size(const vm::CellSlice& cs) const override;
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return n > 0 ? hmn_fork : n;
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 struct HashmapE final : TLB {
   enum { hme_empty = 0, hme_root = 1 };
   Hashmap root_type;
-  HashmapE(int _n, const TLB& _val_type) : root_type(_n, _val_type) {
-  }
+  HashmapE(int _n, const TLB& _val_type);
   int get_size(const vm::CellSlice& cs) const override;
   bool validate(int* ops, const vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(1);
-  }
-  bool null_value(vm::CellBuilder& cb) const override {
-    return cb.store_zeroes_bool(1);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
+  bool null_value(vm::CellBuilder& cb) const override;
   bool add_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override;
   int sub_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override;
   bool add_values_ref(Ref<vm::Cell>& res, Ref<vm::Cell> arg1, Ref<vm::Cell> arg2) const;
@@ -215,24 +161,16 @@ struct HashmapE final : TLB {
 struct AugmentationCheckData : vm::dict::AugmentationData {
   const TLB& value_type;
   const TLB& extra_type;
-  AugmentationCheckData(const TLB& val_type, const TLB& ex_type) : value_type(val_type), extra_type(ex_type) {
-  }
-  bool skip_extra(vm::CellSlice& cs) const override {
-    return extra_type.skip(cs);
-  }
-  bool eval_fork(vm::CellBuilder& cb, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const override {
-    return extra_type.add_values(cb, left_cs, right_cs);
-  }
-  bool eval_empty(vm::CellBuilder& cb) const override {
-    return extra_type.null_value(cb);
-  }
+  AugmentationCheckData(const TLB& val_type, const TLB& ex_type);
+  bool skip_extra(vm::CellSlice& cs) const override;
+  bool eval_fork(vm::CellBuilder& cb, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const override;
+  bool eval_empty(vm::CellBuilder& cb) const override;
 };
 
 struct HashmapAug final : TLB_Complex {
   const AugmentationCheckData& aug;
   int n;
-  HashmapAug(int _n, const AugmentationCheckData& _aug) : aug(_aug), n(_n) {
-  }
+  HashmapAug(int _n, const AugmentationCheckData& _aug);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   bool extract_extra(vm::CellSlice& cs) const;
@@ -242,26 +180,20 @@ struct HashmapAugNode final : TLB_Complex {
   enum { ahmn_leaf = 0, ahmn_fork = 1 };
   const AugmentationCheckData& aug;
   int n;
-  HashmapAugNode(int _n, const AugmentationCheckData& _aug) : aug(_aug), n(_n) {
-  }
+  HashmapAugNode(int _n, const AugmentationCheckData& _aug);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return n > 0 ? ahmn_fork : n;
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 struct HashmapAugE final : TLB_Complex {
   enum { ahme_empty = 0, ahme_root = 1 };
   HashmapAug root_type;
-  HashmapAugE(int _n, const AugmentationCheckData& _aug) : root_type(_n, std::move(_aug)) {
-  }
+  HashmapAugE(int _n, const AugmentationCheckData& _aug);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   bool extract_extra(vm::CellSlice& cs) const;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(1);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 struct Grams final : TLB_Complex {
@@ -278,21 +210,13 @@ extern const Grams t_Grams;
 struct MsgAddressInt final : TLB_Complex {
   enum { addr_std = 2, addr_var = 3 };
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(2);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
   static ton::AccountIdPrefixFull get_prefix(vm::CellSlice&& cs);
   static ton::AccountIdPrefixFull get_prefix(const vm::CellSlice& cs);
   static ton::AccountIdPrefixFull get_prefix(Ref<vm::CellSlice> cs_ref);
-  static bool get_prefix_to(vm::CellSlice&& cs, ton::AccountIdPrefixFull& pfx) {
-    return (pfx = get_prefix(std::move(cs))).is_valid();
-  }
-  static bool get_prefix_to(const vm::CellSlice& cs, ton::AccountIdPrefixFull& pfx) {
-    return (pfx = get_prefix(cs)).is_valid();
-  }
-  static bool get_prefix_to(Ref<vm::CellSlice> cs_ref, ton::AccountIdPrefixFull& pfx) {
-    return cs_ref.not_null() && (pfx = get_prefix(std::move(cs_ref))).is_valid();
-  }
+  static bool get_prefix_to(vm::CellSlice&& cs, ton::AccountIdPrefixFull& pfx);
+  static bool get_prefix_to(const vm::CellSlice& cs, ton::AccountIdPrefixFull& pfx);
+  static bool get_prefix_to(Ref<vm::CellSlice> cs_ref, ton::AccountIdPrefixFull& pfx);
   bool skip_get_depth(vm::CellSlice& cs, int& depth) const;
   bool extract_std_address(Ref<vm::CellSlice> cs_ref, ton::WorkchainId& workchain, ton::StdSmcAddress& addr,
                            bool rewrite = true) const;
@@ -312,9 +236,7 @@ extern const MsgAddressInt t_MsgAddressInt;
 struct MsgAddressExt final : TLB {
   enum { addr_none = 0, addr_ext = 1 };
   int get_size(const vm::CellSlice& cs) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(2);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const MsgAddressExt t_MsgAddressExt;
@@ -322,44 +244,23 @@ extern const MsgAddressExt t_MsgAddressExt;
 struct MsgAddress final : TLB_Complex {
   enum { addr_none = 0, addr_ext = 1, addr_std = 2, addr_var = 3 };
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(2);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const MsgAddress t_MsgAddress;
 
 struct ExtraCurrencyCollection final : TLB {
   HashmapE dict_type, dict_type2;
-  ExtraCurrencyCollection() : dict_type(32, t_VarUIntegerPos_32), dict_type2(32, t_VarUIntegerPosRelaxed_32) {
-  }
-  int get_size(const vm::CellSlice& cs) const override {
-    return dict_type.get_size(cs);
-  }
-  bool validate(int* ops, const vm::CellSlice& cs, bool weak) const override {
-    return dict_type.validate(ops, cs, weak);
-  }
-  bool null_value(vm::CellBuilder& cb) const override {
-    return cb.store_zeroes_bool(1);
-  }
-  bool add_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override {
-    return dict_type.add_values(cb, cs1, cs2);
-  }
-  int sub_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override {
-    return dict_type2.sub_values(cb, cs1, cs2);
-  }
-  bool add_values_ref(Ref<vm::Cell>& res, Ref<vm::Cell> arg1, Ref<vm::Cell> arg2) const {
-    return dict_type.add_values_ref(res, std::move(arg1), std::move(arg2));
-  }
-  int sub_values_ref(Ref<vm::Cell>& res, Ref<vm::Cell> arg1, Ref<vm::Cell> arg2) const {
-    return dict_type2.sub_values_ref(res, std::move(arg1), std::move(arg2));
-  }
-  bool store_ref(vm::CellBuilder& cb, Ref<vm::Cell> arg) const {
-    return dict_type.store_ref(cb, std::move(arg));
-  }
-  unsigned precompute_size(Ref<vm::Cell> arg) const {
-    return arg.is_null() ? 1 : 0x10001;
-  }
+  ExtraCurrencyCollection();
+  int get_size(const vm::CellSlice& cs) const override;
+  bool validate(int* ops, const vm::CellSlice& cs, bool weak) const override;
+  bool null_value(vm::CellBuilder& cb) const override;
+  bool add_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override;
+  int sub_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override;
+  bool add_values_ref(Ref<vm::Cell>& res, Ref<vm::Cell> arg1, Ref<vm::Cell> arg2) const;
+  int sub_values_ref(Ref<vm::Cell>& res, Ref<vm::Cell> arg1, Ref<vm::Cell> arg2) const;
+  bool store_ref(vm::CellBuilder& cb, Ref<vm::Cell> arg) const;
+  unsigned precompute_size(Ref<vm::Cell> arg) const;
 };
 
 extern const ExtraCurrencyCollection t_ExtraCurrencyCollection;
@@ -368,9 +269,7 @@ struct CurrencyCollection final : TLB_Complex {
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   td::RefInt256 as_integer_skip(vm::CellSlice& cs) const override;
-  bool null_value(vm::CellBuilder& cb) const override {
-    return cb.store_bits_same_bool(1 + 4, false);
-  }
+  bool null_value(vm::CellBuilder& cb) const override;
   bool add_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override;
   bool unpack_special(vm::CellSlice& cs, td::RefInt256& balance, Ref<vm::Cell>& extra, bool inexact = false) const;
   bool unpack_special(vm::CellSlice& cs, block::CurrencyCollection& value, bool inexact = false) const;
@@ -379,9 +278,7 @@ struct CurrencyCollection final : TLB_Complex {
   bool pack_special(vm::CellBuilder& cb, block::CurrencyCollection&& value) const;
   bool unpack(vm::CellSlice& cs, block::CurrencyCollection& res) const;
   bool pack(vm::CellBuilder& cb, const block::CurrencyCollection& res) const;
-  unsigned precompute_size(td::RefInt256 balance, Ref<vm::Cell> extra) const {
-    return t_Grams.precompute_size(std::move(balance)) + t_ExtraCurrencyCollection.precompute_size(std::move(extra));
-  }
+  unsigned precompute_size(td::RefInt256 balance, Ref<vm::Cell> extra) const;
 };
 
 extern const CurrencyCollection t_CurrencyCollection;
@@ -390,16 +287,11 @@ struct CommonMsgInfo final : TLB_Complex {
   enum { int_msg_info = 0, ext_in_msg_info = 2, ext_out_msg_info = 3 };
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    int v = (int)cs.prefetch_ulong(2);
-    return v == 1 ? int_msg_info : v;
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
   struct Record_int_msg_info;
   bool unpack(vm::CellSlice& cs, Record_int_msg_info& data) const;
   bool get_created_lt(vm::CellSlice& cs, unsigned long long& created_lt) const;
-  bool is_internal(const vm::CellSlice& cs) const {
-    return get_tag(cs) == int_msg_info;
-  }
+  bool is_internal(const vm::CellSlice& cs) const;
 };
 
 struct CommonMsgInfo::Record_int_msg_info {
@@ -412,9 +304,7 @@ struct CommonMsgInfo::Record_int_msg_info {
 extern const CommonMsgInfo t_CommonMsgInfo;
 
 struct TickTock final : TLB {
-  int get_size(const vm::CellSlice& cs) const override {
-    return 2;
-  }
+  int get_size(const vm::CellSlice& cs) const override;
 };
 
 extern const TickTock t_TickTock;
@@ -430,9 +320,7 @@ struct Message final : TLB_Complex {
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   bool extract_info(vm::CellSlice& cs) const;
   bool get_created_lt(vm::CellSlice& cs, unsigned long long& created_lt) const;
-  bool is_internal(const vm::CellSlice& cs) const {
-    return t_CommonMsgInfo.is_internal(cs);
-  }
+  bool is_internal(const vm::CellSlice& cs) const;
   bool is_internal(Ref<vm::Cell> ref) const;
 };
 
@@ -444,13 +332,8 @@ struct IntermediateAddress final : TLB_Complex {
   int get_size(const vm::CellSlice& cs) const override;
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  bool fetch_regular(vm::CellSlice& cs, int& use_dst_bits) const {
-    return cs.fetch_uint_to(8, use_dst_bits) && use_dst_bits <= 96;
-  }
-  int get_tag(const vm::CellSlice& cs) const override {
-    int v = (int)cs.prefetch_ulong(2);
-    return v == 1 ? interm_addr_regular : v;
-  }
+  bool fetch_regular(vm::CellSlice& cs, int& use_dst_bits) const;
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const IntermediateAddress t_IntermediateAddress;
@@ -503,10 +386,7 @@ extern const StorageInfo t_StorageInfo;
 struct AccountState final : TLB_Complex {
   enum { account_uninit = 0, account_frozen = 1, account_active = 2 };
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    int t = (int)cs.prefetch_ulong(2);
-    return t == 3 ? account_active : t;
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
   bool get_ticktock(vm::CellSlice& cs, int& ticktock) const;
 };
 
@@ -523,16 +403,13 @@ extern const AccountStorage t_AccountStorage;
 struct Account final : TLB_Complex {
   enum { account_none = 0, account = 1 };
   bool allow_empty;
-  Account(bool _allow_empty = false) : allow_empty(_allow_empty) {
-  }
+  Account(bool _allow_empty = false);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   // Ref<vm::CellSlice> get_balance(const vm::CellSlice& cs) const;
   bool skip_copy_balance(vm::CellBuilder& cb, vm::CellSlice& cs) const;
   bool skip_copy_depth_balance(vm::CellBuilder& cb, vm::CellSlice& cs) const;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(1);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const Account t_Account, t_AccountE;
@@ -540,12 +417,8 @@ extern const RefTo<Account> t_Ref_AccountE;
 
 struct AccountStatus final : TLB {
   enum { acc_state_uninit, acc_state_frozen, acc_state_active, acc_state_nonexist };
-  int get_size(const vm::CellSlice& cs) const override {
-    return 2;
-  }
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(2);
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const AccountStatus t_AccountStatus;
@@ -561,25 +434,13 @@ struct ShardAccount final : TLB_Complex {
     bool reset();
     bool unpack(vm::CellSlice& cs);
     bool unpack(Ref<vm::CellSlice> cs_ref);
-    bool invalidate() {
-      return valid = false;
-    }
+    bool invalidate();
   };
-  int get_size(const vm::CellSlice& cs) const override {
-    return 0x10140;
-  }
-  bool skip(vm::CellSlice& cs) const override {
-    return cs.advance_ext(0x140, 1);
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    return cs.advance(0x140) && t_Ref_AccountE.validate_skip(ops, cs, weak);
-  }
-  static bool unpack(vm::CellSlice& cs, Record& info) {
-    return info.unpack(cs);
-  }
-  static bool unpack(Ref<vm::CellSlice> cs_ref, Record& info) {
-    return info.unpack(std::move(cs_ref));
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  bool skip(vm::CellSlice& cs) const override;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
+  static bool unpack(vm::CellSlice& cs, Record& info);
+  static bool unpack(Ref<vm::CellSlice> cs_ref, Record& info);
   static bool extract_account_state(Ref<vm::CellSlice> cs_ref, Ref<vm::Cell>& acc_state);
 };
 
@@ -595,8 +456,7 @@ struct DepthBalanceInfo final : TLB_Complex {
 extern const DepthBalanceInfo t_DepthBalanceInfo;
 
 struct Aug_ShardAccounts final : AugmentationCheckData {
-  Aug_ShardAccounts() : AugmentationCheckData(t_ShardAccount, t_DepthBalanceInfo) {
-  }
+  Aug_ShardAccounts();
   bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
 };
 
@@ -604,29 +464,18 @@ extern const Aug_ShardAccounts aug_ShardAccounts;
 
 struct ShardAccounts final : TLB_Complex {
   HashmapAugE dict_type;
-  ShardAccounts() : dict_type(256, aug_ShardAccounts){};
-  bool skip(vm::CellSlice& cs) const override {
-    return dict_type.skip(cs);
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    return dict_type.validate_skip(ops, cs, weak);
-  }
+  ShardAccounts();
+  ;
+  bool skip(vm::CellSlice& cs) const override;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
 };
 
 extern const ShardAccounts t_ShardAccounts;
 
 struct AccStatusChange final : TLB {
   enum { acst_unchanged = 0, acst_frozen = 2, acst_deleted = 3 };
-  int get_size(const vm::CellSlice& cs) const override {
-    return cs.prefetch_ulong(1) ? 2 : 1;
-  }
-  int get_tag(const vm::CellSlice& cs) const override {
-    if (cs.size() == 1) {
-      return (int)cs.prefetch_ulong(1) ? -1 : acst_unchanged;
-    }
-    int v = (int)cs.prefetch_ulong(2);
-    return v == 1 ? acst_unchanged : v;
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const AccStatusChange t_AccStatusChange;
@@ -654,20 +503,9 @@ struct TrComputeInternal1 final : TLB_Complex {
 
 struct ComputeSkipReason final : TLB {
   enum { cskip_no_state = 0, cskip_bad_state = 1, cskip_no_gas = 2, cskip_suspended = 3 };
-  int get_size(const vm::CellSlice& cs) const override {
-    return cs.prefetch_ulong(2) == 3 ? 3 : 2;
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    int tag = get_tag(cs);
-    return tag >= 0 && cs.advance(tag == 3 ? 3 : 2);
-  }
-  int get_tag(const vm::CellSlice& cs) const override {
-    int t = (int)cs.prefetch_ulong(2);
-    if (t == 3 && cs.prefetch_ulong(3) != 0b110) {
-      return -1;
-    }
-    return t;
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const ComputeSkipReason t_ComputeSkipReason;
@@ -676,9 +514,7 @@ struct TrComputePhase final : TLB_Complex {
   enum { tr_phase_compute_skipped = 0, tr_phase_compute_vm = 1 };
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(1);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const TrComputePhase t_TrComputePhase;
@@ -745,8 +581,7 @@ extern const Transaction t_Transaction;
 extern const RefTo<Transaction> t_Ref_Transaction;
 
 struct Aug_AccountTransactions final : AugmentationCheckData {
-  Aug_AccountTransactions() : AugmentationCheckData(t_Ref_Transaction, t_CurrencyCollection) {
-  }
+  Aug_AccountTransactions();
   bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
 };
 
@@ -754,12 +589,8 @@ extern const Aug_AccountTransactions aug_AccountTransactions;
 extern const HashmapAug t_AccountTransactions;  // (HashmapAug 64 ^Transaction CurrencyCollection)
 
 struct HashUpdate final : TLB_Complex {
-  bool skip(vm::CellSlice& cs) const override {
-    return cs.advance(8 + 256 * 2);
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    return cs.fetch_ulong(8) == 0x72 && cs.advance(256 * 2);
-  }
+  bool skip(vm::CellSlice& cs) const override;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
 };
 
 extern const HashUpdate t_HashUpdate;
@@ -774,8 +605,7 @@ struct AccountBlock final : TLB_Complex {
 extern const AccountBlock t_AccountBlock;
 
 struct Aug_ShardAccountBlocks final : AugmentationCheckData {
-  Aug_ShardAccountBlocks() : AugmentationCheckData(t_AccountBlock, t_CurrencyCollection) {
-  }
+  Aug_ShardAccountBlocks();
   bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
 };
 
@@ -785,9 +615,7 @@ extern const HashmapAugE t_ShardAccountBlocks;  // (HashmapAugE 256 AccountBlock
 struct ImportFees final : TLB_Complex {
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  bool null_value(vm::CellBuilder& cb) const override {
-    return cb.store_bits_same_bool(4 + 4 + 1, false);
-  }
+  bool null_value(vm::CellBuilder& cb) const override;
   bool add_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override;
 };
 
@@ -805,9 +633,7 @@ struct InMsg final : TLB_Complex {
   };
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(3);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
   bool get_import_fees(vm::CellBuilder& cb, vm::CellSlice& cs) const;
 };
 
@@ -826,10 +652,7 @@ struct OutMsg final : TLB_Complex {
   };
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    int t = (int)cs.prefetch_ulong(3);
-    return t != 6 ? t : (int)cs.prefetch_ulong(4);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
   bool get_export_value(vm::CellBuilder& cb, vm::CellSlice& cs) const;
   bool get_created_lt(vm::CellSlice& cs, unsigned long long& created_lt) const;
 };
@@ -839,69 +662,50 @@ extern const OutMsg t_OutMsg;
 // next: InMsgDescr, OutMsgDescr, OutMsgQueue, and their augmentations
 
 struct Aug_InMsgDescr final : AugmentationCheckData {
-  Aug_InMsgDescr() : AugmentationCheckData(t_InMsg, t_ImportFees) {
-  }
-  bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override {
-    return t_InMsg.get_import_fees(cb, cs);
-  }
+  Aug_InMsgDescr();
+  bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
 };
 
 extern const Aug_InMsgDescr aug_InMsgDescr;
 
 struct InMsgDescr final : TLB_Complex {
   HashmapAugE dict_type;
-  InMsgDescr() : dict_type(256, aug_InMsgDescr){};
-  bool skip(vm::CellSlice& cs) const override {
-    return dict_type.skip(cs);
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    return dict_type.validate_skip(ops, cs, weak);
-  }
+  InMsgDescr();
+  ;
+  bool skip(vm::CellSlice& cs) const override;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
 };
 
 extern const InMsgDescr t_InMsgDescr;
 
 struct Aug_OutMsgDescr final : AugmentationCheckData {
-  Aug_OutMsgDescr() : AugmentationCheckData(t_OutMsg, t_CurrencyCollection) {
-  }
-  bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override {
-    return t_OutMsg.get_export_value(cb, cs);
-  }
+  Aug_OutMsgDescr();
+  bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
 };
 
 extern const Aug_OutMsgDescr aug_OutMsgDescr;
 
 struct OutMsgDescr final : TLB_Complex {
   HashmapAugE dict_type;
-  OutMsgDescr() : dict_type(256, aug_OutMsgDescr){};
-  bool skip(vm::CellSlice& cs) const override {
-    return dict_type.skip(cs);
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    return dict_type.validate_skip(ops, cs, weak);
-  }
+  OutMsgDescr();
+  ;
+  bool skip(vm::CellSlice& cs) const override;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
 };
 
 extern const OutMsgDescr t_OutMsgDescr;
 
 struct EnqueuedMsg final : TLB_Complex {
-  int get_size(const vm::CellSlice& cs) const override {
-    return 0x10040;
-  }
-  bool skip(vm::CellSlice& cs) const override {
-    return cs.advance_ext(0x10040);
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  bool unpack(vm::CellSlice& cs, EnqueuedMsgDescr& descr) const {
-    return descr.unpack(cs);
-  }
+  bool unpack(vm::CellSlice& cs, EnqueuedMsgDescr& descr) const;
 };
 
 extern const EnqueuedMsg t_EnqueuedMsg;
 
 struct Aug_OutMsgQueue final : AugmentationCheckData {
-  Aug_OutMsgQueue() : AugmentationCheckData(t_EnqueuedMsg, t_uint64) {
-  }
+  Aug_OutMsgQueue();
   bool eval_fork(vm::CellBuilder& cb, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const override;
   bool eval_empty(vm::CellBuilder& cb) const override;
   bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
@@ -911,21 +715,16 @@ extern const Aug_OutMsgQueue aug_OutMsgQueue;
 
 struct OutMsgQueue final : TLB_Complex {
   HashmapAugE dict_type;
-  OutMsgQueue() : dict_type(32 + 64 + 256, aug_OutMsgQueue){};
-  bool skip(vm::CellSlice& cs) const override {
-    return dict_type.skip(cs);
-  }
-  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override {
-    return dict_type.validate_skip(ops, cs, weak);
-  }
+  OutMsgQueue();
+  ;
+  bool skip(vm::CellSlice& cs) const override;
+  bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
 };
 
 extern const OutMsgQueue t_OutMsgQueue;
 
 struct ProcessedUpto final : TLB {
-  int get_size(const vm::CellSlice& cs) const override {
-    return 64 + 256;
-  }
+  int get_size(const vm::CellSlice& cs) const override;
 };
 
 extern const ProcessedUpto t_ProcessedUpto;
@@ -942,9 +741,7 @@ extern const RefTo<OutMsgQueueInfo> t_Ref_OutMsgQueueInfo;
 
 struct ExtBlkRef final : TLB {
   enum { fixed_size = 64 + 32 + 256 * 2 };
-  int get_size(const vm::CellSlice& cs) const override {
-    return fixed_size;
-  }
+  int get_size(const vm::CellSlice& cs) const override;
   bool unpack(vm::CellSlice& cs, ton::BlockIdExt& blkid, ton::LogicalTime* end_lt = nullptr) const;
   bool unpack(Ref<vm::CellSlice> cs_ref, ton::BlockIdExt& blkid, ton::LogicalTime* end_lt = nullptr) const;
   bool store(vm::CellBuilder& cb, const ton::BlockIdExt& blkid, ton::LogicalTime end_lt) const;
@@ -955,25 +752,17 @@ struct ExtBlkRef final : TLB {
 extern const ExtBlkRef t_ExtBlkRef;
 
 struct BlkMasterInfo final : TLB {
-  int get_size(const vm::CellSlice& cs) const override {
-    return t_ExtBlkRef.get_size(cs);
-  }
+  int get_size(const vm::CellSlice& cs) const override;
 };
 
 extern const BlkMasterInfo t_BlkMasterInfo;
 
 struct ShardIdent final : TLB_Complex {
   struct Record;
-  int get_size(const vm::CellSlice& cs) const override {
-    return 2 + 6 + 32 + 64;
-  }
-  bool skip(vm::CellSlice& cs) const override {
-    return cs.advance(get_size(cs));
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return 0;
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
   bool unpack(vm::CellSlice& cs, Record& data) const;
   bool pack(vm::CellBuilder& cb, const Record& data) const;
   bool unpack(vm::CellSlice& cs, ton::ShardIdFull& data) const;
@@ -986,29 +775,18 @@ struct ShardIdent::Record {
   int shard_pfx_bits;
   int workchain_id;
   unsigned long long shard_prefix;
-  Record() : shard_pfx_bits(-1), workchain_id(ton::workchainInvalid), shard_prefix(0) {
-  }
-  Record(int _pfxlen, int _wcid, unsigned long long _pfx)
-      : shard_pfx_bits(_pfxlen), workchain_id(_wcid), shard_prefix(_pfx) {
-  }
+  Record();
+  Record(int _pfxlen, int _wcid, unsigned long long _pfx);
   bool check() const;
-  bool is_valid() const {
-    return shard_pfx_bits >= 0;
-  }
-  void invalidate() {
-    shard_pfx_bits = -1;
-  }
+  bool is_valid() const;
+  void invalidate();
 };
 
 extern const ShardIdent t_ShardIdent;
 
 struct BlockIdExt final : TLB_Complex {
-  int get_size(const vm::CellSlice& cs) const override {
-    return 2 + 6 + 32 + 64 + 32 + 256 * 2;
-  }
-  bool skip(vm::CellSlice& cs) const override {
-    return cs.advance(get_size(cs));
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
   bool unpack(vm::CellSlice& cs, ton::BlockIdExt& data) const;
   bool pack(vm::CellBuilder& cb, const ton::BlockIdExt& data) const;
@@ -1020,9 +798,7 @@ struct ShardState final : TLB_Complex {
   enum { shard_state = (int)0x9023afe2, split_state = 0x5f327da5 };
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(32) == shard_state ? shard_state : -1;
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const ShardState t_ShardState;
@@ -1030,9 +806,7 @@ extern const ShardState t_ShardState;
 struct ShardState_aux final : TLB_Complex {
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return 0;
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const ShardState_aux t_ShardState_aux;
@@ -1041,17 +815,14 @@ struct LibDescr final : TLB_Complex {
   enum { shared_lib_descr = 0 };
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
-  int get_tag(const vm::CellSlice& cs) const override {
-    return (int)cs.prefetch_ulong(2);
-  }
+  int get_tag(const vm::CellSlice& cs) const override;
 };
 
 extern const LibDescr t_LibDescr;
 
 struct BlkPrevInfo final : TLB_Complex {
   bool merged;
-  BlkPrevInfo(bool _merged) : merged(_merged) {
-  }
+  BlkPrevInfo(bool _merged);
   bool skip(vm::CellSlice& cs) const override;
   bool validate_skip(int* ops, vm::CellSlice& cs, bool weak = false) const override;
 };
@@ -1068,29 +839,22 @@ extern const McStateExtra t_McStateExtra;
 
 struct KeyExtBlkRef final : TLB {
   enum { fixed_size = 1 + ExtBlkRef::fixed_size };
-  int get_size(const vm::CellSlice& cs) const override {
-    return fixed_size;
-  }
+  int get_size(const vm::CellSlice& cs) const override;
 };
 
 extern const KeyExtBlkRef t_KeyExtBlkRef;
 
 struct KeyMaxLt final : TLB {
   enum { fixed_size = 1 + 64 };
-  int get_size(const vm::CellSlice& cs) const override {
-    return fixed_size;
-  }
-  bool null_value(vm::CellBuilder& cb) const override {
-    return cb.store_bits_same_bool(fixed_size, false);
-  }
+  int get_size(const vm::CellSlice& cs) const override;
+  bool null_value(vm::CellBuilder& cb) const override;
   bool add_values(vm::CellBuilder& cb, vm::CellSlice& cs1, vm::CellSlice& cs2) const override;
 };
 
 extern const KeyMaxLt t_KeyMaxLt;
 
 struct Aug_OldMcBlocksInfo final : AugmentationCheckData {
-  Aug_OldMcBlocksInfo() : AugmentationCheckData(t_KeyExtBlkRef, t_KeyMaxLt) {
-  }
+  Aug_OldMcBlocksInfo();
   bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
 };
 
@@ -1106,8 +870,7 @@ struct ShardFeeCreated final : TLB_Complex {
 extern const ShardFeeCreated t_ShardFeeCreated;
 
 struct Aug_ShardFees final : AugmentationCheckData {
-  Aug_ShardFees() : AugmentationCheckData(t_ShardFeeCreated, t_ShardFeeCreated) {
-  }
+  Aug_ShardFees();
   bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
 };
 
