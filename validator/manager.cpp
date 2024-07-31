@@ -673,7 +673,9 @@ void ValidatorManagerImpl::wait_block_state(BlockHandle handle, td::uint32 prior
                                             td::Promise<td::Ref<ShardState>> promise) {
   auto it0 = block_state_cache_.find(handle->id());
   if (it0 != block_state_cache_.end()) {
-    it0->second.ttl_ = td::Timestamp::in(30.0);
+    if (handle->inited_unix_time() && handle->unix_time() > (UnixTime)td::Clocks::system() - 3600) {
+      it0->second.ttl_ = td::Timestamp::in(30.0);
+    }
     promise.set_result(it0->second.state_);
     return;
   }
@@ -1100,7 +1102,7 @@ void ValidatorManagerImpl::get_block_by_seqno_from_db(AccountIdPrefixFull accoun
 }
 
 void ValidatorManagerImpl::finished_wait_state(BlockHandle handle, td::Result<td::Ref<ShardState>> R) {
-  if (R.is_ok()) {
+  if (R.is_ok() && handle->inited_unix_time() && handle->unix_time() > (UnixTime)td::Clocks::system() - 3600) {
     block_state_cache_[handle->id()] = {R.ok(), td::Timestamp::in(30.0)};
   }
   auto it = wait_state_.find(handle->id());
