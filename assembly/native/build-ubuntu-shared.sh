@@ -1,7 +1,7 @@
 #/bin/bash
 
 #sudo apt-get update
-#sudo apt-get install -y build-essential git cmake ninja-build zlib1g-dev libsecp256k1-dev libmicrohttpd-dev libsodium-dev liblz4-dev
+#sudo apt-get install -y build-essential git cmake ninja-build zlib1g-dev libsecp256k1-dev libmicrohttpd-dev libsodium-dev liblz4-dev libjemalloc-dev
 
 with_tests=false
 with_artifacts=false
@@ -42,7 +42,7 @@ else
   echo "Using compiled openssl_3"
 fi
 
-cmake -GNinja .. \
+cmake -GNinja -DTON_USE_JEMALLOC=ON .. \
 -DCMAKE_BUILD_TYPE=Release \
 -DOPENSSL_ROOT_DIR=$opensslPath \
 -DOPENSSL_INCLUDE_DIR=$opensslPath/include \
@@ -58,7 +58,7 @@ ninja storage-daemon storage-daemon-cli fift func tonlib tonlibjson tonlib-cli \
       adnl-proxy create-state emulator test-ed25519 test-ed25519-crypto test-bigint \
       test-vm test-fift test-cells test-smartcont test-net test-tdactor test-tdutils \
       test-tonlib-offline test-adnl test-dht test-rldp test-rldp2 test-catchain \
-      test-fec test-tddb test-db test-validator-session-state
+      test-fec test-tddb test-db test-validator-session-state test-emulator
       test $? -eq 0 || { echo "Can't compile ton"; exit 1; }
 else
 ninja storage-daemon storage-daemon-cli fift func tonlib tonlibjson tonlib-cli \
@@ -95,6 +95,8 @@ test $? -eq 0 || { echo "Can't strip final binaries"; exit 1; }
 ./validator-engine/validator-engine -V || exit 1
 ./lite-client/lite-client -V || exit 1
 ./crypto/fift  -V || exit 1
+
+ldd ./validator-engine/validator-engine || exit 1
 
 cd ..
 

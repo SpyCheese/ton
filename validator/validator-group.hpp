@@ -34,8 +34,10 @@ class ValidatorManager;
 
 class ValidatorGroup : public td::actor::Actor {
  public:
-  void generate_block_candidate(td::uint32 round_id, td::Promise<BlockCandidate> promise);
-  void validate_block_candidate(td::uint32 round_id, BlockCandidate block, td::Promise<td::uint32> promise);
+  void generate_block_candidate(td::uint32 round_id,
+                                td::Promise<validatorsession::ValidatorSession::GeneratedCandidate> promise);
+  void validate_block_candidate(td::uint32 round_id, BlockCandidate block,
+                                td::Promise<std::pair<UnixTime, bool>> promise);
   void accept_block_candidate(td::uint32 round_id, PublicKeyHash src, td::BufferSlice block, RootHash root_hash,
                               FileHash file_hash, std::vector<BlockSignature> signatures,
                               std::vector<BlockSignature> approve_signatures,
@@ -62,12 +64,16 @@ class ValidatorGroup : public td::actor::Actor {
   void get_validator_group_info_for_litequery(
       td::Promise<tl_object_ptr<lite_api::liteServer_nonfinal_validatorGroupInfo>> promise);
 
+  void update_options(td::Ref<ValidatorManagerOptions> opts) {
+    opts_ = std::move(opts);
+  }
+
   ValidatorGroup(ShardIdFull shard, PublicKeyHash local_id, ValidatorSessionId session_id,
                  td::Ref<ValidatorSet> validator_set, validatorsession::ValidatorSessionOptions config,
                  td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
                  td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<overlay::Overlays> overlays,
                  std::string db_root, td::actor::ActorId<ValidatorManager> validator_manager, bool create_session,
-                 bool allow_unsafe_self_blocks_resync)
+                 bool allow_unsafe_self_blocks_resync, td::Ref<ValidatorManagerOptions> opts)
       : shard_(shard)
       , local_id_(std::move(local_id))
       , session_id_(session_id)
@@ -80,7 +86,8 @@ class ValidatorGroup : public td::actor::Actor {
       , db_root_(std::move(db_root))
       , manager_(validator_manager)
       , init_(create_session)
-      , allow_unsafe_self_blocks_resync_(allow_unsafe_self_blocks_resync) {
+      , allow_unsafe_self_blocks_resync_(allow_unsafe_self_blocks_resync)
+      , opts_(std::move(opts)) {
   }
 
  private:
@@ -121,6 +128,7 @@ class ValidatorGroup : public td::actor::Actor {
   bool init_ = false;
   bool started_ = false;
   bool allow_unsafe_self_blocks_resync_;
+  td::Ref<ValidatorManagerOptions> opts_;
   td::uint32 last_known_round_id_ = 0;
 
   struct CachedCollatedBlock {

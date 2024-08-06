@@ -358,7 +358,8 @@ target_link_libraries(test-ed25519-crypto PUBLIC ton_crypto)
 
 add_library(fift-lib STATIC ${FIFT_SOURCE})
 target_include_directories(fift-lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
-target_link_libraries(fift-lib PUBLIC ton_crypto ton_db tdutils ton_block)
+target_link_libraries(fift-lib PUBLIC ton_crypto tdutils ton_block)
+
 if (USE_EMSCRIPTEN)
   target_link_options(fift-lib PRIVATE -fexceptions)
   target_compile_options(fift-lib PRIVATE -fexceptions)
@@ -479,10 +480,17 @@ if (NOT CMAKE_CROSSCOMPILING OR USE_EMSCRIPTEN)
       OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_DEST_FIF}
     )
     set(ARG_DEST_CPP "${ARG_DEST}.cpp")
+
+    if (WIN32)
+      set(ARG_LIB_DIR "fift/lib@smartcont")
+    else()
+      set(ARG_LIB_DIR "fift/lib:smartcont")
+    endif()
+
     add_custom_command(
       COMMENT "Generate ${ARG_DEST_CPP}"
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      COMMAND fift -Ifift/lib:smartcont -s asm-to-cpp.fif ${ARG_DEST_FIF} ${ARG_DEST_CPP} ${ARG_NAME}
+      COMMAND fift -I${ARG_LIB_DIR} -s asm-to-cpp.fif ${ARG_DEST_FIF} ${ARG_DEST_CPP} ${ARG_NAME}
       MAIN_DEPENDENCY ${ARG_SOURCE}
       DEPENDS fift ${ARG_DEST_FIF} smartcont/asm-to-cpp.fif fift/lib/Asm.fif
       OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_DEST_CPP}

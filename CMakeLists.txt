@@ -234,7 +234,7 @@ if (THREADS_HAVE_PTHREAD_ARG)
 endif()
 
 if (TON_USE_JEMALLOC)
-  find_package(JeMalloc REQUIRED)
+  find_package(jemalloc REQUIRED)
 endif()
 
 set(MEMPROF "" CACHE STRING "Use one of \"ON\", \"FAST\" or \"SAFE\" to enable memory profiling. \
@@ -539,6 +539,9 @@ target_link_libraries(test-ton-collator overlay tdutils tdactor adnl tl_api dht
 add_executable(test-http test/test-http.cpp)
 target_link_libraries(test-http PRIVATE tonhttp)
 
+add_executable(test-emulator test/test-td-main.cpp emulator/test/emulator-tests.cpp)
+target_link_libraries(test-emulator PRIVATE emulator)
+
 get_directory_property(HAS_PARENT PARENT_DIRECTORY)
 if (HAS_PARENT)
   set(ALL_TEST_SOURCE
@@ -570,6 +573,7 @@ add_test(test-cells test-cells ${TEST_OPTIONS})
 add_test(test-smartcont test-smartcont)
 add_test(test-net test-net)
 add_test(test-actors test-tdactor)
+add_test(test-emulator test-emulator)
 
 #BEGIN tonlib
 add_test(test-tdutils test-tdutils)

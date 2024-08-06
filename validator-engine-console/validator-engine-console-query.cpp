@@ -1171,11 +1171,95 @@ td::Status ShowCustomOverlaysQuery::receive(td::BufferSlice data) {
     td::TerminalIO::out() << "Overlay \"" << overlay->name_ << "\": " << overlay->nodes_.size() << " nodes\n";
     for (const auto &node : overlay->nodes_) {
       td::TerminalIO::out() << "  " << node->adnl_id_
-                            << (node->msg_sender_ ? (PSTRING() << " (sender, p=" << node->msg_sender_priority_ << ")")
-                                                  : "")
-                            << "\n";
+                            << (node->msg_sender_
+                                    ? (PSTRING() << " (msg sender, p=" << node->msg_sender_priority_ << ")")
+                                    : "")
+                            << (node->block_sender_ ? " (block sender)" : "") << "\n";
     }
     td::TerminalIO::out() << "\n";
   }
+  return td::Status::OK();
+}
+
+td::Status SetStateSerializerEnabledQuery::run() {
+  TRY_RESULT(value, tokenizer_.get_token<int>());
+  if (value != 0 && value != 1) {
+    return td::Status::Error("expected 0 or 1");
+  }
+  TRY_STATUS(tokenizer_.check_endl());
+  enabled_ = value;
+  return td::Status::OK();
+}
+
+td::Status SetStateSerializerEnabledQuery::send() {
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_setStateSerializerEnabled>(enabled_);
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status SetStateSerializerEnabledQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status SetCollatorOptionsJsonQuery::run() {
+  TRY_RESULT_ASSIGN(file_name_, tokenizer_.get_token<std::string>());
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status SetCollatorOptionsJsonQuery::send() {
+  TRY_RESULT(data, td::read_file(file_name_));
+  auto b =
+      ton::create_serialize_tl_object<ton::ton_api::engine_validator_setCollatorOptionsJson>(data.as_slice().str());
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status SetCollatorOptionsJsonQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status ResetCollatorOptionsQuery::run() {
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status ResetCollatorOptionsQuery::send() {
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_setCollatorOptionsJson>("{}");
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status ResetCollatorOptionsQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status GetCollatorOptionsJsonQuery::run() {
+  TRY_RESULT_ASSIGN(file_name_, tokenizer_.get_token<std::string>());
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status GetCollatorOptionsJsonQuery::send() {
+  auto b =
+      ton::create_serialize_tl_object<ton::ton_api::engine_validator_getCollatorOptionsJson>();
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status GetCollatorOptionsJsonQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_jsonConfig>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  TRY_STATUS(td::write_file(file_name_, f->data_));
+  td::TerminalIO::out() << "saved config to " << file_name_ << "\n";
   return td::Status::OK();
 }
