@@ -150,13 +150,13 @@ ninja storage-daemon storage-daemon-cli fift func tonlib tonlibjson tonlib-cli \
       adnl-proxy create-state emulator test-ed25519 test-ed25519-crypto test-bigint \
       test-vm test-fift test-cells test-smartcont test-net test-tdactor test-tdutils \
       test-tonlib-offline test-adnl test-dht test-rldp test-rldp2 test-catchain \
-      test-fec test-tddb test-db test-validator-session-state test-emulator
+      test-fec test-tddb test-db test-validator-session-state test-emulator proxy-liteserver tps-counter
       test $? -eq 0 || { echo "Can't compile ton"; exit 1; }
 else
 ninja storage-daemon storage-daemon-cli fift func tonlib tonlibjson tonlib-cli \
       validator-engine lite-client pow-miner validator-engine-console blockchain-explorer \
       generate-random-id json2tlo dht-server http-proxy rldp-http-proxy \
-      adnl-proxy create-state emulator
+      adnl-proxy create-state emulator proxy-liteserver tps-counter
       test $? -eq 0 || { echo "Can't compile ton"; exit 1; }
 fi
 
@@ -178,6 +178,8 @@ strip -g storage/storage-daemon/storage-daemon \
          utils/generate-random-id \
          utils/json2tlo \
          adnl/adnl-proxy \
+         utils/proxy-liteserver \
+         tps-counter/tps-counter \
          emulator/libemulator.*
 
 test $? -eq 0 || { echo "Can't strip final binaries"; exit 1; }
@@ -202,7 +204,7 @@ if [ "$with_artifacts" = true ]; then
      build/tonlib/libtonlibjson.so build/http/http-proxy build/rldp-http-proxy/rldp-http-proxy \
      build/dht-server/dht-server build/lite-client/lite-client build/validator-engine/validator-engine \
      build/utils/generate-random-id build/utils/json2tlo build/adnl/adnl-proxy build/emulator/libemulator.so \
-     artifacts
+     build/utils/proxy-liteserver build/tps-counter/tps-counter artifacts
   test $? -eq 0 || { echo "Can't copy final binaries"; exit 1; }
   chmod +x artifacts/*
   cp -R crypto/smartcont artifacts
