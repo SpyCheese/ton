@@ -4081,33 +4081,6 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_showColla
   }
 }
 
-void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_getValidatorSessionsInfo &query,
-                                        td::BufferSlice data, ton::PublicKeyHash src, td::uint32 perm,
-                                        td::Promise<td::BufferSlice> promise) {
-  if (!(perm & ValidatorEnginePermissions::vep_default)) {
-    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::error, "not authorized")));
-    return;
-  }
-
-  if (validator_manager_.empty()) {
-    promise.set_value(
-        create_control_query_error(td::Status::Error(ton::ErrorCode::notready, "validator manager not started")));
-    return;
-  }
-
-  auto P = td::PromiseCreator::lambda(
-      [promise = std::move(promise)](
-          td::Result<ton::tl_object_ptr<ton::ton_api::engine_validator_validatorSessionsInfo>> R) mutable {
-        if (R.is_error()) {
-          promise.set_value(create_control_query_error(R.move_as_error()));
-        } else {
-          promise.set_value(ton::serialize_tl_object(R.move_as_ok(), true));
-        }
-      });
-  td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::get_validator_sessions_info,
-                          std::move(P));
-}
-
 void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_addCollator &query,
                                         td::BufferSlice data, ton::PublicKeyHash src, td::uint32 perm,
                                         td::Promise<td::BufferSlice> promise) {
@@ -4666,15 +4639,19 @@ int main(int argc, char *argv[]) {
       });
   td::uint32 threads = 7;
   p.add_checked_option(
-      't', "threads", PSTRING() << "number of threads (default=" << threads << ")", [&](td::Slice fname) {
+      't', "threads", PSTRING() << "number of threads (default=" << threads << ")", [&](td::Slice arg) {
         td::int32 v;
         try {
-          v = std::stoi(fname.str());
+          v = std::stoi(arg.str());
         } catch (...) {
           return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: not a number");
         }
-        if (v < 1 || v > 256) {
-          return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: should be in range [1..256]");
+        if (v <= 0) {
+          return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: should be > 0");
+        }
+        if (v > 127) {
+          LOG(WARNING) << "`--threads " << v << "` is too big, effective value will be 127";
+          v = 127;
         }
         threads = v;
         return td::Status::OK();

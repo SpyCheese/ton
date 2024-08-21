@@ -369,6 +369,7 @@ void ValidatorGroup::start(std::vector<BlockIdExt> prev, BlockIdExt min_masterch
   stats.session_id = session_id_;
   stats.shard = shard_;
   stats.cc_seqno = validator_set_->get_catchain_seqno();
+  stats.last_key_block_seqno = last_key_block_seqno_;
   stats.timestamp = td::Clocks::system();
   td::uint32 idx = 0;
   for (const auto& node : validator_set_->export_vector()) {
@@ -398,6 +399,16 @@ void ValidatorGroup::destroy() {
                               }
                               stats.cc_seqno = cc_seqno;
                               td::actor::send_closure(manager, &ValidatorManager::log_validator_session_stats, block_id,
+                                                      std::move(stats));
+                            });
+    td::actor::send_closure(session_, &validatorsession::ValidatorSession::get_end_stats,
+                            [manager = manager_](td::Result<validatorsession::EndValidatorGroupStats> R) {
+                              if (R.is_error()) {
+                                LOG(DEBUG) << "Failed to get validator session end stats: " << R.move_as_error();
+                                return;
+                              }
+                              auto stats = R.move_as_ok();
+                              td::actor::send_closure(manager, &ValidatorManager::log_end_validator_group_stats,
                                                       std::move(stats));
                             });
     auto ses = session_.release();
@@ -446,25 +457,6 @@ void ValidatorGroup::get_validator_group_info_for_litequery_cont(
   result->cc_seqno_ = validator_set_->get_catchain_seqno();
   result->candidates_ = std::move(candidates);
   promise.set_result(std::move(result));
-}
-
-void ValidatorGroup::get_session_info(
-    td::Promise<tl_object_ptr<ton_api::engine_validator_validatorSessionInfo>> promise) {
-  if (session_.empty() || !started_) {
-    promise.set_error(td::Status::Error(ErrorCode::notready, "session not started"));
-  }
-  auto P = td::PromiseCreator::lambda(
-      [promise = std::move(promise), block_id = create_next_block_id_simple()](
-          td::Result<tl_object_ptr<ton_api::engine_validator_validatorSessionInfo>> R) mutable {
-        if (R.is_error()) {
-          promise.set_error(R.move_as_error());
-          return;
-        }
-        auto info = R.move_as_ok();
-        info->current_block_ = create_tl_block_id_simple(block_id);
-        promise.set_result(std::move(info));
-      });
-  td::actor::send_closure(session_, &validatorsession::ValidatorSession::get_session_info, std::move(P));
 }
 
 void ValidatorGroup::collate_block(td::uint32 round_id, td::Timestamp timeout, td::Promise<BlockCandidate> promise,

@@ -271,6 +271,8 @@ void ValidatorSessionImpl::process_broadcast(PublicKeyHash src, td::BufferSlice 
     }
     stat->deserialize_time = deserialize_time;
     stat->serialized_size = data.size();
+    stat->root_hash = candidate->root_hash_;
+    stat->file_hash = file_hash;
   }
 
   if ((td::int32)block_round < (td::int32)cur_round_ - MAX_PAST_ROUND_BLOCK ||
@@ -469,6 +471,8 @@ void ValidatorSessionImpl::generated_block(td::uint32 round, ValidatorSessionCan
     stat->collated_at = td::Clocks::system();
     stat->block_timestamp = td::Clocks::system();
     stat->collation_cached = collation_cached;
+    stat->root_hash = root_hash;
+    stat->file_hash = file_hash;
   }
   if (round != cur_round_) {
     return;
@@ -603,6 +607,8 @@ void ValidatorSessionImpl::try_approve_block(const SentBlock *block) {
         if (stat->block_timestamp <= 0.0) {
           stat->block_timestamp = td::Clocks::system();
         }
+        stat->root_hash = B->root_hash_;
+        stat->file_hash = td::sha256_bits256(B->data_);
       }
 
       auto P = td::PromiseCreator::lambda([round = cur_round_, hash = block_id, root_hash = block->get_root_hash(),
@@ -998,6 +1004,29 @@ void ValidatorSessionImpl::get_current_stats(td::Promise<ValidatorSessionStats> 
   promise.set_result(cur_stats_);
 }
 
+void ValidatorSessionImpl::get_end_stats(td::Promise<EndValidatorGroupStats> promise) {
+  if (!started_) {
+    promise.set_error(td::Status::Error(ErrorCode::notready, "not started"));
+    return;
+  }
+  EndValidatorGroupStats stats;
+  stats.session_id = unique_hash_;
+  stats.timestamp = td::Clocks::system();
+  stats.nodes.resize(description().get_total_nodes());
+  for (size_t i = 0; i < stats.nodes.size(); ++i) {
+    stats.nodes[i].id = description().get_source_id(i);
+  }
+  td::actor::send_closure(catchain_, &catchain::CatChain::get_source_heights,
+                          [promise = std::move(promise),
+                           stats = std::move(stats)](td::Result<std::vector<catchain::CatChainBlockHeight>> R) mutable {
+                            TRY_RESULT_PROMISE(promise, heights, std::move(R));
+                            for (size_t i = 0; i < std::min(heights.size(), stats.nodes.size()); ++i) {
+                              stats.nodes[i].catchain_blocks = heights[i];
+                            }
+                            promise.set_result(std::move(stats));
+                          });
+}
+
 void ValidatorSessionImpl::get_validator_group_info_for_litequery(
     td::uint32 cur_round,
     td::Promise<std::vector<tl_object_ptr<lite_api::liteServer_nonfinal_candidateInfo>>> promise) {
@@ -1204,18 +1233,6 @@ void ValidatorSessionImpl::stats_process_action(td::uint32 node_id, ton_api::val
                                        }
                                      },
                                      [](const auto &) {}));
-}
-
-void ValidatorSessionImpl::get_session_info(
-    td::Promise<tl_object_ptr<ton_api::engine_validator_validatorSessionInfo>> promise) {
-  std::vector<td::Bits256> next_producers;
-  for (td::uint32 round = cur_round_; round < cur_round_ + 20; ++round) {
-    td::uint32 node = description().get_node_by_priority(round, 0);
-    next_producers.push_back(description().get_source_id(node).bits256_value());
-  }
-  promise.set_result(create_tl_object<ton_api::engine_validator_validatorSessionInfo>(
-      create_tl_block_id_simple(BlockId{}), description().get_source_id(local_idx()).bits256_value(),
-      cur_round_, std::move(next_producers)));
 }
 
 td::actor::ActorOwn<ValidatorSession> ValidatorSession::create(

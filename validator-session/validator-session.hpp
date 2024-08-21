@@ -175,8 +175,6 @@ class ValidatorSessionImpl : public ValidatorSession {
                                                                   ValidatorSessionCandidateId candidate_id);
   void stats_process_action(td::uint32 node_id, ton_api::validatorSession_round_Message &action);
 
-  void get_session_info(td::Promise<tl_object_ptr<ton_api::engine_validator_validatorSessionInfo>> promise) override;
-
  public:
   ValidatorSessionImpl(catchain::CatChainSessionId session_id, ValidatorSessionOptions opts, PublicKeyHash local_id,
                        std::vector<ValidatorSessionNode> nodes, std::unique_ptr<Callback> callback,
@@ -189,6 +187,7 @@ class ValidatorSessionImpl : public ValidatorSession {
   void start() override;
   void destroy() override;
   void get_current_stats(td::Promise<ValidatorSessionStats> promise) override;
+  void get_end_stats(td::Promise<EndValidatorGroupStats> promise) override;
   void get_validator_group_info_for_litequery(
       td::uint32 cur_round,
       td::Promise<std::vector<tl_object_ptr<lite_api::liteServer_nonfinal_candidateInfo>>> promise) override;
