@@ -2528,6 +2528,9 @@ bool Aug_OutMsgQueue::eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const {
          cb.store_ulong_rchk_bool(emitted_lt, 64);
 }
 
+Aug_DispatchQueue::Aug_DispatchQueue() : AugmentationCheckData(gen::t_AccountDispatchQueue, t_uint64) {
+}
+
 bool Aug_DispatchQueue::eval_fork(vm::CellBuilder& cb, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const {
   unsigned long long x, y;
   return left_cs.fetch_ulong_bool(64, x) && right_cs.fetch_ulong_bool(64, y) &&

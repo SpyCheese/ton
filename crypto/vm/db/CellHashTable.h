@@ -19,7 +19,7 @@
 #pragma once
 
 #include "td/utils/Slice.h"
-#include "td/utils/HashSet.h"
+
 #include <set>
 
 namespace vm {
@@ -43,7 +43,7 @@ class CellHashTable {
   template <class F>
   void for_each(F &&f) {
     for (auto &info : set_) {
-      f(const_cast<InfoT &>(info));
+      f(info);
     }
   }
   template <class F>
@@ -73,6 +73,6 @@ class CellHashTable {
   }
 
  private:
-  td::NodeHashSet<InfoT, typename InfoT::Hash, typename InfoT::Eq> set_;
+  std::set<InfoT, std::less<>> set_;
 };
 }  // namespace vm

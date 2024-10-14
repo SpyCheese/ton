@@ -54,88 +54,12 @@
 
 #include <set>
 #include <map>
-#include <thread>
 
 #include <openssl/sha.h>
 
 #include "openssl/digest.hpp"
-#include "vm/dict.h"
-
-#include <condition_variable>
-#include <latch>
-#include <numeric>
-#include <optional>
-#include <queue>
 
 namespace vm {
-class ThreadExecutor : public DynamicBagOfCellsDb::AsyncExecutor {
- public:
-  explicit ThreadExecutor(size_t threads_n) {
-    for (size_t i = 0; i < threads_n; ++i) {
-      threads_.emplace_back([this]() {
-        while (true) {
-          auto task = pop_task();
-          if (!task) {
-            break;
-          }
-          CHECK(generation_.load() % 2 == 1);
-          task();
-        }
-      });
-    }
-  }
-
-  ~ThreadExecutor() override {
-    for (size_t i = 0; i < threads_.size(); ++i) {
-      push_task({});
-    }
-    for (auto &t : threads_) {
-      t.join();
-    }
-  }
-
-  void execute_async(std::function<void()> f) override {
-    push_task(std::move(f));
-  }
-
-  void execute_sync(std::function<void()> f) override {
-    auto x = generation_.load();
-    std::scoped_lock lock(sync_mutex_);
-    CHECK(x == generation_);
-    CHECK(generation_.load() % 2 == 1);
-    f();
-    CHECK(generation_.load() % 2 == 1);
-  }
-  void inc_generation() {
-    generation_.fetch_add(1);
-  }
-
- private:
-  std::atomic<size_t> generation_{0};
-  std::queue<std::pair<std::function<void()>, size_t>> queue_;
-  std::mutex queue_mutex_;
-  std::condition_variable cv_;
-  std::mutex sync_mutex_;
-  std::vector<td::thread> threads_;
-
-  std::function<void()> pop_task() {
-    std::unique_lock lock(queue_mutex_);
-    cv_.wait(lock, [&] { return !queue_.empty(); });
-    CHECK(!queue_.empty());
-    auto task = std::move(queue_.front());
-    queue_.pop();
-    CHECK(task.second == generation_);
-    return task.first;
-  }
-
-  void push_task(std::function<void()> task) {
-    {
-      std::scoped_lock lock(queue_mutex_);
-      queue_.emplace(std::move(task), generation_.load());
-    }
-    cv_.notify_one();
-  }
-};
 
 std::vector<int> do_get_serialization_modes() {
   std::vector<int> res;
@@ -158,23 +82,9 @@ int get_random_serialization_mode(T &rnd) {
   return modes[rnd.fast(0, (int)modes.size() - 1)];
 }
 
-class BenchSha : public td::Benchmark {
+class BenchSha256 : public td::Benchmark {
  public:
-  explicit BenchSha(size_t n) : str_(n, 'a') {
-  }
   std::string get_description() const override {
-    return PSTRING() << get_name() << " length=" << str_.size();
-  }
-
-  virtual std::string get_name() const = 0;
-
- protected:
-  std::string str_;
-};
-class BenchSha256 : public BenchSha {
- public:
-  using BenchSha::BenchSha;
-  std::string get_name() const override {
     return "SHA256";
   }
 
@@ -182,7 +92,7 @@ class BenchSha256 : public BenchSha {
     int res = 0;
     for (int i = 0; i < n; i++) {
       digest::SHA256 hasher;
-      hasher.feed(str_);
+      hasher.feed("abcd", 4);
       unsigned char buf[32];
       hasher.extract(buf);
       res += buf[0];
@@ -190,12 +100,10 @@ class BenchSha256 : public BenchSha {
     td::do_not_optimize_away(res);
   }
 };
-class BenchSha256Reuse : public BenchSha {
+class BenchSha256Reuse : public td::Benchmark {
  public:
-  using BenchSha::BenchSha;
-
-  std::string get_name() const override {
-    return "SHA256 reuse (used in DataCell)";
+  std::string get_description() const override {
+    return "SHA256 reuse";
   }
 
   void run(int n) override {
@@ -203,7 +111,7 @@ class BenchSha256Reuse : public BenchSha {
     digest::SHA256 hasher;
     for (int i = 0; i < n; i++) {
       hasher.reset();
-      hasher.feed(str_);
+      hasher.feed("abcd", 4);
       unsigned char buf[32];
       hasher.extract(buf);
       res += buf[0];
@@ -211,46 +119,28 @@ class BenchSha256Reuse : public BenchSha {
     td::do_not_optimize_away(res);
   }
 };
-class BenchSha256Low : public BenchSha {
+class BenchSha256Low : public td::Benchmark {
  public:
-  using BenchSha::BenchSha;
-
-  std::string get_name() const override {
+  std::string get_description() const override {
     return "SHA256 low level";
   }
 
-// Use the old method to check for performance degradation
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)  // Disable deprecated warning for MSVC
-#endif
   void run(int n) override {
     int res = 0;
-    SHA256_CTX ctx;
+    td::Sha256State ctx;
     for (int i = 0; i < n; i++) {
-      SHA256_Init(&ctx);
-      SHA256_Update(&ctx, str_.data(), str_.size());
+      ctx.init();
+      ctx.feed("abcd");
       unsigned char buf[32];
-      SHA256_Final(buf, &ctx);
+      ctx.extract(td::MutableSlice{buf, 32});
       res += buf[0];
     }
     td::do_not_optimize_away(res);
   }
 };
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-
-class BenchSha256Tdlib : public BenchSha {
+class BenchSha256Tdlib : public td::Benchmark {
  public:
-  using BenchSha::BenchSha;
-
-  std::string get_name() const override {
+  std::string get_description() const override {
     return "SHA256 TDLib";
   }
 
@@ -260,7 +150,7 @@ class BenchSha256Tdlib : public BenchSha {
     for (int i = 0; i < n; i++) {
       td::init_thread_local<td::Sha256State>(ctx);
       ctx->init();
-      ctx->feed(str_);
+      ctx->feed("abcd");
       unsigned char buf[32];
       ctx->extract(td::MutableSlice(buf, 32), false);
       res += buf[0];
@@ -268,61 +158,11 @@ class BenchSha256Tdlib : public BenchSha {
     td::do_not_optimize_away(res);
   }
 };
-
-template <class F>
-void bench_threaded(F &&f) {
-  class Threaded : public td::Benchmark {
-   public:
-    explicit Threaded(F &&f) : f_(std::move(f)), base(f_()) {
-    }
-    F f_;
-    std::decay_t<decltype(f_())> base;
-
-    std::string get_description() const override {
-      return base.get_description() + " threaded";
-    }
-
-    void run(int n) override {
-      std::atomic<int> task_i{0};
-      int chunk_size = 1024;
-      int num_threads = 16;
-      n *= num_threads;
-      std::vector<td::thread> threads;
-      for (int i = 0; i < num_threads; i++) {
-        threads.emplace_back([&]() mutable {
-          auto bench = f_();
-          while (true) {
-            i = task_i.fetch_add(chunk_size, std::memory_order_relaxed);
-            auto i_end = std::min(n, i + chunk_size);
-            if (i > n) {
-              break;
-            }
-            bench.run(i_end - i);
-          }
-        });
-      }
-      for (auto &thread : threads) {
-        thread.join();
-      }
-    };
-  };
-  bench(Threaded(std::forward<F>(f)));
-}
 TEST(Cell, sha_benchmark) {
-  for (size_t n : {4, 64, 128}) {
-    bench(BenchSha256Tdlib(n));
-    bench(BenchSha256Low(n));
-    bench(BenchSha256Reuse(n));
-    bench(BenchSha256(n));
-  }
-}
-TEST(Cell, sha_benchmark_threaded) {
-  for (size_t n : {4, 64, 128}) {
-    bench_threaded([n] { return BenchSha256Tdlib(n); });
-    bench_threaded([n]() { return BenchSha256Low(n); });
-    bench_threaded([n]() { return BenchSha256Reuse(n); });
-    bench_threaded([n]() { return BenchSha256(n); });
-  }
+  bench(BenchSha256Tdlib());
+  bench(BenchSha256Low());
+  bench(BenchSha256Reuse());
+  bench(BenchSha256());
 }
 
 std::string serialize_boc(Ref<Cell> cell, int mode = 31) {
@@ -922,136 +762,16 @@ TEST(TonDb, BocMultipleRoots) {
   }
 };
 
-TEST(TonDb, InMemoryDynamicBocSimple) {
-  auto counter = [] { return td::NamedThreadSafeCounter::get_default().get_counter("DataCell").sum(); };
-  auto before = counter();
-  SCOPE_EXIT {
-    LOG_CHECK(before == counter()) << before << " vs " << counter();
-    ;
-  };
+TEST(TonDb, DynamicBoc) {
   td::Random::Xorshift128plus rnd{123};
-  auto kv = std::make_shared<td::MemoryKeyValue>();
-  CellStorer storer(*kv);
-
-  auto boc = DynamicBagOfCellsDb::create_in_memory(kv.get(), {});
-
-  auto empty_cell = vm::CellBuilder().finalize();
-  boc->inc(empty_cell);
-  boc->prepare_commit().ensure();
-  boc->commit(storer).ensure();
-  auto got_empty_cell = boc->load_cell(empty_cell->get_hash().as_slice()).move_as_ok();
-  ASSERT_EQ(empty_cell->get_hash(), got_empty_cell->get_hash());
-
-  boc->dec(empty_cell);
-
-  auto one_ref_cell = vm::CellBuilder().store_ref(empty_cell).finalize();
-  boc->inc(one_ref_cell);
-  boc->prepare_commit().ensure();
-  boc->commit(storer).ensure();
-  auto got_one_ref_cell = boc->load_cell(one_ref_cell->get_hash().as_slice()).move_as_ok();
-  ASSERT_EQ(one_ref_cell->get_hash(), got_one_ref_cell->get_hash());
-  boc = DynamicBagOfCellsDb::create_in_memory(kv.get(), {});
-
-  auto random_ref_cell = gen_random_cell(3, rnd);
-  boc->inc(random_ref_cell);
-  boc->prepare_commit().ensure();
-  boc->commit(storer).ensure();
-  auto got_random_ref_cell = boc->load_cell(random_ref_cell->get_hash().as_slice()).move_as_ok();
-  ASSERT_EQ(random_ref_cell->get_hash(), got_random_ref_cell->get_hash());
-  boc = DynamicBagOfCellsDb::create_in_memory(kv.get(), {});
-}
-
-int VERBOSITY_NAME(boc) = VERBOSITY_NAME(DEBUG) + 10;
-
-struct BocOptions {
-  std::shared_ptr<ThreadExecutor> async_executor;
-  std::optional<DynamicBagOfCellsDb::CreateInMemoryOptions> o_in_memory;
-  td::uint64 seed{123};
-
-  auto create_dboc(td::KeyValueReader *kv, std::optional<td::int64> o_root_n) {
-    if (o_in_memory) {
-      auto res = DynamicBagOfCellsDb::create_in_memory(kv, *o_in_memory);
-      auto stats = res->get_stats().move_as_ok();
-      if (o_root_n) {
-        ASSERT_EQ(*o_root_n, stats.roots_total_count);
-      }
-      VLOG(boc) << "reset roots_n=" << stats.roots_total_count << " cells_n=" << stats.cells_total_count;
-      return res;
-    }
-    return DynamicBagOfCellsDb::create();
-  };
-  void prepare_commit(DynamicBagOfCellsDb &dboc) {
-    if (async_executor) {
-      async_executor->inc_generation();
-      std::latch latch(1);
-      td::Result<td::Unit> res;
-      async_executor->execute_sync([&] {
-        dboc.prepare_commit_async(async_executor, [&](auto r) {
-          res = std::move(r);
-          latch.count_down();
-        });
-      });
-      latch.wait();
-      async_executor->execute_sync([&] {});
-      async_executor->inc_generation();
-    } else {
-      dboc.prepare_commit();
-    }
-  }
-};
-
-template <class F>
-void with_all_boc_options(F &&f, size_t tests_n = 500) {
-  LOG(INFO) << "Test dynamic boc";
-  auto counter = [] { return td::NamedThreadSafeCounter::get_default().get_counter("DataCell").sum(); };
-  auto run = [&](BocOptions options) {
-    LOG(INFO) << "\t" << (options.o_in_memory ? "in memory" : "on disk") << (options.async_executor ? " async" : "");
-    if (options.o_in_memory) {
-      LOG(INFO) << "\t\tuse_arena=" << options.o_in_memory->use_arena
-                << " less_memory=" << options.o_in_memory->use_less_memory_during_creation;
-    }
-    for (td::uint32 i = 0; i < tests_n; i++) {
-      auto before = counter();
-      options.seed = i == 0 ? 123 : i;
-      f(options);
-      auto after = counter();
-      LOG_CHECK((options.o_in_memory && options.o_in_memory->use_arena) || before == after)
-          << before << " vs " << after;
-    }
-  };
-  run({.async_executor = std::make_shared<ThreadExecutor>(4)});
-  run({});
-  for (auto use_arena : {false, true}) {
-    for (auto less_memory : {false, true}) {
-      run({.o_in_memory =
-               DynamicBagOfCellsDb::CreateInMemoryOptions{.extra_threads = std::thread::hardware_concurrency(),
-                                                          .verbose = false,
-                                                          .use_arena = use_arena,
-                                                          .use_less_memory_during_creation = less_memory}});
-    }
-  }
-}
-
-void test_dynamic_boc(BocOptions options) {
-  auto counter = [] { return td::NamedThreadSafeCounter::get_default().get_counter("DataCell").sum(); };
-  auto before = counter();
-  SCOPE_EXIT {
-    LOG_CHECK((options.o_in_memory && options.o_in_memory->use_arena) || before == counter())
-        << before << " vs " << counter();
-  };
-  td::Random::Xorshift128plus rnd{options.seed};
   std::string old_root_hash;
   std::string old_root_serialization;
   auto kv = std::make_shared<td::MemoryKeyValue>();
-  auto create_dboc = [&]() {
-    auto roots_n = old_root_hash.empty() ? 0 : 1;
-    return options.create_dboc(kv.get(), roots_n);
-  };
-  auto dboc = create_dboc();
+  auto dboc = DynamicBagOfCellsDb::create();
   dboc->set_loader(std::make_unique<CellLoader>(kv));
   for (int t = 1000; t >= 0; t--) {
     if (rnd() % 10 == 0) {
-      dboc = create_dboc();
+      dboc = DynamicBagOfCellsDb::create();
     }
     dboc->set_loader(std::make_unique<CellLoader>(kv));
     Ref<Cell> old_root;
@@ -1075,41 +795,29 @@ void test_dynamic_boc(BocOptions options) {
     if (t != 0) {
       dboc->inc(cell);
     }
-    dboc->prepare_commit().ensure();
+    dboc->prepare_commit();
     {
       CellStorer cell_storer(*kv);
-      dboc->commit(cell_storer).ensure();
+      dboc->commit(cell_storer);
     }
   }
   ASSERT_EQ(0u, kv->count("").ok());
-}
-
-TEST(TonDb, DynamicBoc) {
-  with_all_boc_options(test_dynamic_boc, 1);
 };
 
-void test_dynamic_boc2(BocOptions options) {
-  td::Random::Xorshift128plus rnd{options.seed};
-
-  int total_roots = rnd.fast(1, !rnd.fast(0, 10) * 100 + 10);
-  int max_roots = rnd.fast(1, 20);
+TEST(TonDb, DynamicBoc2) {
+  int VERBOSITY_NAME(boc) = VERBOSITY_NAME(DEBUG) + 10;
+  td::Random::Xorshift128plus rnd{123};
+  int total_roots = 10000;
+  int max_roots = 20;
+  std::vector<std::string> root_hashes(max_roots);
+  std::vector<Ref<Cell>> roots(max_roots);
   int last_commit_at = 0;
   int first_root_id = 0;
   int last_root_id = 0;
   auto kv = std::make_shared<td::MemoryKeyValue>();
-  auto create_dboc = [&](td::int64 root_n) { return options.create_dboc(kv.get(), root_n); };
-  auto dboc = create_dboc(0);
+  auto dboc = DynamicBagOfCellsDb::create();
   dboc->set_loader(std::make_unique<CellLoader>(kv));
 
-  auto counter = [] { return td::NamedThreadSafeCounter::get_default().get_counter("DataCell").sum(); };
-  auto before = counter();
-  SCOPE_EXIT{
-      // LOG_CHECK((options.o_in_memory && options.o_in_memory->use_arena) || before == counter())
-      //     << before << " vs " << counter();
-  };
-
-  std::vector<Ref<Cell>> roots(max_roots);
-  std::vector<std::string> root_hashes(max_roots);
   auto add_root = [&](Ref<Cell> root) {
     dboc->inc(root);
     root_hashes[last_root_id % max_roots] = (root->get_hash().as_slice().str());
@@ -1117,23 +825,18 @@ void test_dynamic_boc2(BocOptions options) {
     last_root_id++;
   };
 
-  auto get_root = [&](int root_id) -> Ref<Cell> {
+  auto get_root = [&](int root_id) {
     VLOG(boc) << "  from older root #" << root_id;
     auto from_root = roots[root_id % max_roots];
     if (from_root.is_null()) {
       VLOG(boc) << "  from db";
       auto from_root_hash = root_hashes[root_id % max_roots];
-      if (rnd() % 2 == 0) {
-        from_root = dboc->load_root(from_root_hash).move_as_ok();
-      } else {
-        from_root = dboc->load_cell(from_root_hash).move_as_ok();
-      }
+      from_root = dboc->load_cell(from_root_hash).move_as_ok();
     } else {
       VLOG(boc) << "FROM MEMORY";
     }
     return from_root;
   };
-  std::map<CellHash, int> root_cnt;
   auto new_root = [&] {
     if (last_root_id == total_roots) {
       return;
@@ -1147,16 +850,13 @@ void test_dynamic_boc2(BocOptions options) {
       from_root = get_root(rnd.fast(first_root_id, last_root_id - 1));
     }
     VLOG(boc) << "  ...";
-    auto new_root = gen_random_cell(rnd.fast(1, 20), from_root, rnd);
-    root_cnt[new_root->get_hash()]++;
-    add_root(std::move(new_root));
+    add_root(gen_random_cell(rnd.fast(1, 20), from_root, rnd));
     VLOG(boc) << "  OK";
   };
 
   auto commit = [&] {
     VLOG(boc) << "commit";
-    //rnd.fast(0, 1);
-    options.prepare_commit(*dboc);
+    dboc->prepare_commit();
     {
       CellStorer cell_storer(*kv);
       dboc->commit(cell_storer);
@@ -1170,7 +870,7 @@ void test_dynamic_boc2(BocOptions options) {
   auto reset = [&] {
     VLOG(boc) << "reset";
     commit();
-    dboc = create_dboc(td::int64(root_cnt.size()));
+    dboc = DynamicBagOfCellsDb::create();
     dboc->set_loader(std::make_unique<CellLoader>(kv));
   };
 
@@ -1179,15 +879,7 @@ void test_dynamic_boc2(BocOptions options) {
     if (first_root_id == last_root_id) {
       return;
     }
-    auto old_root = get_root(first_root_id);
-    auto it = root_cnt.find(old_root->get_hash());
-    it->second--;
-    CHECK(it->second >= 0);
-    if (it->second == 0) {
-      root_cnt.erase(it);
-    }
-
-    dboc->dec(std::move(old_root));
+    dboc->dec(get_root(first_root_id));
     first_root_id++;
     VLOG(boc) << "  OK";
   };
@@ -1199,10 +891,6 @@ void test_dynamic_boc2(BocOptions options) {
   }
   commit();
   ASSERT_EQ(0u, kv->count("").ok());
-}
-
-TEST(TonDb, DynamicBoc2) {
-  with_all_boc_options(test_dynamic_boc2);
 }
 
 template <class BocDeserializerT>
@@ -2160,7 +1848,7 @@ TEST(TonDb, CompactArrayOld) {
     SCOPE_EXIT {
       ton_db->commit_transaction(std::move(txn));
     };
-    auto smart = txn->begin_smartcontract();
+    auto smart = txn->begin_smartcontract("");
     SCOPE_EXIT {
       txn->commit_smartcontract(std::move(smart));
     };
@@ -2187,7 +1875,7 @@ TEST(TonDb, CompactArrayOld) {
     SCOPE_EXIT {
       ton_db->commit_transaction(std::move(txn));
     };
-    auto smart = txn->begin_smartcontract();
+    auto smart = txn->begin_smartcontract("");
     //smart->validate_meta();
     SCOPE_EXIT {
       txn->commit_smartcontract(std::move(smart));
@@ -2208,7 +1896,7 @@ TEST(TonDb, CompactArrayOld) {
     SCOPE_EXIT {
       ton_db->abort_transaction(std::move(txn));
     };
-    auto smart = txn->begin_smartcontract();
+    auto smart = txn->begin_smartcontract("");
     SCOPE_EXIT {
       txn->abort_smartcontract(std::move(smart));
     };
@@ -2262,18 +1950,17 @@ TEST(TonDb, BocRespectsUsageCell) {
   ASSERT_STREQ(serialization, serialization_of_virtualized_cell);
 }
 
-void test_dynamic_boc_respectes_usage_cell(vm::BocOptions options) {
-  td::Random::Xorshift128plus rnd(options.seed);
+TEST(TonDb, DynamicBocRespectsUsageCell) {
+  td::Random::Xorshift128plus rnd(123);
   auto cell = vm::gen_random_cell(20, rnd, true);
   auto usage_tree = std::make_shared<vm::CellUsageTree>();
   auto usage_cell = vm::UsageCell::create(cell, usage_tree->root_ptr());
 
   auto kv = std::make_shared<td::MemoryKeyValue>();
-  auto dboc = options.create_dboc(kv.get(), {});
+  auto dboc = vm::DynamicBagOfCellsDb::create();
   dboc->set_loader(std::make_unique<vm::CellLoader>(kv));
   dboc->inc(usage_cell);
   {
-    options.prepare_commit(*dboc);
     vm::CellStorer cell_storer(*kv);
     dboc->commit(cell_storer);
   }
@@ -2283,42 +1970,6 @@ void test_dynamic_boc_respectes_usage_cell(vm::BocOptions options) {
   auto serialization_of_virtualized_cell = serialize_boc(virtualized_proof);
   auto serialization = serialize_boc(cell);
   ASSERT_STREQ(serialization, serialization_of_virtualized_cell);
-}
-
-TEST(TonDb, DynamicBocRespectsUsageCell) {
-  vm::with_all_boc_options(test_dynamic_boc_respectes_usage_cell, 20);
-}
-
-TEST(TonDb, LargeBocSerializer) {
-  td::Random::Xorshift128plus rnd{123};
-  size_t n = 1000000;
-  std::vector<td::uint64> data(n);
-  std::iota(data.begin(), data.end(), 0);
-  vm::CompactArray arr(data);
-  auto root = arr.root();
-  std::string path = "serialization";
-  td::unlink(path).ignore();
-  auto fd = td::FileFd::open(path, td::FileFd::Flags::Create | td::FileFd::Flags::Truncate | td::FileFd::Flags::Write)
-                .move_as_ok();
-  std_boc_serialize_to_file(root, fd, 31);
-  fd.close();
-  auto a = td::read_file_str(path).move_as_ok();
-
-  auto kv = std::make_shared<td::MemoryKeyValue>();
-  auto dboc = vm::DynamicBagOfCellsDb::create();
-  dboc->set_loader(std::make_unique<vm::CellLoader>(kv));
-  dboc->inc(root);
-  dboc->prepare_commit();
-  vm::CellStorer cell_storer(*kv);
-  dboc->commit(cell_storer);
-  dboc->set_loader(std::make_unique<vm::CellLoader>(kv));
-  td::unlink(path).ignore();
-  fd = td::FileFd::open(path, td::FileFd::Flags::Create | td::FileFd::Flags::Truncate | td::FileFd::Flags::Write)
-           .move_as_ok();
-  std_boc_serialize_to_file_large(dboc->get_cell_db_reader(), root->get_hash(), fd, 31);
-  fd.close();
-  auto b = td::read_file_str(path).move_as_ok();
-  CHECK(a == b);
 }
 
 TEST(TonDb, DoNotMakeListsPrunned) {
@@ -2369,7 +2020,7 @@ TEST(TonDb, CellStat) {
     ASSERT_EQ(stat.cells, new_stat.get_stat().cells);
     ASSERT_EQ(stat.bits, new_stat.get_stat().bits);
 
-    CHECK(usage_tree.use_count() == 1);
+    CHECK(usage_tree.unique());
     usage_tree.reset();
     td::Ref<vm::Cell> C, BC, C_proof;
     std::shared_ptr<vm::CellUsageTree> usage_tree_B;
@@ -2406,6 +2057,7 @@ TEST(Ref, AtomicRef) {
   int threads_n = 10;
   std::vector<Node> nodes(threads_n);
   std::vector<td::thread> threads(threads_n);
+  int thread_id = 0;
   for (auto &thread : threads) {
     thread = td::thread([&] {
       for (int i = 0; i < 1000000; i++) {
@@ -2420,6 +2072,7 @@ TEST(Ref, AtomicRef) {
         }
       }
     });
+    thread_id++;
   }
   for (auto &thread : threads) {
     thread.join();

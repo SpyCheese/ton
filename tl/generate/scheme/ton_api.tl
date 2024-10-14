@@ -668,7 +668,6 @@ engine.validator.signature signature:bytes = engine.validator.Signature;
 
 engine.validator.oneStat key:string value:string = engine.validator.OneStat;
 engine.validator.stats stats:(vector engine.validator.oneStat) = engine.validator.Stats;
-engine.validator.textStats data:string = engine.validator.TextStats;
 
 engine.validator.controlQueryError code:int message:string = engine.validator.ControlQueryError;
 
@@ -765,7 +764,6 @@ engine.validator.setCollatorOptionsJson json:string = engine.validator.Success;
 engine.validator.getCollatorOptionsJson = engine.validator.JsonConfig;
 
 engine.validator.getAdnlStats all:Bool = adnl.Stats;
-engine.validator.getActorTextStats = engine.validator.TextStats;
 
 ---types---
 

@@ -725,8 +725,7 @@ struct Aug_OutMsgQueue final : AugmentationCheckData {
 extern const Aug_OutMsgQueue aug_OutMsgQueue;
 
 struct Aug_DispatchQueue final : AugmentationCheckData {
-  Aug_DispatchQueue() : AugmentationCheckData(gen::t_AccountDispatchQueue, t_uint64) {
-  }
+  Aug_DispatchQueue();
   bool eval_fork(vm::CellBuilder& cb, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const override;
   bool eval_empty(vm::CellBuilder& cb) const override;
   bool eval_leaf(vm::CellBuilder& cb, vm::CellSlice& cs) const override;
