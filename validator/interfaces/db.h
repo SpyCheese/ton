@@ -46,6 +46,7 @@ class Db : public td::actor::Actor {
   virtual void store_block_candidate(BlockCandidate candidate, td::Promise<td::Unit> promise) = 0;
   virtual void get_block_candidate(ton::PublicKey source, BlockIdExt id, FileHash collated_data_file_hash,
                                    td::Promise<BlockCandidate> promise) = 0;
+  virtual void get_block_candidate_by_block_id(BlockIdExt id, td::Promise<BlockCandidate> promise) = 0;
 
   virtual void store_block_state(BlockHandle handle, td::Ref<ShardState> state,
                                  td::Promise<td::Ref<ShardState>> promise) = 0;
@@ -66,6 +67,8 @@ class Db : public td::actor::Actor {
   virtual void store_zero_state_file(BlockIdExt block_id, td::BufferSlice state, td::Promise<td::Unit> promise) = 0;
   virtual void get_zero_state_file(BlockIdExt block_id, td::Promise<td::BufferSlice> promise) = 0;
   virtual void check_zero_state_file_exists(BlockIdExt block_id, td::Promise<bool> promise) = 0;
+  virtual void get_previous_persistent_state_files(
+      BlockSeqno cur_mc_seqno, td::Promise<std::vector<std::pair<std::string, ShardIdFull>>> promise) = 0;
 
   virtual void try_get_static_file(FileHash file_hash, td::Promise<td::BufferSlice> promise) = 0;
 

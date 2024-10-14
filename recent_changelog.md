@@ -1,13 +1,16 @@
-## 2024.04 Update
+## 2024.08 Update
 
-1. Emulator: Single call optimized runGetMethod added
-2. Tonlib: a series of proof improvements, also breaking Change in `liteServer.getAllShardsInfo` method (see below)
-3. DB: usage statistics now collected, outdated persistent states are not serialized
-4. LS: fast `getOutMsgQueueSizes` added, preliminary support of non-final block requests
-5. Network: lz4 compression of block candidates (disabled by default).
-6. Overlays: add custom overlays
-7. Transaction Executor: fixed issue with due_payment collection
+1. Introduction of dispatch queues, message envelopes with transaction chain metadata, and explicitly stored msg_queue size, which will be activated by `Config8.version >= 8` and new `Config8.capabilities` bits: `capStoreOutMsgQueueSize`, `capMsgMetadata`, `capDeferMessages`. 
+2. A number of changes to transcation executor which will activated for `Config8.version >= 8`:
+    - Check mode on invalid `action_send_msg`. Ignore action if `IGNORE_ERROR` (+2) bit is set, bounce if `BOUNCE_ON_FAIL` (+16) bit is set.
+    - Slightly change random seed generation to fix mix of `addr_rewrite` and `addr`.
+    - Fill in `skipped_actions` for both invalid and valid messages with `IGNORE_ERROR` mode that can't be sent.
+    - Allow unfreeze through external messages.
+    - Don't use user-provided `fwd_fee` and `ihr_fee` for internal messages.
+3. A few issues with broadcasts were fixed: stop on receiving last piece, response to AdnlMessageCreateChannel
+4. A number of fixes and improvements for emulator and tonlib: correct work with config_addr, not accepted externals, bounces, debug ops gas consumption, added version and c5 dump, fixed tonlib crashes
+5. Added new flags and commands to the node, in particular `--fast-state-serializer`, `getcollatoroptionsjson`, `setcollatoroptionsjson`
 
-* `liteServer.getAllShardsInfo` method was updated for better efficiency. Previously, field proof contained BoC with two roots: one for BlockState from block's root and another for ShardHashes from BlockState. Now, it returns a single-root proof BoC, specifically the merkle proof of ShardHashes directly from the block's root, streamlining data access and integrity. Checking of the proof requires to check that ShardHashes in the `data` correspond to ShardHashes from the block.
+Besides the work of the core team, this update is based on the efforts of @krigga (emulator), stonfi team, in particular @dbaranovstonfi and @hey-researcher (emulator), and  @loeul, @xiaoxianBoy, @simlecode (typos in comments and docs).
 
-Besides the work of the core team, this update is based on the efforts of @akifoq (due_payment issue).
+

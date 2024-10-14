@@ -25,6 +25,8 @@ set(VALIDATOR_DB_SOURCE
   db/statedb.cpp
   db/staticfilesdb.cpp
   db/staticfilesdb.hpp
+  db/db-utils.cpp
+  db/db-utils.h
 
   db/package.hpp
   db/package.cpp
@@ -198,14 +200,10 @@ target_include_directories(full-node PUBLIC
   ${OPENSSL_INCLUDE_DIR}
   )
 
-target_link_libraries(validator PRIVATE tdutils tdactor adnl rldp tl_api dht tdfec
-  overlay catchain validatorsession ton_crypto ton_block ton_db)
+target_link_libraries(validator PRIVATE tdactor adnl rldp tl_api dht tdfec overlay catchain validatorsession ton_db)
 
-target_link_libraries(validator-disk PRIVATE tdutils tdactor adnl rldp tl_api dht tdfec
-  overlay catchain validatorsession ton_crypto ton_block ton_db)
+target_link_libraries(validator-disk PRIVATE tdactor adnl rldp tl_api dht tdfec overlay catchain validatorsession ton_db)
 
-target_link_libraries(validator-hardfork PRIVATE tdutils tdactor adnl rldp tl_api dht tdfec
-  overlay catchain validatorsession ton_crypto ton_block ton_db)
+target_link_libraries(validator-hardfork PRIVATE tdactor adnl rldp tl_api dht tdfec overlay catchain validatorsession ton_db)
 
-target_link_libraries(full-node PRIVATE tdutils tdactor adnl rldp rldp2 tl_api dht tdfec
-  overlay catchain validatorsession ton_crypto ton_block ton_db)
+target_link_libraries(full-node PRIVATE tdactor adnl rldp rldp2 tl_api dht tdfec overlay catchain validatorsession ton_db)

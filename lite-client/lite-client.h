@@ -258,7 +258,9 @@ class TestNode : public td::actor::Actor {
   bool get_block_transactions(ton::BlockIdExt blkid, int mode, unsigned count, ton::Bits256 acc_addr,
                               ton::LogicalTime lt);
   void got_block_transactions(ton::BlockIdExt blkid, int mode, unsigned req_count, bool incomplete,
-                              std::vector<TransId> trans, td::BufferSlice proof);
+                              std::vector<TransId> trans,
+                              std::vector<ton::tl_object_ptr<ton::lite_api::liteServer_transactionMetadata>> metadata,
+                              td::BufferSlice proof);
   bool get_block_proof(ton::BlockIdExt from, ton::BlockIdExt to, int mode);
   void got_block_proof(ton::BlockIdExt from, ton::BlockIdExt to, int mode, td::BufferSlice res);
   bool get_creator_stats(ton::BlockIdExt blkid, int mode, unsigned req_count, ton::Bits256 start_after,
@@ -305,6 +307,13 @@ class TestNode : public td::actor::Actor {
                                           unsigned refs, td::Bits256 chash, std::string filename);
   bool get_msg_queue_sizes();
   void got_msg_queue_sizes(ton::tl_object_ptr<ton::lite_api::liteServer_outMsgQueueSizes> f);
+  bool get_dispatch_queue_info(ton::BlockIdExt block_id);
+  bool get_dispatch_queue_info_cont(ton::BlockIdExt block_id, bool first, td::Bits256 after_addr);
+  void got_dispatch_queue_info(ton::BlockIdExt block_id,
+                               ton::tl_object_ptr<ton::lite_api::liteServer_dispatchQueueInfo> info);
+  bool get_dispatch_queue_messages(ton::BlockIdExt block_id, ton::WorkchainId wc, ton::StdSmcAddress addr,
+                                   ton::LogicalTime lt, bool one_account);
+  void got_dispatch_queue_messages(ton::tl_object_ptr<ton::lite_api::liteServer_dispatchQueueMessages> msgs);
   bool cache_cell(Ref<vm::Cell> cell);
   bool list_cached_cells() const;
   bool dump_cached_cell(td::Slice hash_pfx, td::Slice type_name = {});

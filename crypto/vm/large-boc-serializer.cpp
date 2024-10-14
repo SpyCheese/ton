@@ -14,6 +14,9 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
+#include "td/utils/Time.h"
+#include "td/utils/Timer.h"
+
 #include <map>
 #include "vm/large-boc-serializer.h"
 #include "vm/boc-writers.h"
@@ -30,8 +33,12 @@ class LargeBocSerializer {
  public:
   using Hash = Cell::Hash;
 
-  explicit LargeBocSerializer(std::shared_ptr<CellDbReader> reader) : reader(std::move(reader)) {}
+  explicit LargeBocSerializer(std::shared_ptr<CellDbReader> reader) : reader(std::move(reader)) {
+  }
 
+  void set_logger(BagOfCellsLogger* logger_ptr) {
+    logger_ptr_ = logger_ptr;
+  }
   void add_root(Hash root);
   td::Status import_cells();
   td::Status serialize(td::FileFd& fd, int mode);
@@ -39,6 +46,7 @@ class LargeBocSerializer {
  private:
   std::shared_ptr<CellDbReader> reader;
   struct CellInfo {
+    Cell::Hash hash;
     std::array<int, 4> ref_idx;
     int idx;
     unsigned short serialized_size;
@@ -62,10 +70,11 @@ class LargeBocSerializer {
       return 4;
     }
   };
-  std::map<Hash, CellInfo> cells;
+  td::NodeHashMap<Hash, CellInfo> cells;
   std::vector<std::pair<const Hash, CellInfo>*> cell_list;
   struct RootInfo {
-    RootInfo(Hash hash, int idx) : hash(hash), idx(idx) {}
+    RootInfo(Hash hash, int idx) : hash(hash), idx(idx) {
+    }
     Hash hash;
     int idx;
   };
@@ -78,6 +87,8 @@ class LargeBocSerializer {
   void reorder_cells();
   int revisit(int cell_idx, int force = 0);
   td::uint64 compute_sizes(int mode, int& r_size, int& o_size);
+
+  BagOfCellsLogger* logger_ptr_{};
 };
 
 void LargeBocSerializer::add_root(Hash root) {
@@ -85,18 +96,27 @@ void LargeBocSerializer::add_root(Hash root) {
 }
 
 td::Status LargeBocSerializer::import_cells() {
+  if (logger_ptr_) {
+    logger_ptr_->start_stage("import_cells");
+  }
   for (auto& root : roots) {
     TRY_RESULT(idx, import_cell(root.hash));
     root.idx = idx;
   }
   reorder_cells();
   CHECK(!cell_list.empty());
+  if (logger_ptr_) {
+    logger_ptr_->finish_stage(PSLICE() << cell_count << " cells");
+  }
   return td::Status::OK();
 }
 
 td::Result<int> LargeBocSerializer::import_cell(Hash hash, int depth) {
   if (depth > Cell::max_depth) {
     return td::Status::Error("error while importing a cell into a bag of cells: cell depth too large");
+  }
+  if (logger_ptr_) {
+    TRY_STATUS(logger_ptr_->on_cell_processed());
   }
   auto it = cells.find(hash);
   if (it != cells.end()) {
@@ -313,13 +333,9 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
     return td::Status::Error("bag of cells is too large");
   }
 
-  boc_writers::FileWriter writer{fd, (size_t) info.total_size};
-  auto store_ref = [&](unsigned long long value) {
-    writer.store_uint(value, info.ref_byte_size);
-  };
-  auto store_offset = [&](unsigned long long value) {
-    writer.store_uint(value, info.offset_byte_size);
-  };
+  boc_writers::FileWriter writer{fd, (size_t)info.total_size};
+  auto store_ref = [&](unsigned long long value) { writer.store_uint(value, info.ref_byte_size); };
+  auto store_offset = [&](unsigned long long value) { writer.store_uint(value, info.offset_byte_size); };
 
   writer.store_uint(info.magic, 4);
 
@@ -349,6 +365,9 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
   DCHECK(writer.position() == info.index_offset);
   DCHECK((unsigned)cell_count == cell_list.size());
   if (info.has_index) {
+    if (logger_ptr_) {
+      logger_ptr_->start_stage("generate_index");
+    }
     std::size_t offs = 0;
     for (int i = cell_count - 1; i >= 0; --i) {
       const auto& dc_info = cell_list[i]->second;
@@ -366,11 +385,20 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
         fixed_offset = offs * 2 + dc_info.should_cache;
       }
       store_offset(fixed_offset);
+      if (logger_ptr_) {
+        TRY_STATUS(logger_ptr_->on_cell_processed());
+      }
     }
     DCHECK(offs == info.data_size);
+    if (logger_ptr_) {
+      logger_ptr_->finish_stage("");
+    }
   }
   DCHECK(writer.position() == info.data_offset);
   size_t keep_position = writer.position();
+  if (logger_ptr_) {
+    logger_ptr_->start_stage("serialize");
+  }
   for (int i = 0; i < cell_count; ++i) {
     auto hash = cell_list[cell_count - 1 - i]->first;
     const auto& dc_info = cell_list[cell_count - 1 - i]->second;
@@ -389,6 +417,9 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
       DCHECK(k > i && k < cell_count);
       store_ref(k);
     }
+    if (logger_ptr_) {
+      TRY_STATUS(logger_ptr_->on_cell_processed());
+    }
   }
   DCHECK(writer.position() - keep_position == info.data_size);
   if (info.has_crc32c) {
@@ -396,17 +427,26 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
     writer.store_uint(td::bswap32(crc), 4);
   }
   DCHECK(writer.empty());
-  return writer.finalize();
+  TRY_STATUS(writer.finalize());
+  if (logger_ptr_) {
+    logger_ptr_->finish_stage(PSLICE() << cell_count << " cells, " << writer.position() << " bytes");
+  }
+  return td::Status::OK();
 }
-}
+}  // namespace
 
-td::Status std_boc_serialize_to_file_large(std::shared_ptr<CellDbReader> reader, Cell::Hash root_hash,
-                                           td::FileFd& fd, int mode) {
+td::Status std_boc_serialize_to_file_large(std::shared_ptr<CellDbReader> reader, Cell::Hash root_hash, td::FileFd& fd,
+                                           int mode, td::CancellationToken cancellation_token) {
+  td::Timer timer;
   CHECK(reader != nullptr)
   LargeBocSerializer serializer(reader);
+  BagOfCellsLogger logger(std::move(cancellation_token));
+  serializer.set_logger(&logger);
   serializer.add_root(root_hash);
   TRY_STATUS(serializer.import_cells());
-  return serializer.serialize(fd, mode);
+  TRY_STATUS(serializer.serialize(fd, mode));
+  LOG(ERROR) << "serialization took " << timer.elapsed() << "s";
+  return td::Status::OK();
 }
 
-}
+}  // namespace vm

@@ -53,7 +53,7 @@ class ValidatorSessionImpl : public ValidatorSession {
   const ValidatorSessionState *real_state_ = nullptr;
   const ValidatorSessionState *virtual_state_ = nullptr;
 
-  td::uint32 cur_round_ = 0;
+  td::uint32 cur_round_ = 0, first_block_round_ = 0;
   td::Timestamp round_started_at_ = td::Timestamp::never();
   td::Timestamp round_debug_at_ = td::Timestamp::never();
   std::set<ValidatorSessionCandidateId> pending_approve_;
@@ -89,6 +89,9 @@ class ValidatorSessionImpl : public ValidatorSession {
   td::actor::ActorId<overlay::Overlays> overlay_manager_;
   td::actor::ActorOwn<catchain::CatChain> catchain_;
   std::unique_ptr<ValidatorSessionDescription> description_;
+
+  double catchain_max_block_delay_ = 0.4;
+  double catchain_max_block_delay_slow_ = 1.0;
 
   void on_new_round(td::uint32 round);
   void on_catchain_started();
@@ -148,6 +151,7 @@ class ValidatorSessionImpl : public ValidatorSession {
   }
 
   void request_new_block(bool now);
+  double get_current_max_block_delay() const;
   void get_broadcast_p2p(PublicKeyHash node, ValidatorSessionFileHash file_hash,
                          ValidatorSessionCollatedDataFileHash collated_data_file_hash, PublicKeyHash src,
                          td::uint32 round, ValidatorSessionRootHash root_hash, td::Promise<td::BufferSlice> promise,
@@ -159,10 +163,19 @@ class ValidatorSessionImpl : public ValidatorSession {
   bool compress_block_candidates_ = false;
 
   ValidatorSessionStats cur_stats_;
+  bool stats_inited_ = false;
+  std::map<std::pair<td::uint32, ValidatorSessionCandidateId>, std::vector<td::uint32>>
+      stats_pending_approve_;  // round, candidate_id -> approvers
+  std::map<std::pair<td::uint32, ValidatorSessionCandidateId>, std::vector<td::uint32>>
+      stats_pending_sign_;  // round, candidate_id -> signers
   void stats_init();
   void stats_add_round();
-  void stats_set_candidate_status(td::uint32 round, PublicKeyHash src, ValidatorSessionCandidateId candidate_id,
-                                  int status, std::string comment = "");
+  ValidatorSessionStats::Producer *stats_get_candidate_stat(
+      td::uint32 round, PublicKeyHash src,
+      ValidatorSessionCandidateId candidate_id = ValidatorSessionCandidateId::zero());
+  ValidatorSessionStats::Producer *stats_get_candidate_stat_by_id(td::uint32 round,
+                                                                  ValidatorSessionCandidateId candidate_id);
+  void stats_process_action(td::uint32 node_id, ton_api::validatorSession_round_Message &action);
 
  public:
   ValidatorSessionImpl(catchain::CatChainSessionId session_id, ValidatorSessionOptions opts, PublicKeyHash local_id,
@@ -176,9 +189,15 @@ class ValidatorSessionImpl : public ValidatorSession {
   void start() override;
   void destroy() override;
   void get_current_stats(td::Promise<ValidatorSessionStats> promise) override;
+  void get_end_stats(td::Promise<EndValidatorGroupStats> promise) override;
   void get_validator_group_info_for_litequery(
       td::uint32 cur_round,
       td::Promise<std::vector<tl_object_ptr<lite_api::liteServer_nonfinal_candidateInfo>>> promise) override;
+
+  void set_catchain_max_block_delay(double delay, double delay_slow) override {
+    catchain_max_block_delay_ = delay;
+    catchain_max_block_delay_slow_ = delay_slow;
+  }
 
   void process_blocks(std::vector<catchain::CatChainBlock *> blocks);
   void finished_processing();
@@ -190,17 +209,16 @@ class ValidatorSessionImpl : public ValidatorSession {
   void process_query(PublicKeyHash src, td::BufferSlice data, td::Promise<td::BufferSlice> promise);
 
   void try_approve_block(const SentBlock *block);
-  void try_sign();
 
-  void candidate_decision_fail(td::uint32 round, ValidatorSessionCandidateId hash, std::string result,
-                               td::uint32 src, td::BufferSlice proof);
+  void candidate_decision_fail(td::uint32 round, ValidatorSessionCandidateId hash, std::string result, td::uint32 src,
+                               td::BufferSlice proof, double validation_time, bool validation_cached);
   void candidate_decision_ok(td::uint32 round, ValidatorSessionCandidateId hash, RootHash root_hash, FileHash file_hash,
-                             td::uint32 src, td::uint32 ok_from);
+                             td::uint32 src, td::uint32 ok_from, double validation_time, bool validation_cached);
   void candidate_approved_signed(td::uint32 round, ValidatorSessionCandidateId hash, td::uint32 ok_from,
                                  td::BufferSlice signature);
 
   void generated_block(td::uint32 round, ValidatorSessionRootHash root_hash, td::BufferSlice data,
-                       td::BufferSlice collated);
+                       td::BufferSlice collated, double collation_time, bool collation_cached);
   void signed_block(td::uint32 round, ValidatorSessionCandidateId hash, td::BufferSlice signature);
 
   void end_request(td::uint32 round, ValidatorSessionCandidateId block_id) {

@@ -949,8 +949,8 @@ bool TestNode::show_help(std::string command) {
          "lasttrans[dump] <account-id> <trans-lt> <trans-hash> [<count>]\tShows or dumps specified transaction and "
          "several preceding "
          "ones\n"
-         "listblocktrans[rev] <block-id-ext> <count> [<start-account-id> <start-trans-lt>]\tLists block transactions, "
-         "starting immediately after or before the specified one\n"
+         "listblocktrans[rev][meta] <block-id-ext> <count> [<start-account-id> <start-trans-lt>]\tLists block "
+         "transactions, starting immediately after or before the specified one\n"
          "blkproofchain[step] <from-block-id-ext> [<to-block-id-ext>]\tDownloads and checks proof of validity of the "
          "second "
          "indicated block (or the last known masterchain block) starting from given block\n"
@@ -974,6 +974,11 @@ bool TestNode::show_help(std::string command) {
          "into files <filename-pfx><complaint-hash>.boc\n"
          "complaintprice <expires-in> <complaint-boc>\tComputes the price (in nanograms) for creating a complaint\n"
          "msgqueuesizes\tShows current sizes of outbound message queues in all shards\n"
+         "dispatchqueueinfo <block-id>\tShows list of account dispatch queue of a block\n"
+         "dispatchqueuemessages <block-id> <addr> [<after-lt>]\tShows deferred messages from account <addr>, lt > "
+         "<after_lt>\n"
+         "dispatchqueuemessagesall <block-id> [<after-addr> [<after-lt>]]\tShows messages from dispatch queue of a "
+         "block, starting after <after_addr>, <after-lt>\n"
          "known\tShows the list of all known block ids\n"
          "knowncells\tShows the list of hashes of all known (cached) cells\n"
          "dumpcell <hex-hash-pfx>\nDumps a cached cell by a prefix of its hash\n"
@@ -988,9 +993,9 @@ bool TestNode::show_help(std::string command) {
 bool TestNode::do_parse_line() {
   ton::WorkchainId workchain = ton::masterchainId;  // change to basechain later
   int addr_ext = 0;
-  ton::StdSmcAddress addr{};
+  ton::StdSmcAddress addr = ton::StdSmcAddress::zero();
   ton::BlockIdExt blkid{};
-  ton::LogicalTime lt{};
+  ton::LogicalTime lt = 0;
   ton::Bits256 hash{};
   ton::ShardIdFull shard{};
   ton::BlockSeqno seqno{};
@@ -1074,6 +1079,13 @@ bool TestNode::do_parse_line() {
     return parse_block_id_ext(blkid) && parse_uint32(count) &&
            (seekeoln() || (parse_hash(hash) && parse_lt(lt) && (mode |= 128) && seekeoln())) &&
            get_block_transactions(blkid, mode, count, hash, lt);
+  } else if (word == "listblocktransmeta" || word == "listblocktransrevmeta") {
+    lt = 0;
+    int mode = (word == "listblocktransmeta" ? 7 : 0x47);
+    mode |= 256;
+    return parse_block_id_ext(blkid) && parse_uint32(count) &&
+           (seekeoln() || (parse_hash(hash) && parse_lt(lt) && (mode |= 128) && seekeoln())) &&
+           get_block_transactions(blkid, mode, count, hash, lt);
   } else if (word == "blkproofchain" || word == "blkproofchainstep") {
     ton::BlockIdExt blkid2{};
     return parse_block_id_ext(blkid) && (seekeoln() || parse_block_id_ext(blkid2)) && seekeoln() &&
@@ -1111,6 +1123,16 @@ bool TestNode::do_parse_line() {
            set_error(get_complaint_price(expire_in, filename));
   } else if (word == "msgqueuesizes") {
     return get_msg_queue_sizes();
+  } else if (word == "dispatchqueueinfo") {
+    return parse_block_id_ext(blkid) && seekeoln() && get_dispatch_queue_info(blkid);
+  } else if (word == "dispatchqueuemessages" || word == "dispatchqueuemessagesall") {
+    bool one_account = word == "dispatchqueuemessages";
+    if (!parse_block_id_ext(blkid)) {
+      return false;
+    }
+    workchain = blkid.id.workchain;
+    return ((!one_account && seekeoln()) || parse_account_addr(workchain, addr)) && (seekeoln() || parse_lt(lt)) &&
+           seekeoln() && get_dispatch_queue_messages(blkid, workchain, addr, lt, one_account);
   } else if (word == "known") {
     return eoln() && show_new_blkids(true);
   } else if (word == "knowncells") {
@@ -1636,6 +1658,81 @@ void TestNode::got_msg_queue_sizes(ton::tl_object_ptr<ton::lite_api::liteServer_
     td::TerminalIO::out() << ton::create_block_id(x->id_).id.to_str() << "    " << x->size_ << std::endl;
   }
   td::TerminalIO::out() << "External message queue size limit: " << f->ext_msg_queue_size_limit_ << std::endl;
+}
+
+bool TestNode::get_dispatch_queue_info(ton::BlockIdExt block_id) {
+  td::TerminalIO::out() << "Dispatch queue in block: " << block_id.id.to_str() << std::endl;
+  return get_dispatch_queue_info_cont(block_id, true, td::Bits256::zero());
+}
+
+bool TestNode::get_dispatch_queue_info_cont(ton::BlockIdExt block_id, bool first, td::Bits256 after_addr) {
+  auto q = ton::create_serialize_tl_object<ton::lite_api::liteServer_getDispatchQueueInfo>(
+      first ? 0 : 2, ton::create_tl_lite_block_id(block_id), after_addr, 32, false);
+  return envelope_send_query(std::move(q), [=, Self = actor_id(this)](td::Result<td::BufferSlice> res) -> void {
+    if (res.is_error()) {
+      LOG(ERROR) << "liteServer.getDispatchQueueInfo error: " << res.move_as_error();
+      return;
+    }
+    auto F = ton::fetch_tl_object<ton::lite_api::liteServer_dispatchQueueInfo>(res.move_as_ok(), true);
+    if (F.is_error()) {
+      LOG(ERROR) << "cannot parse answer to liteServer.getDispatchQueueInfo";
+      return;
+    }
+    td::actor::send_closure_later(Self, &TestNode::got_dispatch_queue_info, block_id, F.move_as_ok());
+  });
+}
+
+void TestNode::got_dispatch_queue_info(ton::BlockIdExt block_id,
+                                       ton::tl_object_ptr<ton::lite_api::liteServer_dispatchQueueInfo> info) {
+  for (auto& acc : info->account_dispatch_queues_) {
+    td::TerminalIO::out() << block_id.id.workchain << ":" << acc->addr_.to_hex() << " : size=" << acc->size_
+                          << " lt=" << acc->min_lt_ << ".." << acc->max_lt_ << std::endl;
+  }
+  if (info->complete_) {
+    td::TerminalIO::out() << "Done" << std::endl;
+    return;
+  }
+  get_dispatch_queue_info_cont(block_id, false, info->account_dispatch_queues_.back()->addr_);
+}
+
+bool TestNode::get_dispatch_queue_messages(ton::BlockIdExt block_id, ton::WorkchainId wc, ton::StdSmcAddress addr,
+                                           ton::LogicalTime lt, bool one_account) {
+  if (wc != block_id.id.workchain) {
+    return set_error("workchain mismatch");
+  }
+  auto q = ton::create_serialize_tl_object<ton::lite_api::liteServer_getDispatchQueueMessages>(
+      one_account ? 2 : 0, ton::create_tl_lite_block_id(block_id), addr, lt, 64, false, one_account, false);
+  return envelope_send_query(std::move(q), [=, Self = actor_id(this)](td::Result<td::BufferSlice> res) -> void {
+    if (res.is_error()) {
+      LOG(ERROR) << "liteServer.getDispatchQueueMessages error: " << res.move_as_error();
+      return;
+    }
+    auto F = ton::fetch_tl_object<ton::lite_api::liteServer_dispatchQueueMessages>(res.move_as_ok(), true);
+    if (F.is_error()) {
+      LOG(ERROR) << "cannot parse answer to liteServer.getDispatchQueueMessages";
+      return;
+    }
+    td::actor::send_closure_later(Self, &TestNode::got_dispatch_queue_messages, F.move_as_ok());
+  });
+}
+
+void TestNode::got_dispatch_queue_messages(ton::tl_object_ptr<ton::lite_api::liteServer_dispatchQueueMessages> msgs) {
+  td::TerminalIO::out() << "Dispatch queue messages (" << msgs->messages_.size() << "):\n";
+  int count = 0;
+  for (auto& m : msgs->messages_) {
+    auto& meta = m->metadata_;
+    td::TerminalIO::out() << "Msg #" << ++count << ": " << msgs->id_->workchain_ << ":" << m->addr_.to_hex() << " "
+                          << m->lt_ << " : "
+                          << (meta->initiator_->workchain_ == ton::workchainInvalid
+                                  ? "[ no metadata ]"
+                                  : block::MsgMetadata{(td::uint32)meta->depth_, meta->initiator_->workchain_,
+                                                       meta->initiator_->id_, (ton::LogicalTime)meta->initiator_lt_}
+                                        .to_str())
+                          << "\n";
+  }
+  if (!msgs->complete_) {
+    td::TerminalIO::out() << "(incomplete list)\n";
+  }
 }
 
 bool TestNode::dns_resolve_start(ton::WorkchainId workchain, ton::StdSmcAddress addr, ton::BlockIdExt blkid,
@@ -2493,23 +2590,40 @@ bool TestNode::get_block_transactions(ton::BlockIdExt blkid, int mode, unsigned 
     } else {
       auto f = F.move_as_ok();
       std::vector<TransId> transactions;
+      std::vector<ton::tl_object_ptr<ton::lite_api::liteServer_transactionMetadata>> metadata;
       for (auto& id : f->ids_) {
         transactions.emplace_back(id->account_, id->lt_, id->hash_);
+        metadata.push_back(std::move(id->metadata_));
       }
       td::actor::send_closure_later(Self, &TestNode::got_block_transactions, ton::create_block_id(f->id_), mode,
-                                    f->req_count_, f->incomplete_, std::move(transactions), std::move(f->proof_));
+                                    f->req_count_, f->incomplete_, std::move(transactions), std::move(metadata),
+                                    std::move(f->proof_));
     }
   });
 }
 
-void TestNode::got_block_transactions(ton::BlockIdExt blkid, int mode, unsigned req_count, bool incomplete,
-                                      std::vector<TestNode::TransId> trans, td::BufferSlice proof) {
+void TestNode::got_block_transactions(
+    ton::BlockIdExt blkid, int mode, unsigned req_count, bool incomplete, std::vector<TestNode::TransId> trans,
+    std::vector<ton::tl_object_ptr<ton::lite_api::liteServer_transactionMetadata>> metadata, td::BufferSlice proof) {
   LOG(INFO) << "got up to " << req_count << " transactions from block " << blkid.to_str();
   auto out = td::TerminalIO::out();
   int count = 0;
-  for (auto& t : trans) {
+  for (size_t i = 0; i < trans.size(); ++i) {
+    auto& t = trans[i];
     out << "transaction #" << ++count << ": account " << t.acc_addr.to_hex() << " lt " << t.trans_lt << " hash "
         << t.trans_hash.to_hex() << std::endl;
+    if (mode & 256) {
+      auto& meta = metadata.at(i);
+      if (meta == nullptr) {
+        out << "    metadata: <none>" << std::endl;
+      } else {
+        out << "    metadata: "
+            << block::MsgMetadata{(td::uint32)meta->depth_, meta->initiator_->workchain_, meta->initiator_->id_,
+                                  (ton::LogicalTime)meta->initiator_lt_}
+                   .to_str()
+            << std::endl;
+      }
+    }
   }
   out << (incomplete ? "(block transaction list incomplete)" : "(end of block transaction list)") << std::endl;
 }
@@ -3405,9 +3519,7 @@ void TestNode::got_creator_stats(ton::BlockIdExt req_blkid, ton::BlockIdExt blki
         promise.set_error(td::Status::Error(PSLICE() << "invalid CreatorStats record with key " << key.to_hex()));
         return;
       }
-      if (mc_cnt.modified_since(min_utime) || shard_cnt.modified_since(min_utime)) {
-        func(key, mc_cnt, shard_cnt);
-      }
+      func(key, mc_cnt, shard_cnt);
       allow_eq = false;
     }
     if (complete) {
@@ -3635,7 +3747,7 @@ void TestNode::continue_check_validator_load3(std::unique_ptr<TestNode::Validato
                                               std::unique_ptr<TestNode::ValidatorLoadInfo> info2, int mode,
                                               std::string file_pfx) {
   LOG(INFO) << "continue_check_validator_load3 for blocks " << info1->blk_id.to_str() << " and "
-            << info1->blk_id.to_str() << " with mode=" << mode << " and file prefix `" << file_pfx
+            << info2->blk_id.to_str() << " with mode=" << mode << " and file prefix `" << file_pfx
             << "`: comparing block creators data";
   if (info1->created_total.first <= 0 || info2->created_total.first <= 0) {
     LOG(ERROR) << "no total created blocks statistics";
@@ -3696,13 +3808,14 @@ void TestNode::continue_check_validator_load3(std::unique_ptr<TestNode::Validato
   block::MtCarloComputeShare shard_share(shard_count, info2->vset->export_scaled_validator_weights());
   for (int i = 0; i < count; i++) {
     int x1 = d[i].first, y1 = d[i].second;
-    double xe = (i < main_count ? (double)xs / main_count : 0);
+    bool is_masterchain_validator = i < main_count;
+    double xe = (is_masterchain_validator ? (double)xs / main_count : 0);
     double ye = shard_share[i] * (double)ys / shard_count;
     td::Bits256 pk = info2->vset->list[i].pubkey.as_bits256();
     double p1 = create_prob(x1, .9 * xe), p2 = shard_create_prob(y1, .9 * ye, chunk_size);
     td::TerminalIO::out() << "val #" << i << ": pubkey " << pk.to_hex() << ", blocks created (" << x1 << "," << y1
                           << "), expected (" << xe << "," << ye << "), probabilities " << p1 << " and " << p2 << "\n";
-    if (std::min(p1, p2) < .00001) {
+    if ((is_masterchain_validator ? p1 : p2) < .00001) {
       LOG(ERROR) << "validator #" << i << " with pubkey " << pk.to_hex()
                  << " : serious misbehavior detected: created less than 90% of the expected amount of blocks with "
                     "probability 99.999% : created ("
@@ -3715,10 +3828,10 @@ void TestNode::continue_check_validator_load3(std::unique_ptr<TestNode::Validato
           cnt_ok++;
         }
       }
-    } else if (std::min(p1, p2) < .001) {
+    } else if ((is_masterchain_validator ? p1 : p2) < .005) {
       LOG(ERROR) << "validator #" << i << " with pubkey " << pk.to_hex()
                  << " : moderate misbehavior detected: created less than 90% of the expected amount of blocks with "
-                    "probability 99.9% : created ("
+                    "probability 99.5% : created ("
                  << x1 << "," << y1 << "), expected (" << xe << "," << ye << ") masterchain/shardchain blocks\n";
       if ((mode & 3) == 2) {
         auto st = write_val_create_proof(*info1, *info2, i, false, file_pfx, ++cnt);
@@ -4300,7 +4413,7 @@ int main(int argc, char* argv[]) {
   });
   p.add_option('V', "version", "shows lite-client build information", [&]() {
     std::cout << "lite-client build information: [ Commit: " << GitMetadata::CommitSHA1() << ", Date: " << GitMetadata::CommitDate() << "]\n";
-    
+
     std::exit(0);
   });
   p.add_option('i', "idx", "set liteserver idx", [&](td::Slice arg) {

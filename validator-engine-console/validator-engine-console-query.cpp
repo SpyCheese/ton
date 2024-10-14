@@ -842,23 +842,27 @@ td::Status GetOverlaysStatsQuery::receive(td::BufferSlice data) {
     td::StringBuilder sb;
     sb << "overlay_id: " << s->overlay_id_ << " adnl_id: " << s->adnl_id_ << " scope: " << s->scope_ << "\n";
     sb << "  nodes:\n";
-    
-    td::uint32 overlay_t_out_bytes = 0;
-    td::uint32 overlay_t_out_pckts = 0;
-    td::uint32 overlay_t_in_bytes = 0;
-    td::uint32 overlay_t_in_pckts = 0;
-    
+
+    auto print_traffic = [&](const char *name, const char *indent,
+                             ton::tl_object_ptr<ton::ton_api::engine_validator_overlayStatsTraffic> &t) {
+      sb << indent << name << ":\n"
+         << indent << " out: " << t->t_out_bytes_ << " bytes/sec, " << t->t_out_pckts_ << " pckts/sec\n"
+         << indent << " in: " << t->t_in_bytes_ << " bytes/sec, " << t->t_in_pckts_ << " pckts/sec\n";
+    };
     for (auto &n : s->nodes_) {
-      sb << "   adnl_id: " << n->adnl_id_ << " ip_addr: " << n->ip_addr_ << " broadcast_errors: " << n->bdcst_errors_ << " fec_broadcast_errors: " << n->fec_bdcst_errors_ << " last_in_query: " << n->last_in_query_ << " (" << time_to_human(n->last_in_query_) << ")" << " last_out_query: " << n->last_out_query_ << " (" << time_to_human(n->last_out_query_) << ")" << "\n   throughput:\n    out: " << n->t_out_bytes_ << " bytes/sec, " << n->t_out_pckts_ << " pckts/sec\n    in: " << n->t_in_bytes_ << " bytes/sec, " << n->t_in_pckts_ << " pckts/sec\n";
-      
-      overlay_t_out_bytes += n->t_out_bytes_;
-      overlay_t_out_pckts += n->t_out_pckts_;
-      
-      overlay_t_in_bytes += n->t_in_bytes_;
-      overlay_t_in_pckts += n->t_in_pckts_;
+      sb << "   adnl_id: " << n->adnl_id_ << " ip_addr: " << n->ip_addr_ << " broadcast_errors: " << n->bdcst_errors_
+         << " fec_broadcast_errors: " << n->fec_bdcst_errors_ << " last_in_query: " << n->last_in_query_ << " ("
+         << time_to_human(n->last_in_query_) << ")"
+         << " last_out_query: " << n->last_out_query_ << " (" << time_to_human(n->last_out_query_) << ")"
+         << "\n";
+      sb << "   is_neighbour: " << n->is_neighbour_ << "  is_alive: " << n->is_alive_
+         << "  node_flags: " << n->node_flags_ << "\n";
+      print_traffic("throughput", "   ", n->traffic_);
+      print_traffic("throughput (responses only)", "   ", n->traffic_responses_);
     }
-    sb << "  total_throughput:\n   out: " << overlay_t_out_bytes << " bytes/sec, " << overlay_t_out_pckts << " pckts/sec\n   in: " << overlay_t_in_bytes << " bytes/sec, " << overlay_t_in_pckts << " pckts/sec\n";
-     
+    print_traffic("total_throughput", "  ", s->total_traffic_);
+    print_traffic("total_throughput (responses only)", "  ", s->total_traffic_responses_);
+
     sb << "  stats:\n";
     for (auto &t : s->stats_) {
       sb << "    " << t->key_ << "\t" << t->value_ << "\n";
@@ -884,54 +888,64 @@ td::Status GetOverlaysStatsJsonQuery::receive(td::BufferSlice data) {
   TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_overlaysStats>(data.as_slice(), true),
                     "received incorrect answer: ");
   std::ofstream sb(file_name_);
-  
+
   sb << "[\n";
   bool rtail = false;
   for (auto &s : f->overlays_) {
-    if(rtail) {
+    if (rtail) {
       sb << ",\n";
     } else {
       rtail = true;
     }
-    
-    sb << "{\n  \"overlay_id\": \"" << s->overlay_id_ << "\",\n  \"adnl_id\": \"" << s->adnl_id_ << "\",\n  \"scope\": " << s->scope_ << ",\n";
+
+    sb << "{\n  \"overlay_id\": \"" << s->overlay_id_ << "\",\n  \"adnl_id\": \"" << s->adnl_id_
+       << "\",\n  \"scope\": " << s->scope_ << ",\n";
     sb << "  \"nodes\": [\n";
-    
-    td::uint32 overlay_t_out_bytes = 0;
-    td::uint32 overlay_t_out_pckts = 0;
-    td::uint32 overlay_t_in_bytes = 0;
-    td::uint32 overlay_t_in_pckts = 0;
-    
+
+    auto print_traffic = [&](const char *name,
+                             ton::tl_object_ptr<ton::ton_api::engine_validator_overlayStatsTraffic> &t) {
+      sb << "\"" << name << "\": { \"out_bytes_sec\": " << t->t_out_bytes_ << ", \"out_pckts_sec\": " << t->t_out_pckts_
+         << ", \"in_bytes_sec\": " << t->t_in_bytes_ << ", \"in_pckts_sec\": " << t->t_in_pckts_ << " }";
+    };
+
     bool tail = false;
     for (auto &n : s->nodes_) {
-      if(tail) {
+      if (tail) {
         sb << ",\n";
       } else {
         tail = true;
       }
-      
-      sb << "   {\n    \"adnl_id\": \"" << n->adnl_id_ << "\",\n    \"ip_addr\": \"" << n->ip_addr_ << "\",\n    \"broadcast_errors\": " << n->bdcst_errors_ << ",\n    \"fec_broadcast_errors\": " << n->fec_bdcst_errors_ << ",\n    \"last_in_query_unix\": " << n->last_in_query_ << ",\n    \"last_in_query_human\": \"" << time_to_human(n->last_in_query_) << "\",\n" << "    \"last_out_query_unix\": " << n->last_out_query_ << ",\n    \"last_out_query_human\": \"" << time_to_human(n->last_out_query_) << "\",\n" << "\n    \"throughput\": { \"out_bytes_sec\": " << n->t_out_bytes_ << ", \"out_pckts_sec\": " << n->t_out_pckts_ << ", \"in_bytes_sec\": " << n->t_in_bytes_ << ", \"in_pckts_sec\": " << n->t_in_pckts_ << " }\n   }";
-      
-      overlay_t_out_bytes += n->t_out_bytes_;
-      overlay_t_out_pckts += n->t_out_pckts_;
-      
-      overlay_t_in_bytes += n->t_in_bytes_;
-      overlay_t_in_pckts += n->t_in_pckts_;
+
+      sb << "   {\n    \"adnl_id\": \"" << n->adnl_id_ << "\",\n    \"ip_addr\": \"" << n->ip_addr_
+         << "\",\n    \"broadcast_errors\": " << n->bdcst_errors_
+         << ",\n    \"fec_broadcast_errors\": " << n->fec_bdcst_errors_
+         << ",\n    \"last_in_query_unix\": " << n->last_in_query_ << ",\n    \"last_in_query_human\": \""
+         << time_to_human(n->last_in_query_) << "\",\n"
+         << "    \"last_out_query_unix\": " << n->last_out_query_ << ",\n    \"last_out_query_human\": \""
+         << time_to_human(n->last_out_query_) << "\",\n"
+         << "\n    ";
+      print_traffic("throughput", n->traffic_);
+      sb << ",\n    ";
+      print_traffic("throughput_responses", n->traffic_responses_);
+      sb << "\n   }";
     }
-    sb << "  ],\n";
-    
-    sb << "  \"total_throughput\": { \"out_bytes_sec\": " << overlay_t_out_bytes << ", \"out_pckts_sec\": " << overlay_t_out_pckts << ", \"in_bytes_sec\": " << overlay_t_in_bytes << ", \"in_pckts_sec\": " << overlay_t_in_pckts << " },\n";
-     
+    sb << "  ],\n  ";
+
+    print_traffic("total_throughput", s->total_traffic_);
+    sb << ",\n  ";
+    print_traffic("total_throughput_responses", s->total_traffic_responses_);
+    sb << ",\n";
+
     sb << "  \"stats\": {\n";
-    
+
     tail = false;
     for (auto &t : s->stats_) {
-      if(tail) {
+      if (tail) {
         sb << ",\n";
       } else {
         tail = true;
       }
-      
+
       sb << "   \"" << t->key_ << "\": \"" << t->value_ << "\"";
     }
     sb << "\n  }\n";
@@ -939,7 +953,7 @@ td::Status GetOverlaysStatsJsonQuery::receive(td::BufferSlice data) {
   }
   sb << "]\n";
   sb << std::flush;
-  
+
   td::TerminalIO::output(std::string("wrote stats to " + file_name_ + "\n"));
   return td::Status::OK();
 }
@@ -1006,6 +1020,32 @@ td::Status ImportShardOverlayCertificateQuery::receive(td::BufferSlice data) {
   TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
                     "received incorrect answer: ");
   td::TerminalIO::out() << "successfully sent certificate to overlay manager\n";
+  return td::Status::OK();
+}
+td::Status GetActorStatsQuery::run() {
+ auto r_file_name = tokenizer_.get_token<std::string>();
+ if (r_file_name.is_ok()) {
+    file_name_ = r_file_name.move_as_ok();
+ }
+ return td::Status::OK();
+}
+td::Status GetActorStatsQuery::send() {
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_getActorTextStats>();
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status GetActorStatsQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_textStats>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  if (file_name_.empty()) {
+    td::TerminalIO::out() << f->data_;
+  } else {
+    std::ofstream sb(file_name_);
+    sb << f->data_;
+    sb << std::flush;
+    td::TerminalIO::output(std::string("wrote stats to " + file_name_ + "\n"));
+  }
   return td::Status::OK();
 }
 
@@ -1171,11 +1211,274 @@ td::Status ShowCustomOverlaysQuery::receive(td::BufferSlice data) {
     td::TerminalIO::out() << "Overlay \"" << overlay->name_ << "\": " << overlay->nodes_.size() << " nodes\n";
     for (const auto &node : overlay->nodes_) {
       td::TerminalIO::out() << "  " << node->adnl_id_
-                            << (node->msg_sender_ ? (PSTRING() << " (sender, p=" << node->msg_sender_priority_ << ")")
-                                                  : "")
-                            << "\n";
+                            << (node->msg_sender_
+                                    ? (PSTRING() << " (msg sender, p=" << node->msg_sender_priority_ << ")")
+                                    : "")
+                            << (node->block_sender_ ? " (block sender)" : "") << "\n";
     }
     td::TerminalIO::out() << "\n";
   }
+  return td::Status::OK();
+}
+
+td::Status SetStateSerializerEnabledQuery::run() {
+  TRY_RESULT(value, tokenizer_.get_token<int>());
+  if (value != 0 && value != 1) {
+    return td::Status::Error("expected 0 or 1");
+  }
+  TRY_STATUS(tokenizer_.check_endl());
+  enabled_ = value;
+  return td::Status::OK();
+}
+
+td::Status SetStateSerializerEnabledQuery::send() {
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_setStateSerializerEnabled>(enabled_);
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status SetStateSerializerEnabledQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status SetCollatorOptionsJsonQuery::run() {
+  TRY_RESULT_ASSIGN(file_name_, tokenizer_.get_token<std::string>());
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status SetCollatorOptionsJsonQuery::send() {
+  TRY_RESULT(data, td::read_file(file_name_));
+  auto b =
+      ton::create_serialize_tl_object<ton::ton_api::engine_validator_setCollatorOptionsJson>(data.as_slice().str());
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status SetCollatorOptionsJsonQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status ResetCollatorOptionsQuery::run() {
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status ResetCollatorOptionsQuery::send() {
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_setCollatorOptionsJson>("{}");
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status ResetCollatorOptionsQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status GetCollatorOptionsJsonQuery::run() {
+  TRY_RESULT_ASSIGN(file_name_, tokenizer_.get_token<std::string>());
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status GetCollatorOptionsJsonQuery::send() {
+  auto b =
+      ton::create_serialize_tl_object<ton::ton_api::engine_validator_getCollatorOptionsJson>();
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status GetCollatorOptionsJsonQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_jsonConfig>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  TRY_STATUS(td::write_file(file_name_, f->data_));
+  td::TerminalIO::out() << "saved config to " << file_name_ << "\n";
+  return td::Status::OK();
+}
+
+td::Status GetAdnlStatsJsonQuery::run() {
+  TRY_RESULT_ASSIGN(file_name_, tokenizer_.get_token<std::string>());
+  if (!tokenizer_.endl()) {
+    TRY_RESULT(s, tokenizer_.get_token<std::string>());
+    if (s == "all") {
+      all_ = true;
+    } else {
+      return td::Status::Error(PSTRING() << "unexpected token " << s);
+    }
+  }
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status GetAdnlStatsJsonQuery::send() {
+  auto b =
+      ton::create_serialize_tl_object<ton::ton_api::engine_validator_getAdnlStats>(all_);
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status GetAdnlStatsJsonQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::adnl_stats>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  auto s = td::json_encode<std::string>(td::ToJson(*f), true);
+  TRY_STATUS(td::write_file(file_name_, s));
+  td::TerminalIO::out() << "saved adnl stats to " << file_name_ << "\n";
+  return td::Status::OK();
+}
+
+td::Status GetAdnlStatsQuery::run() {
+  if (!tokenizer_.endl()) {
+    TRY_RESULT(s, tokenizer_.get_token<std::string>());
+    if (s == "all") {
+      all_ = true;
+    } else {
+      return td::Status::Error(PSTRING() << "unexpected token " << s);
+    }
+  }
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status GetAdnlStatsQuery::send() {
+  auto b =
+      ton::create_serialize_tl_object<ton::ton_api::engine_validator_getAdnlStats>(all_);
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status GetAdnlStatsQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(stats, ton::fetch_tl_object<ton::ton_api::adnl_stats>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::StringBuilder sb;
+  sb << "================================= ADNL STATS =================================\n";
+  bool first = true;
+  double now = td::Clocks::system();
+  for (auto &local_id : stats->local_ids_) {
+    if (first) {
+      first = false;
+    } else {
+      sb << "\n";
+    }
+    sb << "LOCAL ID " << local_id->short_id_ << "\n";
+    if (!local_id->current_decrypt_.empty()) {
+      std::sort(local_id->current_decrypt_.begin(), local_id->current_decrypt_.end(),
+                [](const ton::tl_object_ptr<ton::ton_api::adnl_stats_ipPackets> &a,
+                   const ton::tl_object_ptr<ton::ton_api::adnl_stats_ipPackets> &b) {
+                  return a->packets_ > b->packets_;
+                });
+      td::uint64 total = 0;
+      for (auto &x : local_id->current_decrypt_) {
+        total += x->packets_;
+      }
+      sb << "  Packets in decryptor: total=" << total;
+      for (auto &x : local_id->current_decrypt_) {
+        sb << " " << (x->ip_str_.empty() ? "unknown" : x->ip_str_) << "=" << x->packets_;
+      }
+      sb << "\n";
+    }
+    auto print_local_id_packets = [&](const std::string &name,
+                                      std::vector<ton::tl_object_ptr<ton::ton_api::adnl_stats_ipPackets>> &vec) {
+      if (vec.empty()) {
+        return;
+      }
+      std::sort(vec.begin(), vec.end(),
+                [](const ton::tl_object_ptr<ton::ton_api::adnl_stats_ipPackets> &a,
+                   const ton::tl_object_ptr<ton::ton_api::adnl_stats_ipPackets> &b) {
+                  return a->packets_ > b->packets_;
+                });
+      td::uint64 total = 0;
+      for (auto &x : vec) {
+        total += x->packets_;
+      }
+      sb << "  " << name << ": total=" << total;
+      int cnt = 0;
+      for (auto &x : vec) {
+        ++cnt;
+        if (cnt >= 8) {
+          sb << " ...";
+          break;
+        }
+        sb << " " << (x->ip_str_.empty() ? "unknown" : x->ip_str_) << "=" << x->packets_;
+      }
+      sb << "\n";
+    };
+    print_local_id_packets("Decrypted packets (recent)", local_id->packets_recent_->decrypted_packets_);
+    print_local_id_packets("Dropped packets   (recent)", local_id->packets_recent_->dropped_packets_);
+    print_local_id_packets("Decrypted packets (total)", local_id->packets_total_->decrypted_packets_);
+    print_local_id_packets("Dropped packets   (total)", local_id->packets_total_->dropped_packets_);
+    sb << "  PEERS (" << local_id->peers_.size() << "):\n";
+    std::sort(local_id->peers_.begin(), local_id->peers_.end(),
+              [](const ton::tl_object_ptr<ton::ton_api::adnl_stats_peerPair> &a,
+                 const ton::tl_object_ptr<ton::ton_api::adnl_stats_peerPair> &b) {
+                return a->packets_recent_->in_bytes_ + a->packets_recent_->out_bytes_ >
+                       b->packets_recent_->in_bytes_ + b->packets_recent_->out_bytes_;
+              });
+    for (auto &peer : local_id->peers_) {
+      sb << "    PEER " << peer->peer_id_ << "\n";
+      sb << "      Address: " << (peer->ip_str_.empty() ? "unknown" : peer->ip_str_) << "\n";
+      sb << "      Connection " << (peer->connection_ready_ ? "ready" : "not ready") << ", ";
+      switch (peer->channel_status_) {
+        case 0:
+          sb << "channel: none\n";
+          break;
+        case 1:
+          sb << "channel: inited\n";
+          break;
+        case 2:
+          sb << "channel: ready\n";
+          break;
+        default:
+          sb << "\n";
+      }
+
+      auto print_packets = [&](const std::string &name,
+                               const ton::tl_object_ptr<ton::ton_api::adnl_stats_packets> &obj) {
+        if (obj->in_packets_) {
+          sb << "      In  (" << name << "): " << obj->in_packets_ << " packets ("
+             << td::format::as_size(obj->in_bytes_) << "), channel: " << obj->in_packets_channel_ << " packets ("
+             << td::format::as_size(obj->in_bytes_channel_) << ")\n";
+        }
+        if (obj->out_packets_) {
+          sb << "      Out (" << name << "): " << obj->out_packets_ << " packets ("
+             << td::format::as_size(obj->out_bytes_) << "), channel: " << obj->out_packets_channel_ << " packets ("
+             << td::format::as_size(obj->out_bytes_channel_) << ")\n";
+        }
+        if (obj->out_expired_messages_) {
+          sb << "      Out expired (" << name << "): " << obj->out_expired_messages_ << " messages ("
+             << td::format::as_size(obj->out_expired_bytes_) << ")\n";
+        }
+      };
+      print_packets("recent", peer->packets_recent_);
+      print_packets("total", peer->packets_total_);
+
+      sb << "      Last in packet: ";
+      if (peer->last_in_packet_ts_) {
+        sb << now - peer->last_in_packet_ts_ << " s ago";
+      } else {
+        sb << "never";
+      }
+      sb << "    Last out packet: ";
+      if (peer->last_out_packet_ts_) {
+        sb << now - peer->last_out_packet_ts_ << " s ago";
+      } else {
+        sb << "never";
+      }
+      sb << "\n";
+      if (peer->out_queue_messages_) {
+        sb << "      Out message queue: " << peer->out_queue_messages_ << " messages ("
+           << td::format::as_size(peer->out_queue_bytes_) << ")\n";
+      }
+    }
+  }
+  sb << "==============================================================================\n";
+  td::TerminalIO::out() << sb.as_cslice();
   return td::Status::OK();
 }

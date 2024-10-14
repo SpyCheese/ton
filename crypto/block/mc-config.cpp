@@ -320,7 +320,7 @@ ton::ValidatorSessionConfig Config::get_consensus_config() const {
     c.max_block_size = r.max_block_bytes;
     c.max_collated_data_size = r.max_collated_bytes;
   };
-  auto set_v2 = [&] (auto& r) {
+  auto set_v2 = [&](auto& r) {
     set_v1(r);
     c.new_catchain_ids = r.new_catchain_ids;
   };
@@ -1940,7 +1940,7 @@ td::Result<SizeLimitsConfig> Config::get_size_limits_config() const {
 td::Result<SizeLimitsConfig> Config::do_get_size_limits_config(td::Ref<vm::CellSlice> cs) {
   SizeLimitsConfig limits;
   if (cs.is_null()) {
-    return limits; // default values
+    return limits;  // default values
   }
   auto unpack_v1 = [&](auto& rec) {
     limits.max_msg_bits = rec.max_msg_bits;
@@ -1956,6 +1956,7 @@ td::Result<SizeLimitsConfig> Config::do_get_size_limits_config(td::Ref<vm::CellS
     limits.max_acc_state_bits = rec.max_acc_state_bits;
     limits.max_acc_state_cells = rec.max_acc_state_cells;
     limits.max_acc_public_libraries = rec.max_acc_public_libraries;
+    limits.defer_out_queue_size_limit = rec.defer_out_queue_size_limit;
   };
   gen::SizeLimitsConfig::Record_size_limits_config rec_v1;
   gen::SizeLimitsConfig::Record_size_limits_config_v2 rec_v2;
@@ -2074,7 +2075,7 @@ bool WorkchainInfo::unpack(ton::WorkchainId wc, vm::CellSlice& cs) {
   }
   auto unpack_v1 = [this](auto& info) {
     enabled_since = info.enabled_since;
-    actual_min_split = info.actual_min_split;
+    monitor_min_split = info.monitor_min_split;
     min_split = info.min_split;
     max_split = info.max_split;
     basic = info.basic;
@@ -2298,17 +2299,14 @@ td::Result<Ref<vm::Tuple>> ConfigInfo::get_prev_blocks_info() const {
     if (shard->sgn() < 0) {
       shard &= ((td::make_refint(1) << 64) - 1);
     }
-    return vm::make_tuple_ref(
-        td::make_refint(block_id.id.workchain),
-        std::move(shard),
-        td::make_refint(block_id.id.seqno),
-        td::bits_to_refint(block_id.root_hash.bits(), 256),
-        td::bits_to_refint(block_id.file_hash.bits(), 256));
+    return vm::make_tuple_ref(td::make_refint(block_id.id.workchain), std::move(shard),
+                              td::make_refint(block_id.id.seqno), td::bits_to_refint(block_id.root_hash.bits(), 256),
+                              td::bits_to_refint(block_id.file_hash.bits(), 256));
   };
   std::vector<vm::StackEntry> last_mc_blocks;
 
   last_mc_blocks.push_back(block_id_to_tuple(block_id));
-  for (ton::BlockSeqno seqno = block_id.id.seqno; seqno > 0 && last_mc_blocks.size() < 16; ) {
+  for (ton::BlockSeqno seqno = block_id.id.seqno; seqno > 0 && last_mc_blocks.size() < 16;) {
     --seqno;
     ton::BlockIdExt block_id;
     if (!get_old_mc_block_id(seqno, block_id)) {
@@ -2322,9 +2320,8 @@ td::Result<Ref<vm::Tuple>> ConfigInfo::get_prev_blocks_info() const {
   if (!get_last_key_block(last_key_block, last_key_block_lt)) {
     return td::Status::Error("cannot fetch last key block");
   }
-  return vm::make_tuple_ref(
-      td::make_cnt_ref<std::vector<vm::StackEntry>>(std::move(last_mc_blocks)),
-      block_id_to_tuple(last_key_block));
+  return vm::make_tuple_ref(td::make_cnt_ref<std::vector<vm::StackEntry>>(std::move(last_mc_blocks)),
+                            block_id_to_tuple(last_key_block));
 }
 
 td::optional<PrecompiledContractsConfig::Contract> PrecompiledContractsConfig::get_contract(

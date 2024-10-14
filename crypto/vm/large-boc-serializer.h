@@ -19,7 +19,7 @@
 #include "db/DynamicBagOfCellsDb.h"
 
 namespace vm {
-td::Status std_boc_serialize_to_file_large(std::shared_ptr<CellDbReader> reader, Cell::Hash root_hash,
-                                           td::FileFd& fd, int mode);
+td::Status std_boc_serialize_to_file_large(std::shared_ptr<CellDbReader> reader, Cell::Hash root_hash, td::FileFd& fd,
+                                           int mode = 0, td::CancellationToken cancellation_token = {});
 
 }  // namespace vm

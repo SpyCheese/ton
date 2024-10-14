@@ -1076,6 +1076,28 @@ class ImportShardOverlayCertificateQuery : public Query {
   std::string in_file_;
 };
 
+class GetActorStatsQuery : public Query {
+ public:
+  GetActorStatsQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
+      : Query(console, std::move(tokenizer)) {
+  }
+  td::Status run() override;
+  td::Status send() override;
+  td::Status receive(td::BufferSlice data) override;
+  static std::string get_name() {
+    return "getactorstats";
+  }
+  static std::string get_help() {
+    return "getactorstats [<outfile>]\tget actor stats and print it either in stdout or in <outfile>";
+  }
+  std::string name() const override {
+    return get_name();
+  }
+
+ private:
+  std::string file_name_;
+};
+
 class GetPerfTimerStatsJsonQuery : public Query {
  public:
   GetPerfTimerStatsJsonQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
@@ -1206,4 +1228,137 @@ class ShowCustomOverlaysQuery : public Query {
   std::string name() const override {
     return get_name();
   }
+};
+
+class SetStateSerializerEnabledQuery : public Query {
+ public:
+  SetStateSerializerEnabledQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
+      : Query(console, std::move(tokenizer)) {
+  }
+  td::Status run() override;
+  td::Status send() override;
+  td::Status receive(td::BufferSlice data) override;
+  static std::string get_name() {
+    return "setstateserializerenabled";
+  }
+  static std::string get_help() {
+    return "setstateserializerenabled <value>\tdisable or enable persistent state serializer; value is 0 or 1";
+  }
+  std::string name() const override {
+    return get_name();
+  }
+
+ private:
+  bool enabled_;
+};
+
+class SetCollatorOptionsJsonQuery : public Query {
+ public:
+  SetCollatorOptionsJsonQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
+      : Query(console, std::move(tokenizer)) {
+  }
+  td::Status run() override;
+  td::Status send() override;
+  td::Status receive(td::BufferSlice data) override;
+  static std::string get_name() {
+    return "setcollatoroptionsjson";
+  }
+  static std::string get_help() {
+    return "setcollatoroptionsjson <filename>\tset collator options from file <filename>";
+  }
+  std::string name() const override {
+    return get_name();
+  }
+
+ private:
+  std::string file_name_;
+};
+
+class ResetCollatorOptionsQuery : public Query {
+ public:
+  ResetCollatorOptionsQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
+      : Query(console, std::move(tokenizer)) {
+  }
+  td::Status run() override;
+  td::Status send() override;
+  td::Status receive(td::BufferSlice data) override;
+  static std::string get_name() {
+    return "resetcollatoroptions";
+  }
+  static std::string get_help() {
+    return "resetcollatoroptions\tset collator options to default values";
+  }
+  std::string name() const override {
+    return get_name();
+  }
+};
+
+class GetCollatorOptionsJsonQuery : public Query {
+ public:
+  GetCollatorOptionsJsonQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
+      : Query(console, std::move(tokenizer)) {
+  }
+  td::Status run() override;
+  td::Status send() override;
+  td::Status receive(td::BufferSlice data) override;
+  static std::string get_name() {
+    return "getcollatoroptionsjson";
+  }
+  static std::string get_help() {
+    return "getcollatoroptionsjson <filename>\tsave current collator options to file <filename>";
+  }
+  std::string name() const override {
+    return get_name();
+  }
+
+ private:
+  std::string file_name_;
+};
+
+class GetAdnlStatsJsonQuery : public Query {
+ public:
+  GetAdnlStatsJsonQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
+      : Query(console, std::move(tokenizer)) {
+  }
+  td::Status run() override;
+  td::Status send() override;
+  td::Status receive(td::BufferSlice data) override;
+  static std::string get_name() {
+    return "getadnlstatsjson";
+  }
+  static std::string get_help() {
+    return "getadnlstatsjson <filename> [all]\tsave adnl stats to <filename>. all - returns all peers (default - only "
+           "peers with traffic in the last 10 minutes)";
+  }
+  std::string name() const override {
+    return get_name();
+  }
+
+ private:
+  std::string file_name_;
+  bool all_ = false;
+};
+
+class GetAdnlStatsQuery : public Query {
+ public:
+  GetAdnlStatsQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
+      : Query(console, std::move(tokenizer)) {
+  }
+  td::Status run() override;
+  td::Status send() override;
+  td::Status receive(td::BufferSlice data) override;
+  static std::string get_name() {
+    return "getadnlstats";
+  }
+  static std::string get_help() {
+    return "getadnlstats [all]\tdisplay adnl stats. all - returns all peers (default - only peers with traffic in the "
+           "last 10 minutes)";
+  }
+  std::string name() const override {
+    return get_name();
+  }
+
+ private:
+  std::string file_name_;
+  bool all_ = false;
 };

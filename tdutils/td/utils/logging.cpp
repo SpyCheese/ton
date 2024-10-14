@@ -18,6 +18,7 @@
 */
 #include "td/utils/logging.h"
 
+#include "ThreadSafeCounter.h"
 #include "td/utils/port/Clocks.h"
 #include "td/utils/port/StdStreams.h"
 #include "td/utils/port/thread_local.h"
@@ -136,6 +137,9 @@ Logger::~Logger() {
       slice = MutableCSlice(slice.begin(), slice.begin() + slice.size() - 1);
     }
     log_.append(slice, log_level_);
+
+    // put stats here to avoid conflict with PSTRING and PSLICE
+    TD_PERF_COUNTER_SINCE(logger, start_at_);
   } else {
     log_.append(as_cslice(), log_level_);
   }
@@ -313,5 +317,4 @@ ScopedDisableLog::~ScopedDisableLog() {
     set_verbosity_level(sdl_verbosity);
   }
 }
-
 }  // namespace td

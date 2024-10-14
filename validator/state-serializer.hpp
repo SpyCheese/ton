@@ -37,6 +37,9 @@ class AsyncStateSerializer : public td::actor::Actor {
   bool saved_to_db_ = true;
 
   td::Ref<ValidatorManagerOptions> opts_;
+  bool auto_disabled_ = false;
+  td::CancellationTokenSource cancellation_token_source_;
+  UnixTime last_known_key_block_ts_ = 0;
 
   td::actor::ActorId<ValidatorManager> manager_;
 
@@ -46,6 +49,14 @@ class AsyncStateSerializer : public td::actor::Actor {
   bool have_masterchain_state_ = false;
 
   std::vector<BlockIdExt> shards_;
+  struct PreviousStateCache {
+    std::vector<std::pair<std::string, ShardIdFull>> state_files;
+    std::shared_ptr<vm::CellHashSet> cache;
+    std::vector<ShardIdFull> cur_shards;
+
+    void prepare_cache(ShardIdFull shard);
+  };
+  std::shared_ptr<PreviousStateCache> previous_state_cache_;
 
  public:
   AsyncStateSerializer(BlockIdExt block_id, td::Ref<ValidatorManagerOptions> opts,
@@ -59,12 +70,15 @@ class AsyncStateSerializer : public td::actor::Actor {
 
   bool need_serialize(BlockHandle handle);
   bool need_monitor(ShardIdFull shard);
+  bool have_newer_persistent_state(UnixTime cur_ts);
 
   void alarm() override;
   void start_up() override;
   void got_self_state(AsyncSerializerState state);
   void got_init_handle(BlockHandle handle);
 
+  void request_previous_state_files();
+  void got_previous_state_files(std::vector<std::pair<std::string, ShardIdFull>> files);
   void request_masterchain_state();
   void request_shard_state(BlockIdExt shard);
 
@@ -80,6 +94,10 @@ class AsyncStateSerializer : public td::actor::Actor {
     promise.set_result(last_block_id_.id.seqno);
   }
 
+  void update_last_known_key_block_ts(UnixTime ts) {
+    last_known_key_block_ts_ = std::max(last_known_key_block_ts_, ts);
+  }
+
   void saved_to_db() {
     saved_to_db_ = true;
     running_ = false;
@@ -89,6 +107,9 @@ class AsyncStateSerializer : public td::actor::Actor {
   void fail_handler(td::Status reason);
   void fail_handler_cont();
   void success_handler();
+
+  void update_options(td::Ref<ValidatorManagerOptions> opts);
+  void auto_disable_serializer(bool disabled);
 };
 
 }  // namespace validator

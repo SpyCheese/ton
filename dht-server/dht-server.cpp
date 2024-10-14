@@ -170,7 +170,7 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
   return ton::create_tl_object<ton::ton_api::engine_validator_config>(
       out_port, std::move(addrs_vec), std::move(adnl_vec), std::move(dht_vec), std::move(val_vec),
       ton::PublicKeyHash::zero().tl(), std::move(full_node_slaves_vec), std::move(full_node_masters_vec),
-      nullptr, std::move(liteserver_vec), std::move(control_vec), std::move(gc_vec));
+      nullptr, nullptr, std::move(liteserver_vec), std::move(control_vec), std::move(gc_vec));
 }
 
 td::Result<bool> Config::config_add_network_addr(td::IPAddress in_ip, td::IPAddress out_ip,
@@ -1231,15 +1231,19 @@ int main(int argc, char *argv[]) {
   });
   td::uint32 threads = 7;
   p.add_checked_option(
-      't', "threads", PSTRING() << "number of threads (default=" << threads << ")", [&](td::Slice fname) {
+      't', "threads", PSTRING() << "number of threads (default=" << threads << ")", [&](td::Slice arg) {
         td::int32 v;
         try {
-          v = std::stoi(fname.str());
+          v = std::stoi(arg.str());
         } catch (...) {
           return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: not a number");
         }
-        if (v < 1 || v > 256) {
-          return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: should be in range [1..256]");
+        if (v <= 0) {
+          return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: should be > 0");
+        }
+        if (v > 127) {
+          LOG(WARNING) << "`--threads " << v << "` is too big, effective value will be 127";
+          v = 127;
         }
         threads = v;
         return td::Status::OK();

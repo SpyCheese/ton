@@ -51,6 +51,26 @@ struct PerfTimerStats {
   std::deque<std::pair<double, double>> stats; // <Time::now(), duration>
 };
 
+struct CollatorOptions : public td::CntObject {
+  bool deferring_enabled = true;
+
+  // Defer messages from account after Xth message in block (excluding first messages from transactions)
+  td::uint32 defer_messages_after = 10;
+  // Defer all messages if out msg queue size is greater than X (excluding first messages from transactions)
+  td::uint64 defer_out_queue_size_limit = 2048;
+
+  // See Collator::process_dispatch_queue
+  td::uint32 dispatch_phase_2_max_total = 150;
+  td::uint32 dispatch_phase_3_max_total = 150;
+  td::uint32 dispatch_phase_2_max_per_initiator = 20;
+  td::optional<td::uint32> dispatch_phase_3_max_per_initiator;  // Default - depends on out msg queue size
+
+  // Don't defer messages from these accounts
+  std::set<std::pair<WorkchainId, StdSmcAddress>> whitelist;
+  // Prioritize these accounts on each phase of process_dispatch_queue
+  std::set<std::pair<WorkchainId, StdSmcAddress>> prioritylist;
+};
+
 struct ValidatorManagerOptions : public td::CntObject {
  public:
   enum class ShardCheckMode { m_monitor, m_validate };
@@ -82,10 +102,19 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual BlockSeqno sync_upto() const = 0;
   virtual std::string get_session_logs_file() const = 0;
   virtual td::uint32 get_celldb_compress_depth() const = 0;
+  virtual bool get_celldb_in_memory() const = 0;
   virtual size_t get_max_open_archive_files() const = 0;
   virtual double get_archive_preload_period() const = 0;
   virtual bool get_disable_rocksdb_stats() const = 0;
   virtual bool nonfinal_ls_queries_enabled() const = 0;
+  virtual td::optional<td::uint64> get_celldb_cache_size() const = 0;
+  virtual bool get_celldb_direct_io() const = 0;
+  virtual bool get_celldb_preload_all() const = 0;
+  virtual td::optional<double> get_catchain_max_block_delay() const = 0;
+  virtual td::optional<double> get_catchain_max_block_delay_slow() const = 0;
+  virtual bool get_state_serializer_enabled() const = 0;
+  virtual td::Ref<CollatorOptions> get_collator_options() const = 0;
+  virtual bool get_fast_state_serializer_enabled() const = 0;
 
   virtual void set_zero_block_id(BlockIdExt block_id) = 0;
   virtual void set_init_block_id(BlockIdExt block_id) = 0;
@@ -110,13 +139,22 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual void set_archive_preload_period(double value) = 0;
   virtual void set_disable_rocksdb_stats(bool value) = 0;
   virtual void set_nonfinal_ls_queries_enabled(bool value) = 0;
+  virtual void set_celldb_cache_size(td::uint64 value) = 0;
+  virtual void set_celldb_direct_io(bool value) = 0;
+  virtual void set_celldb_preload_all(bool value) = 0;
+  virtual void set_celldb_in_memory(bool value) = 0;
+  virtual void set_catchain_max_block_delay(double value) = 0;
+  virtual void set_catchain_max_block_delay_slow(double value) = 0;
+  virtual void set_state_serializer_enabled(bool value) = 0;
+  virtual void set_collator_options(td::Ref<CollatorOptions> value) = 0;
+  virtual void set_fast_state_serializer_enabled(bool value) = 0;
 
   static td::Ref<ValidatorManagerOptions> create(
       BlockIdExt zero_block_id, BlockIdExt init_block_id,
       std::function<bool(ShardIdFull, CatchainSeqno, ShardCheckMode)> check_shard = [](ShardIdFull, CatchainSeqno,
                                                                                        ShardCheckMode) { return true; },
-      bool allow_blockchain_init = false, double sync_blocks_before = 86400, double block_ttl = 86400 * 7,
-      double state_ttl = 3600, double archive_ttl = 86400 * 365, double key_proof_ttl = 86400 * 3650,
+      bool allow_blockchain_init = false, double sync_blocks_before = 3600, double block_ttl = 86400,
+      double state_ttl = 86400, double archive_ttl = 86400 * 7, double key_proof_ttl = 86400 * 3650,
       double max_mempool_num = 999999,
       bool initial_sync_disabled = false);
 };
@@ -134,7 +172,9 @@ class ValidatorManagerInterface : public td::actor::Actor {
     virtual void send_ihr_message(AccountIdPrefixFull dst, td::BufferSlice data) = 0;
     virtual void send_ext_message(AccountIdPrefixFull dst, td::BufferSlice data) = 0;
     virtual void send_shard_block_info(BlockIdExt block_id, CatchainSeqno cc_seqno, td::BufferSlice data) = 0;
-    virtual void send_broadcast(BlockBroadcast broadcast) = 0;
+    virtual void send_block_candidate(BlockIdExt block_id, CatchainSeqno cc_seqno, td::uint32 validator_set_hash,
+                                      td::BufferSlice data) = 0;
+    virtual void send_broadcast(BlockBroadcast broadcast, int mode) = 0;
     virtual void download_block(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
                                 td::Promise<ReceivedBlock> promise) = 0;
     virtual void download_zero_state(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
@@ -188,6 +228,8 @@ class ValidatorManagerInterface : public td::actor::Actor {
                                     td::Promise<td::BufferSlice> promise) = 0;
   virtual void get_persistent_state_slice(BlockIdExt block_id, BlockIdExt masterchain_block_id, td::int64 offset,
                                           td::int64 max_length, td::Promise<td::BufferSlice> promise) = 0;
+  virtual void get_previous_persistent_state_files(
+      BlockSeqno cur_mc_seqno, td::Promise<std::vector<std::pair<std::string, ShardIdFull>>> promise) = 0;
   virtual void get_block_proof(BlockHandle handle, td::Promise<td::BufferSlice> promise) = 0;
   virtual void get_block_proof_link(BlockHandle handle, td::Promise<td::BufferSlice> promise) = 0;
   virtual void get_block_handle(BlockIdExt block_id, bool force, td::Promise<BlockHandle> promise) = 0;
@@ -202,6 +244,7 @@ class ValidatorManagerInterface : public td::actor::Actor {
   virtual void check_external_message(td::BufferSlice data, td::Promise<td::Ref<ExtMessage>> promise) = 0;
   virtual void new_ihr_message(td::BufferSlice data) = 0;
   virtual void new_shard_block(BlockIdExt block_id, CatchainSeqno cc_seqno, td::BufferSlice data) = 0;
+  virtual void new_block_candidate(BlockIdExt block_id, td::BufferSlice data) = 0;
 
   virtual void add_ext_server_id(adnl::AdnlNodeIdShort id) = 0;
   virtual void add_ext_server_port(td::uint16 port) = 0;
@@ -213,6 +256,7 @@ class ValidatorManagerInterface : public td::actor::Actor {
   virtual void get_block_data_from_db_short(BlockIdExt block_id, td::Promise<td::Ref<BlockData>> promise) = 0;
   virtual void get_block_candidate_from_db(PublicKey source, BlockIdExt id, FileHash collated_data_file_hash,
                                            td::Promise<BlockCandidate> promise) = 0;
+  virtual void get_candidate_data_by_block_id_from_db(BlockIdExt id, td::Promise<td::BufferSlice> promise) = 0;
   virtual void get_shard_state_from_db(ConstBlockHandle handle, td::Promise<td::Ref<ShardState>> promise) = 0;
   virtual void get_shard_state_from_db_short(BlockIdExt block_id, td::Promise<td::Ref<ShardState>> promise) = 0;
   virtual void get_block_proof_from_db(ConstBlockHandle handle, td::Promise<td::Ref<Proof>> promise) = 0;
@@ -233,11 +277,13 @@ class ValidatorManagerInterface : public td::actor::Actor {
 
   virtual void run_ext_query(td::BufferSlice data, td::Promise<td::BufferSlice> promise) = 0;
   virtual void prepare_stats(td::Promise<std::vector<std::pair<std::string, std::string>>> promise) = 0;
+  virtual void prepare_actor_stats(td::Promise<std::string> promise) = 0;
 
   virtual void prepare_perf_timer_stats(td::Promise<std::vector<PerfTimerStats>> promise) = 0;
   virtual void add_perf_timer_stat(std::string name, double duration) = 0;
-  virtual void get_out_msg_queue_size(BlockIdExt block_id, td::Promise<td::uint32> promise) = 0;
+  virtual void get_out_msg_queue_size(BlockIdExt block_id, td::Promise<td::uint64> promise) = 0;
 
+  virtual void update_options(td::Ref<ValidatorManagerOptions> opts) = 0;
 };
 
 }  // namespace validator

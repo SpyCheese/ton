@@ -64,4 +64,10 @@ Status update_atime(CSlice path) TD_WARN_UNUSED_RESULT;
 
 #endif
 
+struct TotalMemStat {
+  uint64 total_ram;
+  uint64 available_ram;
+};
+Result<TotalMemStat> get_total_mem_stat() TD_WARN_UNUSED_RESULT;
+
 }  // namespace td

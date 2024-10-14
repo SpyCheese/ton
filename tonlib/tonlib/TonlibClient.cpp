@@ -178,6 +178,7 @@ static block::AccountState create_account_state(ton::tl_object_ptr<ton::lite_api
 }
 struct RawAccountState {
   td::int64 balance = -1;
+  td::Ref<vm::Cell> extra_currencies;
 
   ton::UnixTime storage_last_paid{0};
   vm::CellStorageStat storage_stat;
@@ -204,6 +205,74 @@ std::string to_bytes(td::Ref<vm::Cell> cell) {
     return "";
   }
   return vm::std_boc_serialize(cell, vm::BagOfCells::Mode::WithCRC32C).move_as_ok().as_slice().str();
+}
+
+td::Result<std::vector<tonlib_api::object_ptr<tonlib_api::extraCurrency>>> parse_extra_currencies_or_throw(
+    const td::Ref<vm::Cell> dict_root) {
+  std::vector<tonlib_api::object_ptr<tonlib_api::extraCurrency>> result;
+  vm::Dictionary dict{dict_root, 32};
+  if (!dict.check_for_each([&](td::Ref<vm::CellSlice> value, td::ConstBitPtr key, int n) {
+        CHECK(n == 32);
+        int id = (int)key.get_int(n);
+        auto amount_ref = block::tlb::t_VarUIntegerPos_32.as_integer_skip(value.write());
+        if (amount_ref.is_null() || !value->empty_ext()) {
+          return false;
+        }
+        td::int64 amount = amount_ref->to_long();
+        if (amount == td::int64(~0ULL << 63)) {
+          return false;
+        }
+        result.push_back(tonlib_api::make_object<tonlib_api::extraCurrency>(id, amount));
+        return true;
+      })) {
+    return td::Status::Error("Failed to parse extra currencies dict");
+  }
+  return result;
+}
+
+td::Result<std::vector<tonlib_api::object_ptr<tonlib_api::extraCurrency>>> parse_extra_currencies(
+    const td::Ref<vm::Cell>& dict_root) {
+  return TRY_VM(parse_extra_currencies_or_throw(dict_root));
+}
+
+td::Result<td::Ref<vm::Cell>> to_extra_currenctes_dict(
+    const std::vector<tonlib_api::object_ptr<tonlib_api::extraCurrency>>& extra_currencies) {
+  vm::Dictionary dict{32};
+  for (const auto &f : extra_currencies) {
+    if (f->amount_ == 0) {
+      continue;
+    }
+    if (f->amount_ < 0) {
+      return td::Status::Error("Negative extra currency amount");
+    }
+    vm::CellBuilder cb2;
+    block::tlb::t_VarUInteger_32.store_integer_value(cb2, *td::make_refint(f->amount_));
+    if (!dict.set_builder(td::BitArray<32>(f->id_), cb2, vm::DictionaryBase::SetMode::Add)) {
+      return td::Status::Error("Duplicate extra currency id");
+    }
+  }
+  return std::move(dict).extract_root_cell();
+}
+
+td::Status check_enough_extra_currencies(const td::Ref<vm::Cell> &balance, const td::Ref<vm::Cell> &amount) {
+  block::CurrencyCollection c1{td::zero_refint(), balance};
+  block::CurrencyCollection c2{td::zero_refint(), amount};
+  auto res = TRY_VM(td::Result<bool>{c1 >= c2});
+  TRY_RESULT(v, std::move(res));
+  if (!v) {
+    return TonlibError::NotEnoughFunds();
+  }
+  return td::Status::OK();
+}
+
+td::Result<td::Ref<vm::Cell>> add_extra_currencies(const td::Ref<vm::Cell> &e1, const td::Ref<vm::Cell> &e2) {
+  block::CurrencyCollection c1{td::zero_refint(), e1};
+  block::CurrencyCollection c2{td::zero_refint(), e2};
+  TRY_RESULT_ASSIGN(c1, TRY_VM(td::Result<block::CurrencyCollection>{c1 + c2}));
+  if (c1.is_valid()) {
+    return td::Status::Error("Failed to add extra currencies");
+  }
+  return c1.extra;
 }
 
 td::Result<block::PublicKey> get_public_key(td::Slice public_key) {
@@ -313,9 +382,10 @@ class AccountState {
     if (state.data.not_null()) {
       data = to_bytes(state.data);
     }
+    TRY_RESULT(extra_currencies, parse_extra_currencies(get_extra_currencies()));
     return tonlib_api::make_object<tonlib_api::raw_fullAccountState>(
-        get_balance(), std::move(code), std::move(data), to_transaction_id(raw().info), to_tonlib_api(raw().block_id),
-        raw().frozen_hash, get_sync_time());
+        get_balance(), std::move(extra_currencies), std::move(code), std::move(data), to_transaction_id(raw().info),
+        to_tonlib_api(raw().block_id), raw().frozen_hash, get_sync_time());
   }
 
   td::Result<tonlib_api::object_ptr<tonlib_api::wallet_v3_accountState>> to_wallet_v3_accountState() const {
@@ -447,10 +517,11 @@ class AccountState {
 
   td::Result<tonlib_api::object_ptr<tonlib_api::fullAccountState>> to_fullAccountState() const {
     TRY_RESULT(account_state, to_accountState());
+    TRY_RESULT(extra_currencies, parse_extra_currencies(get_extra_currencies()));
     return tonlib_api::make_object<tonlib_api::fullAccountState>(
         tonlib_api::make_object<tonlib_api::accountAddress>(get_address().rserialize(true)), get_balance(),
-        to_transaction_id(raw().info), to_tonlib_api(raw().block_id), get_sync_time(), std::move(account_state),
-        get_wallet_revision());
+        std::move(extra_currencies), to_transaction_id(raw().info), to_tonlib_api(raw().block_id), get_sync_time(),
+        std::move(account_state), get_wallet_revision());
   }
 
   td::Result<tonlib_api::object_ptr<tonlib_api::tvm_cell>> to_shardAccountCell() const {
@@ -548,6 +619,10 @@ class AccountState {
 
   td::int64 get_balance() const {
     return raw_.balance;
+  }
+
+  td::Ref<vm::Cell> get_extra_currencies() const {
+    return raw_.extra_currencies;
   }
 
   const RawAccountState& raw() const {
@@ -1342,6 +1417,7 @@ class GetRawAccountState : public td::actor::Actor {
     }
     TRY_RESULT(balance, to_balance(storage.balance));
     res.balance = balance;
+    res.extra_currencies = storage.balance->prefetch_ref();
     auto state_tag = block::gen::t_AccountState.get_tag(*storage.state);
     if (state_tag < 0) {
       return td::Status::Error("Failed to parse AccountState tag");
@@ -1768,7 +1844,7 @@ class RunEmulator : public TonlibQueryActor {
   void get_block_id(td::Promise<FullBlockId>&& promise) {
     auto shard_id = ton::shard_prefix(request_.address.addr, 60);
     auto query = ton::lite_api::liteServer_lookupBlock(0b111111010, ton::create_tl_lite_block_id_simple({request_.address.workchain, shard_id, 0}), request_.lt, 0);
-    client_.send_query(std::move(query), promise.wrap([self = this, shard_id](td::Result<tonlib_api::object_ptr<ton::lite_api::liteServer_blockHeader>> header_r) -> td::Result<FullBlockId> {
+    client_.send_query(std::move(query), promise.wrap([shard_id](td::Result<tonlib_api::object_ptr<ton::lite_api::liteServer_blockHeader>> header_r) -> td::Result<FullBlockId> {
 
       TRY_RESULT(header, std::move(header_r));
       ton::BlockIdExt block_id = ton::create_block_id(header->id_);
@@ -1817,7 +1893,7 @@ class RunEmulator : public TonlibQueryActor {
   void get_mc_state_root(td::Promise<td::Ref<vm::Cell>>&& promise) {
     TRY_RESULT_PROMISE(promise, lite_block, to_lite_api(*to_tonlib_api(block_id_.mc)));
     auto block = ton::create_block_id(lite_block);
-    client_.send_query(ton::lite_api::liteServer_getConfigAll(0b11'11111111, std::move(lite_block)), promise.wrap([self = this, block](auto r_config) -> td::Result<td::Ref<vm::Cell>> {
+    client_.send_query(ton::lite_api::liteServer_getConfigAll(0b11'11111111, std::move(lite_block)), promise.wrap([block](auto r_config) -> td::Result<td::Ref<vm::Cell>> {
 
       TRY_RESULT(state, block::check_extract_state_proof(block, r_config->state_proof_.as_slice(), r_config->config_proof_.as_slice()));
 
@@ -1842,7 +1918,7 @@ class RunEmulator : public TonlibQueryActor {
     constexpr int req_count = 256;
     auto query = ton::lite_api::liteServer_listBlockTransactions(std::move(lite_block), mode, req_count, std::move(after), false, true);
 
-    client_.send_query(std::move(query), [self = this, mode, lt, root_hash = block_id_.id.root_hash, req_count](lite_api_ptr<ton::lite_api::liteServer_blockTransactions>&& bTxes) {
+    client_.send_query(std::move(query), [self = this, mode, lt, root_hash = block_id_.id.root_hash](lite_api_ptr<ton::lite_api::liteServer_blockTransactions>&& bTxes) {
       if (!bTxes) {
         self->check(td::Status::Error("liteServer.blockTransactions is null"));
         return;
@@ -1891,7 +1967,9 @@ class RunEmulator : public TonlibQueryActor {
     if (stopped_) {
       return;
     }
-    get_block_id([self = this](td::Result<FullBlockId>&& block_id) { self->set_block_id(std::move(block_id)); });
+    get_block_id([SelfId = actor_id(this)](td::Result<FullBlockId>&& block_id) {
+      td::actor::send_closure(SelfId, &RunEmulator::set_block_id, std::move(block_id));
+    });
   }
 
   void set_block_id(td::Result<FullBlockId>&& block_id) {
@@ -1900,8 +1978,12 @@ class RunEmulator : public TonlibQueryActor {
     } else {
       block_id_ = block_id.move_as_ok();
 
-      get_mc_state_root([self = this](td::Result<td::Ref<vm::Cell>>&& mc_state_root) { self->set_mc_state_root(std::move(mc_state_root)); });
-      get_account_state([self = this](td::Result<td::unique_ptr<AccountState>>&& state) { self->set_account_state(std::move(state)); });
+      get_mc_state_root([SelfId = actor_id(this)](td::Result<td::Ref<vm::Cell>>&& mc_state_root) {
+        td::actor::send_closure(SelfId, &RunEmulator::set_mc_state_root, std::move(mc_state_root));
+      });
+      get_account_state([SelfId = actor_id(this)](td::Result<td::unique_ptr<AccountState>>&& state) {
+        td::actor::send_closure(SelfId, &RunEmulator::set_account_state, std::move(state));
+      });
       check(get_transactions(0));
 
       inc();
@@ -1923,7 +2005,9 @@ class RunEmulator : public TonlibQueryActor {
     } else {
       account_state_ = account_state.move_as_ok();
       send_query(int_api::ScanAndLoadGlobalLibs{account_state_->get_raw_state()},
-                 [self = this](td::Result<vm::Dictionary> R) { self->set_global_libraries(std::move(R)); });
+                 [SelfId = actor_id(this)](td::Result<vm::Dictionary> R) {
+                   td::actor::send_closure(SelfId, &RunEmulator::set_global_libraries, std::move(R));
+                 });
     }
   }
 
@@ -1963,7 +2047,7 @@ class RunEmulator : public TonlibQueryActor {
         check(r_config.move_as_error());
         return;
       }
-      std::unique_ptr<block::ConfigInfo> config = r_config.move_as_ok();
+      std::shared_ptr<block::ConfigInfo> config = r_config.move_as_ok();
 
       auto r_shard_account = account_state_->to_shardAccountCellSlice();
       if (r_shard_account.is_error()) {
@@ -1987,7 +2071,7 @@ class RunEmulator : public TonlibQueryActor {
         return;
       }
       vm::Dictionary libraries = global_libraries_;
-      emulator::TransactionEmulator trans_emulator(std::move(*config));
+      emulator::TransactionEmulator trans_emulator(config);
       trans_emulator.set_prev_blocks_info(prev_blocks_info.move_as_ok());
       trans_emulator.set_libs(std::move(libraries));
       trans_emulator.set_rand_seed(block_id_.rand_seed);
@@ -2000,7 +2084,9 @@ class RunEmulator : public TonlibQueryActor {
         account = std::move(emulation_result.move_as_ok().account);
         RawAccountState raw = std::move(account_state_->raw());
         raw.block_id = block_id_.id;
-        raw.balance = account.get_balance().grams->to_long();
+        block::CurrencyCollection balance = account.get_balance();
+        raw.balance = balance.grams->to_long();
+        raw.extra_currencies = balance.extra;
         raw.storage_last_paid = std::move(account.last_paid);
         raw.storage_stat = std::move(account.storage_stat);
         raw.code = std::move(account.code);
@@ -3021,6 +3107,7 @@ struct ToRawTransactions {
         }
 
         TRY_RESULT(balance, to_balance(msg_info.value));
+        TRY_RESULT(extra_currencies, parse_extra_currencies(msg_info.value->prefetch_ref()));
         TRY_RESULT(src, to_std_address(msg_info.src));
         TRY_RESULT(dest, to_std_address(msg_info.dest));
         TRY_RESULT(fwd_fee, to_balance(msg_info.fwd_fee));
@@ -3029,8 +3116,9 @@ struct ToRawTransactions {
 
         return tonlib_api::make_object<tonlib_api::raw_message>(
             tonlib_api::make_object<tonlib_api::accountAddress>(src),
-            tonlib_api::make_object<tonlib_api::accountAddress>(std::move(dest)), balance, fwd_fee, ihr_fee, created_lt,
-            std::move(body_hash), get_data(src));
+            tonlib_api::make_object<tonlib_api::accountAddress>(std::move(dest)), balance,
+            std::move(extra_currencies), fwd_fee, ihr_fee, created_lt, std::move(body_hash),
+            get_data(src));
       }
       case block::gen::CommonMsgInfo::ext_in_msg_info: {
         block::gen::CommonMsgInfo::Record_ext_in_msg_info msg_info;
@@ -3040,7 +3128,8 @@ struct ToRawTransactions {
         TRY_RESULT(dest, to_std_address(msg_info.dest));
         return tonlib_api::make_object<tonlib_api::raw_message>(
             tonlib_api::make_object<tonlib_api::accountAddress>(),
-            tonlib_api::make_object<tonlib_api::accountAddress>(std::move(dest)), 0, 0, 0, 0, std::move(body_hash),
+            tonlib_api::make_object<tonlib_api::accountAddress>(std::move(dest)), 0,
+            std::vector<tonlib_api::object_ptr<tonlib_api::extraCurrency>>{}, 0, 0, 0, std::move(body_hash),
             get_data(""));
       }
       case block::gen::CommonMsgInfo::ext_out_msg_info: {
@@ -3052,7 +3141,9 @@ struct ToRawTransactions {
         auto created_lt = static_cast<td::int64>(msg_info.created_lt);
         return tonlib_api::make_object<tonlib_api::raw_message>(
             tonlib_api::make_object<tonlib_api::accountAddress>(src),
-            tonlib_api::make_object<tonlib_api::accountAddress>(), 0, 0, 0, created_lt, std::move(body_hash), get_data(src));
+            tonlib_api::make_object<tonlib_api::accountAddress>(), 0,
+            std::vector<tonlib_api::object_ptr<tonlib_api::extraCurrency>>{}, 0, 0, created_lt, std::move(body_hash),
+            get_data(src));
       }
     }
 
@@ -3508,6 +3599,7 @@ class GenericCreateSendGrams : public TonlibQueryActor {
   struct Action {
     block::StdAddress destination;
     td::int64 amount;
+    td::Ref<vm::Cell> extra_currencies;
     td::int32 send_mode{-1};
 
     bool is_encrypted{false};
@@ -3555,6 +3647,7 @@ class GenericCreateSendGrams : public TonlibQueryActor {
       return TonlibError::InvalidField("amount", "can't be negative");
     }
     res.amount = message.amount_;
+    TRY_RESULT_ASSIGN(res.extra_currencies, to_extra_currenctes_dict(message.extra_currencies_));
     if (!message.public_key_.empty()) {
       TRY_RESULT(public_key, get_public_key(message.public_key_));
       auto key = td::Ed25519::PublicKey(td::SecureString(public_key.key));
@@ -3965,8 +4058,10 @@ class GenericCreateSendGrams : public TonlibQueryActor {
     }
 
     td::int64 amount = 0;
+    td::Ref<vm::Cell> extra_currencies;
     for (auto& action : actions_) {
       amount += action.amount;
+      TRY_RESULT_ASSIGN(extra_currencies, add_extra_currencies(extra_currencies, action.extra_currencies));
     }
 
     if (amount > source_->get_balance()) {
@@ -3977,6 +4072,8 @@ class GenericCreateSendGrams : public TonlibQueryActor {
     if (amount == source_->get_balance()) {
       return TonlibError::NotEnoughFunds();
     }
+
+    TRY_STATUS(check_enough_extra_currencies(source_->get_extra_currencies(), extra_currencies));
 
     if (source_->get_wallet_type() == AccountState::RestrictedWallet) {
       auto r_unlocked_balance = ton::RestrictedWallet::create(source_->get_smc_state())
@@ -3995,12 +4092,13 @@ class GenericCreateSendGrams : public TonlibQueryActor {
       auto& destination = destinations_[i];
       gift.destination = destinations_[i]->get_address();
       gift.gramms = action.amount;
+      gift.extra_currencies = action.extra_currencies;
       gift.send_mode = action.send_mode;
 
       // Temporary turn off this dangerous transfer
-      if (false && action.amount == source_->get_balance()) {
-        gift.gramms = -1;
-      }
+      // if (action.amount == source_->get_balance()) {
+      //   gift.gramms = -1;
+      // }
 
       if (action.body.not_null()) {
         gift.body = action.body;
@@ -4349,6 +4447,17 @@ td::Status TonlibClient::do_request(const tonlib_api::smc_getState& request,
   auto& acc = it->second;
   auto data = acc->get_raw_state();
   promise.set_value(tonlib_api::make_object<tonlib_api::tvm_cell>(to_bytes(data)));
+  return td::Status::OK();
+}
+
+td::Status TonlibClient::do_request(const tonlib_api::smc_getRawFullAccountState& request,
+                                    td::Promise<object_ptr<tonlib_api::raw_fullAccountState>>&& promise) {
+  auto it = smcs_.find(request.id_);
+  if (it == smcs_.end()) {
+    return TonlibError::InvalidSmcId();
+  }
+  auto& acc = it->second;
+  promise.set_result(acc->to_raw_fullAccountState());
   return td::Status::OK();
 }
 
@@ -5521,7 +5630,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getShards& request,
                           }
 
                           block::ShardConfig sh_conf;
-                          if (!sh_conf.unpack(mc_extra.shard_hashes)) {
+                          if (!sh_conf.unpack(data_csr)) {
                             return td::Status::Error("cannot extract shard block list from shard configuration");
                           }
                           auto ids = sh_conf.get_shard_hash_ids(true);
@@ -5544,7 +5653,9 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getShards& request,
   return td::Status::OK();
 }
 
-td::Status check_lookup_block_proof(lite_api_ptr<ton::lite_api::liteServer_lookupBlockResult>& result, int mode, ton::BlockId blkid, ton::BlockIdExt client_mc_blkid, td::uint64 lt, td::uint32 utime);
+td::Status check_lookup_block_proof(lite_api_ptr<ton::lite_api::liteServer_lookupBlockResult>& result, int mode,
+                                    ton::BlockId blkid, ton::BlockIdExt client_mc_blkid, td::uint64 lt,
+                                    td::uint32 utime);
 
 td::Status TonlibClient::do_request(const tonlib_api::blocks_lookupBlock& request,
                         td::Promise<object_ptr<tonlib_api::ton_blockIdExt>>&& promise) {
@@ -5553,6 +5664,11 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_lookupBlock& reques
   client_.with_last_block(
     [self = this, blkid, lite_block = std::move(lite_block), mode = request.mode_, lt = (td::uint64)request.lt_, 
     utime = (td::uint32)request.utime_, promise = std::move(promise)](td::Result<LastBlockState> r_last_block) mutable { 
+      if (r_last_block.is_error()) {
+        promise.set_error(r_last_block.move_as_error_prefix(TonlibError::Internal("get last block failed ")));
+        return;
+      }
+
       self->client_.send_query(ton::lite_api::liteServer_lookupBlockWithProof(mode, std::move(lite_block), ton::create_tl_lite_block_id(r_last_block.ok().last_block_id), lt, utime),
         promise.wrap([blkid, mode, utime, lt, last_block = r_last_block.ok().last_block_id](lite_api_ptr<ton::lite_api::liteServer_lookupBlockResult>&& result) 
                                           -> td::Result<object_ptr<tonlib_api::ton_blockIdExt>> {
@@ -5730,7 +5846,7 @@ auto to_tonlib_api(const ton::lite_api::liteServer_transactionId& txid)
 
 td::Status check_block_transactions_proof(lite_api_ptr<ton::lite_api::liteServer_blockTransactions>& bTxes, int32_t mode,
     ton::LogicalTime start_lt, td::Bits256 start_addr, td::Bits256 root_hash, int req_count) {
-  if (mode & ton::lite_api::liteServer_listBlockTransactions::WANT_PROOF_MASK == 0) {
+  if ((mode & ton::lite_api::liteServer_listBlockTransactions::WANT_PROOF_MASK) == 0) {
     return td::Status::OK();
   }
   constexpr int max_answer_transactions = 256;
@@ -5841,7 +5957,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getTransactions& re
                        std::move(after),
                        reverse_mode,
                        check_proof),
-                     promise.wrap([check_proof, reverse_mode, root_hash, req_count = request.count_, start_addr, start_lt, mode = request.mode_]
+                     promise.wrap([root_hash, req_count = request.count_, start_addr, start_lt, mode = request.mode_]
                                   (lite_api_ptr<ton::lite_api::liteServer_blockTransactions>&& bTxes) -> td::Result<object_ptr<tonlib_api::blocks_transactions>> {
                         TRY_STATUS(check_block_transactions_proof(bTxes, mode, start_lt, start_addr, root_hash, req_count));
                         
@@ -6018,6 +6134,24 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getShardBlockProof&
   auto actor_id = actor_id_++;
   actors_[actor_id] = td::actor::create_actor<GetShardBlockProof>("GetShardBlockProof", client_.get_client(), id, from,
                                                                   actor_shared(this, actor_id), std::move(promise));
+  return td::Status::OK();
+}
+
+td::Status TonlibClient::do_request(const tonlib_api::blocks_getOutMsgQueueSizes& request,
+                                    td::Promise<object_ptr<tonlib_api::blocks_outMsgQueueSizes>>&& promise) {
+  client_.send_query(ton::lite_api::liteServer_getOutMsgQueueSizes(request.mode_, request.wc_, request.shard_),
+                     promise.wrap([](lite_api_ptr<ton::lite_api::liteServer_outMsgQueueSizes>&& queue_sizes) {
+    tonlib_api::blocks_outMsgQueueSizes result;
+    result.ext_msg_queue_size_limit_ = queue_sizes->ext_msg_queue_size_limit_;
+    for (auto &x : queue_sizes->shards_) {
+      tonlib_api::blocks_outMsgQueueSize shard;
+      shard.id_ = to_tonlib_api(*x->id_);
+      shard.size_ = x->size_;
+      result.shards_.push_back(tonlib_api::make_object<tonlib_api::blocks_outMsgQueueSize>(std::move(shard)));
+    }
+    return tonlib_api::make_object<tonlib_api::blocks_outMsgQueueSizes>(std::move(result));
+  }));
+
   return td::Status::OK();
 }
 
