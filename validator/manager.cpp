@@ -799,7 +799,13 @@ void ValidatorManagerImpl::wait_neighbor_msg_queue_proofs(
      public:
       Worker(size_t pending, td::Promise<std::map<BlockIdExt, td::Ref<OutMsgQueueProof>>> promise)
           : pending_(pending), promise_(std::move(promise)) {
-        CHECK(pending_ > 0);
+      }
+
+      void start_up() override {
+        if (pending_ == 0) {
+          promise_.set_result(std::move(result_));
+          stop();
+        }
       }
 
       void on_result(td::Ref<OutMsgQueueProof> res) {
@@ -1769,6 +1775,11 @@ void ValidatorManagerImpl::send_block_broadcast(BlockBroadcast broadcast, int mo
   callback_->send_broadcast(std::move(broadcast), mode);
 }
 
+void ValidatorManagerImpl::send_validator_telemetry(PublicKeyHash key,
+                                                    tl_object_ptr<ton_api::validator_telemetry> telemetry) {
+  callback_->send_validator_telemetry(key, std::move(telemetry));
+}
+
 void ValidatorManagerImpl::send_get_out_msg_queue_proof_request(
     ShardIdFull dst_shard, std::vector<BlockIdExt> blocks, block::ImportedMsgQueueLimits limits,
     td::Promise<std::vector<td::Ref<OutMsgQueueProof>>> promise) {
@@ -1894,6 +1905,7 @@ void ValidatorManagerImpl::started(ValidatorManagerInitResult R) {
   if (opts_->nonfinal_ls_queries_enabled()) {
     candidates_buffer_ = td::actor::create_actor<CandidatesBuffer>("candidates-buffer", actor_id(this));
   }
+  init_validator_telemetry();
 
   auto Q = td::PromiseCreator::lambda(
       [SelfId = actor_id(this)](td::Result<std::vector<td::Ref<PersistentStateDescription>>> R) {
@@ -2085,6 +2097,7 @@ void ValidatorManagerImpl::new_masterchain_block() {
       td::actor::send_closure(serializer_, &AsyncStateSerializer::update_last_known_key_block_ts,
                               last_key_block_handle_->unix_time());
     }
+    init_validator_telemetry();
   }
 
   update_shard_overlays();
@@ -2462,13 +2475,25 @@ td::actor::ActorOwn<ValidatorGroup> ValidatorManagerImpl::create_validator_group
 
     auto validator_id = get_validator(shard, validator_set);
     CHECK(!validator_id.is_zero());
+    auto descr = validator_set->get_validator(validator_id.bits256_value());
+    CHECK(descr);
+    auto adnl_id = adnl::AdnlNodeIdShort{
+        descr->addr.is_zero() ? ValidatorFullId{descr->key}.compute_short_id().bits256_value() : descr->addr};
     auto G = td::actor::create_actor<ValidatorGroup>(
-        PSTRING() << "valgroup" << shard.to_str(), shard, validator_id, session_id, validator_set, key_seqno,
-        last_masterchain_state_->get_collator_config(true), opts, keyring_, adnl_, rldp_, overlays_, db_root_,
-        actor_id(this), init_session, opts_->check_unsafe_resync_allowed(validator_set->get_catchain_seqno()), opts_,
+        PSTRING() << "valgroup" << shard.to_str(), shard, validator_id, session_id, validator_set, key_seqno, opts,
+        keyring_, adnl_, rldp_, overlays_, db_root_, actor_id(this), get_collation_manager(adnl_id), init_session,
+        opts_->check_unsafe_resync_allowed(validator_set->get_catchain_seqno()), opts_,
         opts_->need_monitor(shard, last_masterchain_state_));
     return G;
   }
+}
+
+td::actor::ActorId<CollationManager> ValidatorManagerImpl::get_collation_manager(adnl::AdnlNodeIdShort adnl_id) {
+  auto &actor = collation_managers_[adnl_id];
+  if (actor.empty()) {
+    actor = td::actor::create_actor<CollationManager>("collation", adnl_id, opts_, actor_id(this), rldp_);
+  }
+  return actor.get();
 }
 
 void ValidatorManagerImpl::add_handle_to_lru(BlockHandle handle) {
@@ -3081,10 +3106,7 @@ void ValidatorManagerImpl::log_validator_session_stats(BlockIdExt block_id,
       tl_object_ptr<ton_api::validatorSession_collationStats> collation_stats;
       if (it != recorded_block_stats_.end() && it->second.collator_stats_) {
         auto &stats = it->second.collator_stats_.value();
-        collation_stats = create_tl_object<ton_api::validatorSession_collationStats>(
-            stats.bytes, stats.gas, stats.lt_delta, stats.cat_bytes, stats.cat_gas, stats.cat_lt_delta,
-            stats.limits_log, stats.ext_msgs_total, stats.ext_msgs_filtered, stats.ext_msgs_accepted,
-            stats.ext_msgs_rejected);
+        collation_stats = stats.tl();
       }
       std::string approvers, signers;
       for (bool x : producer.approvers) {
@@ -3458,6 +3480,9 @@ void ValidatorManagerImpl::update_options(td::Ref<ValidatorManagerOptions> opts)
   for (auto &collator : collator_nodes_) {
     td::actor::send_closure(collator.second.actor, &CollatorNode::update_options, opts);
   }
+  for (auto &[_, c] : collation_managers_) {
+    td::actor::send_closure(c, &CollationManager::update_options, opts);
+  }
   opts_ = std::move(opts);
 }
 
@@ -3490,6 +3515,54 @@ void ValidatorManagerImpl::del_collator(adnl::AdnlNodeIdShort id, ShardIdFull sh
   } else {
     td::actor::send_closure(it->second.actor, &CollatorNode::del_shard, shard);
   }
+}
+
+void ValidatorManagerImpl::get_collation_manager_stats(
+    td::Promise<tl_object_ptr<ton_api::engine_validator_collationManagerStats>> promise) {
+  class Cb : public td::actor::Actor {
+   public:
+    explicit Cb(td::Promise<tl_object_ptr<ton_api::engine_validator_collationManagerStats>> promise)
+        : promise_(std::move(promise)) {
+    }
+
+    void got_stats(tl_object_ptr<ton_api::engine_validator_collationManagerStats_localId> s) {
+      result_.push_back(std::move(s));
+      dec_pending();
+    }
+
+    void inc_pending() {
+      ++pending_;
+    }
+
+    void dec_pending() {
+      CHECK(pending_ > 0);
+      --pending_;
+      if (pending_ == 0) {
+        promise_.set_result(create_tl_object<ton_api::engine_validator_collationManagerStats>(std::move(result_)));
+        stop();
+      }
+    }
+
+   private:
+    td::Promise<tl_object_ptr<ton_api::engine_validator_collationManagerStats>> promise_;
+    size_t pending_ = 1;
+    std::vector<tl_object_ptr<ton_api::engine_validator_collationManagerStats_localId>> result_;
+  };
+  auto callback = td::actor::create_actor<Cb>("stats", std::move(promise)).release();
+
+  for (auto &[_, actor] : collation_managers_) {
+    td::actor::send_closure(callback, &Cb::inc_pending);
+    td::actor::send_closure(
+        actor, &CollationManager::get_stats,
+        [callback](td::Result<tl_object_ptr<ton_api::engine_validator_collationManagerStats_localId>> R) {
+          if (R.is_error()) {
+            td::actor::send_closure(callback, &Cb::dec_pending);
+          } else {
+            td::actor::send_closure(callback, &Cb::got_stats, R.move_as_ok());
+          }
+        });
+  }
+  td::actor::send_closure(callback, &Cb::dec_pending);
 }
 
 void ValidatorManagerImpl::add_persistent_state_description(td::Ref<PersistentStateDescription> desc) {
@@ -3547,12 +3620,28 @@ td::actor::ActorOwn<ValidatorManagerInterface> ValidatorManagerFactory::create(
                                                                   rldp, overlays);
 }
 
-void ValidatorManagerImpl::record_collate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
-                                                      CollationStats stats) {
+void ValidatorManagerImpl::record_collate_query_stats(BlockIdExt block_id, CollationStats stats) {
   auto &record = new_block_stats_record(block_id);
-  record.collator_work_time_ = work_time;
-  record.collator_cpu_work_time_ = cpu_work_time;
+  record.collator_work_time_ = stats.work_time;
+  record.collator_cpu_work_time_ = stats.cpu_work_time;
   record.collator_stats_ = std::move(stats);
+
+  std::string fname = opts_->get_session_logs_file();
+  if (fname.empty()) {
+    return;
+  }
+
+  auto obj = create_tl_object<ton_api::validatorSession_statsCollatedBlock>(td::Clocks::system(),
+                                                                            create_tl_block_id(block_id), stats.tl());
+  auto s = td::json_encode<std::string>(td::ToJson(*obj.get()), false);
+  s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return c == '\n' || c == '\r'; }), s.end());
+
+  std::ofstream file;
+  file.open(fname, std::ios_base::app);
+  file << s << "\n";
+  file.close();
+
+  LOG(DEBUG) << "Writing collation stats stats for " << block_id.id.to_str();
 }
 
 void ValidatorManagerImpl::record_validate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time) {
@@ -3592,6 +3681,41 @@ void ValidatorManagerImpl::CheckedExtMsgCounter::before_query() {
       break;
     }
     cleanup_at_ += max_ext_msg_per_addr_time_window() / 2.0;
+  }
+}
+
+void ValidatorManagerImpl::init_validator_telemetry() {
+  if (last_masterchain_state_.is_null()) {
+    return;
+  }
+  td::Ref<ValidatorSet> validator_set = last_masterchain_state_->get_total_validator_set(0);
+  if (validator_set.is_null()) {
+    validator_telemetry_.clear();
+    return;
+  }
+  std::set<PublicKeyHash> processed;
+  for (auto& key : temp_keys_) {
+    if (const ValidatorDescr* desc = validator_set->get_validator(key.bits256_value())) {
+      processed.insert(key);
+      adnl::AdnlNodeIdShort adnl_id;
+      if (desc->addr.is_zero()) {
+        adnl_id = adnl::AdnlNodeIdShort{ValidatorFullId{desc->key}.compute_short_id()};
+      } else {
+        adnl_id = adnl::AdnlNodeIdShort{desc->addr};
+      }
+      auto& telemetry = validator_telemetry_[key];
+      if (telemetry.empty()) {
+        telemetry = td::actor::create_actor<ValidatorTelemetry>(
+            "telemetry", key, adnl_id, opts_->zero_block_id().file_hash, actor_id(this));
+      }
+    }
+  }
+  for (auto it = validator_telemetry_.begin(); it != validator_telemetry_.end();) {
+    if (processed.contains(it->first)) {
+      ++it;
+    } else {
+      it = validator_telemetry_.erase(it);
+    }
   }
 }
 

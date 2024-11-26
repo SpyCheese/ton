@@ -34,6 +34,7 @@
 #include "rldp/rldp.h"
 #include "token-manager.h"
 #include "queue-size-counter.hpp"
+#include "validator-telemetry.hpp"
 #include "impl/candidates-buffer.hpp"
 #include "collator-node.hpp"
 
@@ -283,12 +284,15 @@ class ValidatorManagerImpl : public ValidatorManager {
                                                              td::Ref<ValidatorSet> validator_set, BlockSeqno key_seqno,
                                                              validatorsession::ValidatorSessionOptions opts,
                                                              bool create_catchain);
+  td::actor::ActorId<CollationManager> get_collation_manager(adnl::AdnlNodeIdShort adnl_id);
+
   struct ValidatorGroupEntry {
     td::actor::ActorOwn<ValidatorGroup> actor;
     ShardIdFull shard;
   };
   std::map<ValidatorSessionId, ValidatorGroupEntry> validator_groups_;
   std::map<ValidatorSessionId, ValidatorGroupEntry> next_validator_groups_;
+  std::map<adnl::AdnlNodeIdShort, td::actor::ActorOwn<CollationManager>> collation_managers_;
 
   std::set<ValidatorSessionId> check_gc_list_;
   std::vector<ValidatorSessionId> gc_list_;
@@ -356,6 +360,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   }
   void add_temp_key(PublicKeyHash key, td::Promise<td::Unit> promise) override {
     temp_keys_.insert(key);
+    init_validator_telemetry();
     promise.set_value(td::Unit());
   }
   void del_permanent_key(PublicKeyHash key, td::Promise<td::Unit> promise) override {
@@ -364,6 +369,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   }
   void del_temp_key(PublicKeyHash key, td::Promise<td::Unit> promise) override {
     temp_keys_.erase(key);
+    init_validator_telemetry();
     promise.set_value(td::Unit());
   }
 
@@ -521,6 +527,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   void send_ihr_message(td::Ref<IhrMessage> message) override;
   void send_top_shard_block_description(td::Ref<ShardTopBlockDescription> desc) override;
   void send_block_broadcast(BlockBroadcast broadcast, int mode) override;
+  void send_validator_telemetry(PublicKeyHash key, tl_object_ptr<ton_api::validator_telemetry> telemetry) override;
   void send_get_out_msg_queue_proof_request(ShardIdFull dst_shard, std::vector<BlockIdExt> blocks,
                                             block::ImportedMsgQueueLimits limits,
                                             td::Promise<std::vector<td::Ref<OutMsgQueueProof>>> promise) override;
@@ -633,6 +640,9 @@ class ValidatorManagerImpl : public ValidatorManager {
 
   void add_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) override;
   void del_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) override;
+
+  void get_collation_manager_stats(
+      td::Promise<tl_object_ptr<ton_api::engine_validator_collationManagerStats>> promise) override;
 
   void get_out_msg_queue_size(BlockIdExt block_id, td::Promise<td::uint64> promise) override {
     if (queue_size_counter_.empty()) {
@@ -774,10 +784,13 @@ class ValidatorManagerImpl : public ValidatorManager {
   std::map<BlockIdExt, RecordedBlockStats> recorded_block_stats_;
   std::queue<BlockIdExt> recorded_block_stats_lru_;
 
-  void record_collate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
-                                  CollationStats stats) override;
+  void record_collate_query_stats(BlockIdExt block_id, CollationStats stats) override;
   void record_validate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time) override;
   RecordedBlockStats &new_block_stats_record(BlockIdExt block_id);
+
+  std::map<PublicKeyHash, td::actor::ActorOwn<ValidatorTelemetry>> validator_telemetry_;
+
+  void init_validator_telemetry();
 
   struct Collator {
     td::actor::ActorOwn<CollatorNode> actor;

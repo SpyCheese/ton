@@ -57,7 +57,9 @@ set(VALIDATOR_HEADERS
   
   import-db-slice.hpp
   queue-size-counter.hpp
+  validator-telemetry.hpp
 
+  collation-manager.hpp
   collator-node.hpp
   manager-disk.h
   manager-disk.hpp
@@ -74,6 +76,7 @@ set(VALIDATOR_HEADERS
 set(VALIDATOR_SOURCE
   apply-block.cpp
   block-handle.cpp
+  collation-manager.cpp
   collator-node.cpp
   get-next-key-blocks.cpp
   import-db-slice.cpp
@@ -85,6 +88,7 @@ set(VALIDATOR_SOURCE
   validator-group.cpp
   validator-options.cpp
   queue-size-counter.cpp
+  validator-telemetry.cpp
 
   downloaders/wait-block-data.cpp
   downloaders/wait-block-state.cpp

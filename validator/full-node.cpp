@@ -69,6 +69,7 @@ void FullNodeImpl::del_permanent_key(PublicKeyHash key, td::Promise<td::Unit> pr
   }
   local_keys_.erase(key);
   private_block_overlays_.erase(key);
+  update_validator_telemetry_collector();
   for (auto &p : custom_overlays_) {
     update_custom_overlay(p.second);
   }
@@ -278,6 +279,7 @@ void FullNodeImpl::on_new_masterchain_block(td::Ref<MasterchainState> state, std
     fast_sync_overlays_.update_overlays(state, std::move(my_adnl_ids), std::move(monitoring_shards),
                                         zero_state_file_hash_, keyring_, adnl_, overlays_, validator_manager_,
                                         actor_id(this));
+    update_validator_telemetry_collector();
   }
 }
 
@@ -337,7 +339,7 @@ void FullNodeImpl::send_shard_block_info(BlockIdExt block_id, CatchainSeqno cc_s
     td::actor::send_closure(private_block_overlays_.begin()->second,
                             &FullNodePrivateBlockOverlay::send_shard_block_info, block_id, cc_seqno, data.clone());
   }
-  auto fast_sync_overlay = fast_sync_overlays_.choose_overlay(ShardIdFull(masterchainId));
+  auto fast_sync_overlay = fast_sync_overlays_.choose_overlay(ShardIdFull(masterchainId)).first;
   if (!fast_sync_overlay.empty()) {
     td::actor::send_closure(fast_sync_overlay, &FullNodeFastSyncOverlay::send_shard_block_info, block_id, cc_seqno,
                             data.clone());
@@ -357,7 +359,7 @@ void FullNodeImpl::send_block_candidate(BlockIdExt block_id, CatchainSeqno cc_se
     td::actor::send_closure(private_block_overlays_.begin()->second, &FullNodePrivateBlockOverlay::send_block_candidate,
                             block_id, cc_seqno, validator_set_hash, data.clone());
   }
-  auto fast_sync_overlay = fast_sync_overlays_.choose_overlay(block_id.shard_full());
+  auto fast_sync_overlay = fast_sync_overlays_.choose_overlay(block_id.shard_full()).first;
   if (!fast_sync_overlay.empty()) {
     td::actor::send_closure(fast_sync_overlay, &FullNodeFastSyncOverlay::send_block_candidate, block_id, cc_seqno,
                             validator_set_hash, data.clone());
@@ -382,7 +384,7 @@ void FullNodeImpl::send_broadcast(BlockBroadcast broadcast, int mode) {
       td::actor::send_closure(private_block_overlays_.begin()->second, &FullNodePrivateBlockOverlay::send_broadcast,
                               broadcast.clone());
     }
-    auto fast_sync_overlay = fast_sync_overlays_.choose_overlay(broadcast.block_id.shard_full());
+    auto fast_sync_overlay = fast_sync_overlays_.choose_overlay(broadcast.block_id.shard_full()).first;
     if (!fast_sync_overlay.empty()) {
       td::actor::send_closure(fast_sync_overlay, &FullNodeFastSyncOverlay::send_broadcast, broadcast.clone());
     }
@@ -502,10 +504,16 @@ td::actor::ActorId<FullNodeShard> FullNodeImpl::get_shard(ShardIdFull shard) {
   if (pfx_len > wc_monitor_min_split_) {
     shard = shard_prefix(shard, wc_monitor_min_split_);
   }
-  auto it = shards_.find(shard);
-  if (it != shards_.end()) {
-    update_shard_actor(shard, it->second.active);
-    return it->second.actor.get();
+  while (true) {
+    auto it = shards_.find(shard);
+    if (it != shards_.end()) {
+      update_shard_actor(shard, it->second.active);
+      return it->second.actor.get();
+    }
+    if (shard.pfx_len() == 0) {
+      break;
+    }
+    shard = shard_parent(shard);
   }
 
   // Special case if shards_ was not yet initialized.
@@ -587,6 +595,24 @@ void FullNodeImpl::new_key_block(BlockHandle handle) {
   }
 }
 
+void FullNodeImpl::send_validator_telemetry(PublicKeyHash key, tl_object_ptr<ton_api::validator_telemetry> telemetry) {
+  if (use_old_private_overlays_) {
+    auto it = private_block_overlays_.find(key);
+    if (it == private_block_overlays_.end()) {
+      VLOG(FULL_NODE_INFO) << "Cannot send validator telemetry for " << key << " : no private block overlay";
+      return;
+    }
+    td::actor::send_closure(it->second, &FullNodePrivateBlockOverlay::send_validator_telemetry, std::move(telemetry));
+  } else {
+    auto overlay = fast_sync_overlays_.get_masterchain_overlay_for(adnl::AdnlNodeIdShort{telemetry->adnl_id_});
+    if (overlay.empty()) {
+      VLOG(FULL_NODE_INFO) << "Cannot send validator telemetry for adnl id " << key << " : no fast sync overlay";
+      return;
+    }
+    td::actor::send_closure(overlay, &FullNodeFastSyncOverlay::send_validator_telemetry, std::move(telemetry));
+  }
+}
+
 void FullNodeImpl::process_block_broadcast(BlockBroadcast broadcast) {
   send_block_broadcast_to_custom_overlays(broadcast);
   td::actor::send_closure(validator_manager_, &ValidatorManagerInterface::prevalidate_block, std::move(broadcast),
@@ -609,7 +635,49 @@ void FullNodeImpl::process_block_candidate_broadcast(BlockIdExt block_id, Catcha
                           std::move(data));
 }
 
+void FullNodeImpl::set_validator_telemetry_filename(std::string value) {
+  validator_telemetry_filename_ = std::move(value);
+  update_validator_telemetry_collector();
+}
+
+void FullNodeImpl::update_validator_telemetry_collector() {
+  if (use_old_private_overlays_) {
+    if (validator_telemetry_filename_.empty() || private_block_overlays_.empty()) {
+      validator_telemetry_collector_key_ = PublicKeyHash::zero();
+      return;
+    }
+    if (!private_block_overlays_.contains(validator_telemetry_collector_key_)) {
+      auto it = private_block_overlays_.begin();
+      validator_telemetry_collector_key_ = it->first;
+      td::actor::send_closure(it->second, &FullNodePrivateBlockOverlay::collect_validator_telemetry,
+                              validator_telemetry_filename_);
+    }
+  } else {
+    if (validator_telemetry_filename_.empty()) {
+      validator_telemetry_collector_key_ = PublicKeyHash::zero();
+      return;
+    }
+    if (fast_sync_overlays_.get_masterchain_overlay_for(adnl::AdnlNodeIdShort{validator_telemetry_collector_key_})
+            .empty()) {
+      auto [actor, adnl_id] = fast_sync_overlays_.choose_overlay(ShardIdFull{masterchainId});
+      validator_telemetry_collector_key_ = adnl_id.pubkey_hash();
+      if (!actor.empty()) {
+        td::actor::send_closure(actor, &FullNodeFastSyncOverlay::collect_validator_telemetry,
+                                validator_telemetry_filename_);
+      }
+    }
+  }
+}
+
 void FullNodeImpl::start_up() {
+  // TODO: enable fast sync overlays by other means (e.g. some config param)
+  // TODO: in the future - remove the old private overlay entirely
+  // This env var is for testing
+  auto fast_sync_env = getenv("TON_FAST_SYNC_OVERLAYS");
+  if (fast_sync_env && !strcmp(fast_sync_env, "1")) {
+    use_old_private_overlays_ = false;
+  }
+
   update_shard_actor(ShardIdFull{masterchainId}, true);
   if (local_id_.is_zero()) {
     if (adnl_id_.is_zero()) {
@@ -689,6 +757,9 @@ void FullNodeImpl::start_up() {
     void new_key_block(BlockHandle handle) override {
       td::actor::send_closure(id_, &FullNodeImpl::new_key_block, std::move(handle));
     }
+    void send_validator_telemetry(PublicKeyHash key, tl_object_ptr<ton_api::validator_telemetry> telemetry) override {
+      td::actor::send_closure(id_, &FullNodeImpl::send_validator_telemetry, key, std::move(telemetry));
+    }
 
     explicit Callback(td::actor::ActorId<FullNodeImpl> id) : id_(id) {
     }
@@ -707,6 +778,7 @@ void FullNodeImpl::update_private_overlays() {
   }
 
   private_block_overlays_.clear();
+  update_validator_telemetry_collector();
   if (local_keys_.empty()) {
     return;
   }
@@ -728,6 +800,7 @@ void FullNodeImpl::create_private_block_overlay(PublicKeyHash key) {
     private_block_overlays_[key] = td::actor::create_actor<FullNodePrivateBlockOverlay>(
         "BlocksPrivateOverlay", current_validators_[key], std::move(nodes), zero_state_file_hash_, config_, keyring_,
         adnl_, rldp_, rldp2_, overlays_, validator_manager_, actor_id(this));
+    update_validator_telemetry_collector();
   }
 }
 
