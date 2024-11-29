@@ -19,6 +19,7 @@
 #include "interfaces/validator-manager.h"
 #include "rldp/rldp.h"
 #include <map>
+#include <optional>
 
 namespace ton::validator {
 
@@ -35,6 +36,7 @@ class CollatorNode : public td::actor::Actor {
   void del_shard(ShardIdFull shard);
 
   void new_masterchain_block_notification(td::Ref<MasterchainState> state);
+  void update_shard_client_handle(BlockHandle shard_client_handle);
   void update_validator_group_info(ShardIdFull shard, std::vector<BlockIdExt> prev, CatchainSeqno cc_seqno);
 
   void update_options(td::Ref<ValidatorManagerOptions> opts) {
@@ -57,6 +59,9 @@ class CollatorNode : public td::actor::Actor {
 
   struct CacheEntry {
     bool started = false;
+    td::Timestamp has_internal_query_at;
+    td::Timestamp has_external_query_at;
+    td::Timestamp has_result_at;
     BlockSeqno block_seqno = 0;
     td::optional<BlockCandidate> result;
     td::CancellationTokenSource cancellation_token_source;
@@ -80,12 +85,20 @@ class CollatorNode : public td::actor::Actor {
   std::map<std::pair<ShardIdFull, CatchainSeqno>, FutureValidatorGroup> future_validator_groups_;
 
   td::Ref<MasterchainState> last_masterchain_state_;
+  BlockHandle shard_client_handle_;
+
+  td::Status mc_config_status_ = td::Status::Error("not inited");
+  BlockSeqno last_key_block_seqno_ = (BlockSeqno)-1;
 
   td::Result<FutureValidatorGroup*> get_future_validator_group(ShardIdFull shard, CatchainSeqno cc_seqno);
 
   void generate_block(ShardIdFull shard, CatchainSeqno cc_seqno, std::vector<BlockIdExt> prev_blocks,
-                      td::Timestamp timeout, td::Promise<BlockCandidate> promise);
+                      std::optional<BlockCandidatePriority> o_priority, td::Timestamp timeout,
+                      td::Promise<BlockCandidate> promise);
   void process_result(std::shared_ptr<CacheEntry> cache_entry, td::Result<BlockCandidate> R);
+
+  td::Status check_out_of_sync();
+  td::Status check_mc_config();
 
  public:
   static tl_object_ptr<ton_api::collatorNode_Candidate> serialize_candidate(const BlockCandidate& block, bool compress);

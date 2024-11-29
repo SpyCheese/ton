@@ -35,7 +35,8 @@ class CollationManager : public td::actor::Actor {
   void alarm() override;
 
   void collate_block(ShardIdFull shard, BlockIdExt min_masterchain_block_id, std::vector<BlockIdExt> prev,
-                     Ed25519_PublicKey creator, td::Ref<ValidatorSet> validator_set, td::uint64 max_answer_size,
+                     Ed25519_PublicKey creator, BlockCandidatePriority priority,
+                     td::Ref<ValidatorSet> validator_set, td::uint64 max_answer_size,
                      td::CancellationToken cancellation_token, td::Promise<BlockCandidate> promise);
 
   void update_options(td::Ref<ValidatorManagerOptions> opts);
@@ -52,7 +53,8 @@ class CollationManager : public td::actor::Actor {
   td::actor::ActorId<rldp::Rldp> rldp_;
 
   void collate_shard_block(ShardIdFull shard, BlockIdExt min_masterchain_block_id, std::vector<BlockIdExt> prev,
-                           Ed25519_PublicKey creator, td::Ref<ValidatorSet> validator_set, td::uint64 max_answer_size,
+                           Ed25519_PublicKey creator, BlockCandidatePriority priority,
+                           td::Ref<ValidatorSet> validator_set, td::uint64 max_answer_size,
                            td::CancellationToken cancellation_token, td::Promise<BlockCandidate> promise,
                            td::Timestamp timeout);
 
@@ -63,6 +65,8 @@ class CollationManager : public td::actor::Actor {
     td::Timestamp ping_at = td::Timestamp::now();
     bool sent_ping = false;
     size_t active_cnt = 0;
+    td::Timestamp last_ping_at = td::Timestamp::never();
+    td::Status last_ping_status = td::Status::Error("not pinged");
   };
   std::map<adnl::AdnlNodeIdShort, CollatorInfo> collators_;
 

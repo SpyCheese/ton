@@ -33,6 +33,7 @@ void CollationManager::start_up() {
 
 void CollationManager::collate_block(ShardIdFull shard, BlockIdExt min_masterchain_block_id,
                                      std::vector<BlockIdExt> prev, Ed25519_PublicKey creator,
+                                     BlockCandidatePriority priority,
                                      td::Ref<ValidatorSet> validator_set, td::uint64 max_answer_size,
                                      td::CancellationToken cancellation_token, td::Promise<BlockCandidate> promise) {
   if (shard.is_masterchain()) {
@@ -41,12 +42,13 @@ void CollationManager::collate_block(ShardIdFull shard, BlockIdExt min_mastercha
                       std::move(cancellation_token), 0);
     return;
   }
-  collate_shard_block(shard, min_masterchain_block_id, std::move(prev), creator, std::move(validator_set),
+  collate_shard_block(shard, min_masterchain_block_id, std::move(prev), creator, priority, std::move(validator_set),
                       max_answer_size, std::move(cancellation_token), std::move(promise), td::Timestamp::in(10.0));
 }
 
 void CollationManager::collate_shard_block(ShardIdFull shard, BlockIdExt min_masterchain_block_id,
                                            std::vector<BlockIdExt> prev, Ed25519_PublicKey creator,
+                                           BlockCandidatePriority priority,
                                            td::Ref<ValidatorSet> validator_set, td::uint64 max_answer_size,
                                            td::CancellationToken cancellation_token,
                                            td::Promise<BlockCandidate> promise, td::Timestamp timeout) {
@@ -133,8 +135,8 @@ void CollationManager::collate_shard_block(ShardIdFull shard, BlockIdExt min_mas
     delay_action(
         [=, promise = std::move(promise)]() mutable {
           td::actor::send_closure(SelfId, &CollationManager::collate_shard_block, shard, min_masterchain_block_id, prev,
-                                  creator, validator_set, max_answer_size, cancellation_token, std::move(promise),
-                                  timeout);
+                                  creator, priority, validator_set, max_answer_size, cancellation_token,
+                                  std::move(promise), timeout);
         },
         retry_at);
   };
@@ -145,7 +147,8 @@ void CollationManager::collate_shard_block(ShardIdFull shard, BlockIdExt min_mas
   }
 
   td::BufferSlice query = create_serialize_tl_object<ton_api::collatorNode_generateBlock>(
-      create_tl_shard_id(shard), validator_set->get_catchain_seqno(), std::move(prev_blocks), creator.as_bits256());
+      create_tl_shard_id(shard), validator_set->get_catchain_seqno(), std::move(prev_blocks), creator.as_bits256(),
+      priority.round, priority.first_block_round, priority.priority);
   LOG(INFO) << "sending collate query for " << next_block_id.to_str() << ": send to #" << selected_idx << "("
             << selected_collator << ")";
 
@@ -258,6 +261,8 @@ void CollationManager::get_stats(
     } else {
       obj->ping_in_ = -1.0;
     }
+    obj->last_ping_ago_ = collator.last_ping_at ? td::Time::now() - collator.last_ping_at.at() : -1.0;
+    obj->last_ping_status_ = collator.last_ping_status.is_ok() ? "OK" : collator.last_ping_status.message().str();
     stats->collators_.push_back(std::move(obj));
   }
   promise.set_value(std::move(stats));
@@ -320,7 +325,7 @@ void CollationManager::alarm() {
         td::actor::send_closure(SelfId, &CollationManager::got_pong, id, std::move(R));
       };
       LOG(DEBUG) << "sending ping to " << id;
-      td::actor::send_closure(rldp_, &rldp::Rldp::send_query, local_id_, id, "collatorping", std::move(P),
+      td::actor::send_closure(rldp_, &rldp::Rldp::send_query, local_id_, id, "ping", std::move(P),
                               td::Timestamp::in(2.0), std::move(query));
     } else {
       alarm_timestamp().relax(collator.ping_at);
@@ -337,7 +342,7 @@ void CollationManager::got_pong(adnl::AdnlNodeIdShort id, td::Result<td::BufferS
   collator.sent_ping = false;
 
   auto r_pong = [&]() -> td::Result<tl_object_ptr<ton_api::collatorNode_pong>> {
-    TRY_RESULT_PREFIX(data, std::move(R), "rldp query error: ");
+    TRY_RESULT(data, std::move(R));
     auto r_error = fetch_tl_object<ton_api::collatorNode_error>(data, true);
     if (r_error.is_ok()) {
       auto error = r_error.move_as_ok();
@@ -345,12 +350,15 @@ void CollationManager::got_pong(adnl::AdnlNodeIdShort id, td::Result<td::BufferS
     }
     return fetch_tl_object<ton_api::collatorNode_pong>(data, true);
   }();
+  collator.last_ping_at = td::Timestamp::now();
   if (r_pong.is_error()) {
-    LOG(DEBUG) << "pong from " << id << " : " << r_pong.move_as_error();
+    LOG(DEBUG) << "pong from " << id << " : " << r_pong.error();
     collator.alive = false;
+    collator.last_ping_status = r_pong.move_as_error();
   } else {
     LOG(DEBUG) << "pong from " << id << " : OK";
     collator.alive = true;
+    collator.last_ping_status = td::Status::OK();
   }
   collator.ping_at = td::Timestamp::in(td::Random::fast(10.0, 20.0));
   if (collator.active_cnt && !collator.sent_ping) {

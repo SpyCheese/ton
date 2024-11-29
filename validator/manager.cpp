@@ -798,7 +798,9 @@ void ValidatorManagerImpl::wait_neighbor_msg_queue_proofs(
   if (dst_shard.is_masterchain()) {
     // We spit queries for masterchain {dst_shard, {block_1, ..., block_n}} into separate queries
     // {dst_shard, {block_1}}, ..., {dst_shard, {block_n}}
-    // Also, use cache
+    // Also, use cache.
+    // This is performed here and not in OutMsgQueueImporter because it's important to use
+    // cached_msg_queue_to_masterchain_, which is related to the current list of shard block descriptions
     class Worker : public td::actor::Actor {
      public:
       Worker(size_t pending, td::Promise<std::map<BlockIdExt, td::Ref<OutMsgQueueProof>>> promise)
@@ -1438,6 +1440,11 @@ void ValidatorManagerImpl::set_block_candidate(BlockIdExt id, BlockCandidate can
   }
   if (!id.is_masterchain()) {
     add_cached_block_candidate(ReceivedBlock{id, candidate.data.clone()});
+  }
+  LOG(INFO) << "Got candidate " << id.to_str() << " with " << candidate.out_msg_queue_proof_broadcasts.size()
+            << " out msg queue proof broadcasts";
+  for (auto broadcast : candidate.out_msg_queue_proof_broadcasts) {
+    callback_->send_out_msg_queue_proof_broadcast(broadcast);
   }
   td::actor::send_closure(db_, &Db::store_block_candidate, std::move(candidate), std::move(promise));
 }
@@ -2747,6 +2754,9 @@ void ValidatorManagerImpl::update_shard_client_block_handle(BlockHandle handle, 
       last_liteserver_state_ = std::move(state);
     }
   }
+  for (auto &c : collator_nodes_) {
+    td::actor::send_closure(c.second.actor, &CollatorNode::update_shard_client_handle, shard_client_handle_);
+  }
   shard_client_update(seqno);
   promise.set_value(td::Unit());
 }
@@ -2953,12 +2963,15 @@ PublicKeyHash ValidatorManagerImpl::get_validator(ShardIdFull shard, td::Ref<Val
 }
 
 bool ValidatorManagerImpl::is_shard_collator(ShardIdFull shard) {
+  if (shard.is_masterchain()) {
+    return validating_masterchain();
+  }
   for (auto &[_, collator_node] : collator_nodes_) {
     if (collator_node.can_collate_shard(shard)) {
       return true;
     }
   }
-  return false;
+  return is_validator() && opts_->get_collators_list()->self_collate;
 }
 
 bool ValidatorManagerImpl::Collator::can_collate_shard(ShardIdFull shard) const {
@@ -3499,6 +3512,13 @@ void ValidatorManagerImpl::add_collator(adnl::AdnlNodeIdShort id, ShardIdFull sh
   if (it == collator_nodes_.end()) {
     it = collator_nodes_.emplace(id, Collator()).first;
     it->second.actor = td::actor::create_actor<CollatorNode>("collatornode", id, opts_, actor_id(this), adnl_, rldp_);
+    if (last_masterchain_state_.not_null()) {
+      td::actor::send_closure(it->second.actor, &CollatorNode::new_masterchain_block_notification,
+                              last_masterchain_state_);
+    }
+    if (shard_client_handle_) {
+      td::actor::send_closure(it->second.actor, &CollatorNode::update_shard_client_handle, shard_client_handle_);
+    }
   }
   if (!it->second.shards.insert(shard).second) {
     return;
@@ -3567,6 +3587,19 @@ void ValidatorManagerImpl::get_collation_manager_stats(
         });
   }
   td::actor::send_closure(callback, &Cb::dec_pending);
+}
+
+void ValidatorManagerImpl::add_out_msg_queue_proof(ShardIdFull dst_shard, td::Ref<OutMsgQueueProof> proof) {
+  if (is_shard_collator(dst_shard)) {
+    if (out_msg_queue_importer_.empty()) {
+      out_msg_queue_importer_ = td::actor::create_actor<OutMsgQueueImporter>("outmsgqueueimporter", actor_id(this),
+                                                                             opts_, last_masterchain_state_);
+    }
+    td::actor::send_closure(out_msg_queue_importer_, &OutMsgQueueImporter::add_out_msg_queue_proof, dst_shard,
+                            std::move(proof));
+  } else {
+    VLOG(VALIDATOR_DEBUG) << "Dropping unneeded out msg queue proof to shard " << dst_shard.to_str();
+  }
 }
 
 void ValidatorManagerImpl::add_persistent_state_description(td::Ref<PersistentStateDescription> desc) {
