@@ -29,6 +29,7 @@
 #include <map>
 #include <set>
 #include <queue>
+#include <token-manager.h>
 
 namespace ton {
 
@@ -94,11 +95,15 @@ class FullNodeImpl : public FullNode {
   void process_block_broadcast(BlockBroadcast broadcast) override;
   void process_block_candidate_broadcast(BlockIdExt block_id, CatchainSeqno cc_seqno, td::uint32 validator_set_hash,
                                          td::BufferSlice data) override;
+  void get_out_msg_queue_query_token(td::Promise<std::unique_ptr<ActionToken>> promise) override;
 
   void set_validator_telemetry_filename(std::string value) override;
 
   void import_fast_sync_member_certificate(adnl::AdnlNodeIdShort local_id,
-                                            overlay::OverlayMemberCertificate cert) override {
+                                           overlay::OverlayMemberCertificate cert) override {
+    VLOG(FULL_NODE_DEBUG) << "Importing fast sync overlay certificate for " << local_id << " issued by "
+                          << cert.issued_by().compute_short_id() << " expires in "
+                          << (double)cert.expire_at() - td::Clocks::system();
     fast_sync_overlays_.add_member_certificate(local_id, std::move(cert));
   }
 
@@ -179,6 +184,9 @@ class FullNodeImpl : public FullNode {
   PublicKeyHash validator_telemetry_collector_key_ = PublicKeyHash::zero();
 
   void update_validator_telemetry_collector();
+
+  td::actor::ActorOwn<TokenManager> out_msg_queue_query_token_manager_ =
+      td::actor::create_actor<TokenManager>("tokens", /* max_tokens = */ 1);
 };
 
 }  // namespace fullnode

@@ -464,6 +464,8 @@ tonNode.outMsgQueueProof queue_proofs:bytes block_state_proofs:bytes msg_counts:
 tonNode.outMsgQueueProofEmpty = tonNode.OutMsgQueueProof;
 
 tonNode.forgetPeer = tonNode.ForgetPeer;
+tonNode.newFastSyncMemberCertificate adnl_id:int256 certificate:overlay.MemberCertificate = tonNode.NewFastSyncMemberCertificate;
+
 
 ---functions---
 
@@ -500,6 +502,8 @@ tonNode.getCapabilities = tonNode.Capabilities;
 tonNode.slave.sendExtMessage message:tonNode.externalMessage = tonNode.Success;
 
 tonNode.query = Object;
+
+tonNode.requestFastSyncOverlayMemberCertificate sign_by:int256 adnl_id:int256 slot:int = overlay.MemberCertificate;
 
 ---types---
 
@@ -654,9 +658,11 @@ engine.validator.fullNodeMaster port:int adnl:int256 = engine.validator.FullNode
 engine.validator.fullNodeSlave ip:int port:int adnl:PublicKey = engine.validator.FullNodeSlave;
 engine.validator.fullNodeConfig ext_messages_broadcast_disabled:Bool = engine.validator.FullNodeConfig;
 engine.validator.fastSyncMemberCertificate adnl_id:int256 certificate:overlay.MemberCertificate = engine.validator.FastSyncMemberCertificate;
+engine.validator.fastSyncOverlayClient adnl_id:int256 slot:int = engine.validator.FastSyncOverlayClient;
 engine.validator.collatorNodeWhitelist enabled:Bool adnl_ids:(vector int256) = engine.validator.CollatorNodeWhitelist;
 engine.validator.extraConfig state_serializer_enabled:Bool fast_sync_member_certificates:(vector engine.validator.fastSyncMemberCertificate)
-    collator_node_whitelist:engine.validator.collatorNodeWhitelist = engine.validator.ExtraConfig;
+    collator_node_whitelist:engine.validator.collatorNodeWhitelist
+    fast_sync_overlay_clients:(vector engine.validator.fastSyncOverlayClient) = engine.validator.ExtraConfig;
 engine.validator.config out_port:int addrs:(vector engine.Addr) adnl:(vector engine.adnl)
         dht:(vector engine.dht)
         validators:(vector engine.validator) collators:(vector engine.collator)
@@ -749,6 +755,8 @@ engine.validator.perfTimerStats stats:(vector engine.validator.PerfTimerStatsByN
 
 engine.validator.shardOutQueueSize size:long = engine.validator.ShardOutQueueSize;
 
+engine.validator.exportedPrivateKeys encrypted_data:bytes = engine.validator.ExportedPrivateKeys;
+
 engine.validator.collationManagerStats.shard shard_id:tonNode.shardId self_collate:Bool select_mode:string active:Bool collators:(vector int256) = engine.validator.collationManagerStats.Shard;
 engine.validator.collationManagerStats.collator adnl_id:int256 active:Bool alive:Bool ping_in:double last_ping_ago:double last_ping_status:string = engine.validator.collationManagerStats.Collator;
 engine.validator.collationManagerStats.localId adnl_id:int256 shards:(vector engine.validator.collationManagerStats.shard)
@@ -784,6 +792,7 @@ engine.validator.delListeningPort ip:int port:int categories:(vector int) priori
 engine.validator.delProxy out_ip:int out_port:int categories:(vector int) priority_categories:(vector int) = engine.validator.Success;
 
 engine.validator.sign key_hash:int256 data:bytes = engine.validator.Signature;
+engine.validator.exportAllPrivateKeys encryption_key:PublicKey = engine.validator.ExportedPrivateKeys;
 
 engine.validator.getStats = engine.validator.Stats;
 engine.validator.getConfig = engine.validator.JsonConfig;
@@ -837,6 +846,8 @@ engine.validator.getCollationManagerStats = engine.validator.CollationManagerSta
 
 engine.validator.signOverlayMemberCertificate sign_by:int256 adnl_id:int256 slot:int expire_at:int = overlay.MemberCertificate;
 engine.validator.importFastSyncMemberCertificate adnl_id:int256 certificate:overlay.MemberCertificate = engine.validator.Success;
+engine.validator.addFastSyncClient adnl_id:int256 slot:int = engine.validator.Success;
+engine.validator.delFastSyncClient adnl_id:int256 = engine.validator.Success;
 
 ---types---
 

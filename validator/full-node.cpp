@@ -21,6 +21,7 @@
 #include "td/actor/MultiPromise.h"
 #include "full-node.h"
 #include "common/delay.h"
+#include "impl/out-msg-queue-proof.hpp"
 #include "td/utils/Random.h"
 #include "ton/ton-tl.hpp"
 
@@ -644,6 +645,11 @@ void FullNodeImpl::process_block_candidate_broadcast(BlockIdExt block_id, Catcha
                           std::move(data));
 }
 
+void FullNodeImpl::get_out_msg_queue_query_token(td::Promise<std::unique_ptr<ActionToken>> promise) {
+  td::actor::send_closure(out_msg_queue_query_token_manager_, &TokenManager::get_token, 1, 0, td::Timestamp::in(10.0),
+                          std::move(promise));
+}
+
 void FullNodeImpl::set_validator_telemetry_filename(std::string value) {
   validator_telemetry_filename_ = std::move(value);
   update_validator_telemetry_collector();
@@ -936,9 +942,9 @@ bool FullNodeConfig::operator!=(const FullNodeConfig &rhs) const {
 }
 
 bool CustomOverlayParams::send_shard(const ShardIdFull &shard) const {
-  return sender_shards_.empty() || std::ranges::any_of(sender_shards_, [&](const ShardIdFull &our_shard) {
-           return shard_intersects(shard, our_shard);
-         });
+  return sender_shards_.empty() ||
+         std::any_of(sender_shards_.begin(), sender_shards_.end(),
+                     [&](const ShardIdFull &our_shard) { return shard_intersects(shard, our_shard); });
 }
 
 CustomOverlayParams CustomOverlayParams::fetch(const ton_api::engine_validator_customOverlay& f) {
