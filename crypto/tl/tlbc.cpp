@@ -420,7 +420,7 @@ void AdmissibilityInfo::operator|=(const AdmissibilityInfo& other) {
   std::size_t i, j, n = info.size(), n1 = other.info.size();
   assert(n1 && !(n1 & (n1 - 1)));
   for (i = j = 0; i < n; i++) {
-    info[i] = info[i] | other.info[j];
+    info[i] = info[i] || other.info[j];
     j = (j + 1) & (n1 - 1);
   }
 }
@@ -2519,7 +2519,7 @@ void define_builtins() {
   }
   for (int i = 1; i <= 1023; i++) {
     char buff[12];
-    sprintf(buff, "bits%d", i);
+    snprintf(buff, sizeof(buff), "bits%d", i);
     define_builtin_type(buff, "", false, i, i, true, 0);
   }
   Eq_type = define_builtin_type("=", "##", false, 0, 0, true);

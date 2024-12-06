@@ -359,7 +359,7 @@ std::string DataCell::to_hex() const {
   int len = serialize(buff, sizeof(buff));
   char hex_buff[max_serialized_bytes * 2 + 1];
   for (int i = 0; i < len; i++) {
-    sprintf(hex_buff + 2 * i, "%02x", buff[i]);
+    snprintf(hex_buff + 2 * i, sizeof(hex_buff) - 2 * i, "%02x", buff[i]);
   }
   return hex_buff;
 }

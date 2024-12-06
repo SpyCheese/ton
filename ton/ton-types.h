@@ -408,6 +408,9 @@ struct Ed25519_PublicKey {
   bool operator==(const Ed25519_PublicKey& other) const {
     return _pubkey == other._pubkey;
   }
+  bool operator!=(const Ed25519_PublicKey& other) const {
+    return _pubkey != other._pubkey;
+  }
   bool clear() {
     _pubkey.set_zero();
     return true;
