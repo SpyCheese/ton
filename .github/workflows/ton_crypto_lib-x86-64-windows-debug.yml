@@ -1,0 +1,34 @@
+name: Windows ton_crypto_lib build (portable, x86-64, debug)
+
+on: [push,workflow_dispatch,workflow_call]
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  build:
+
+    runs-on: windows-2019
+
+    steps:
+      - name: Get Current OS version
+        run: |
+          systeminfo | findstr /B /C:"OS Name" /C:"OS Version"
+
+      - name: Check out current repository
+        uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+
+      - name: Build TON
+        run: |
+          copy assembly\native\build-toncryptolib-windows-github-debug.bat .
+          copy assembly\native\build-toncryptolib-windows-debug.bat .
+          build-toncryptolib-windows-github-debug.bat Enterprise
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@master
+        with:
+          name: toncryptolib-win-debug
+          path: artifacts

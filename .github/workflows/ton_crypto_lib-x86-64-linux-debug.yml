@@ -1,0 +1,33 @@
+name: Ubuntu ton_crypto_lib build (portable, x86-64, debug)
+
+on: [push,workflow_dispatch,workflow_call]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - run: |
+        sudo apt update
+        sudo apt install -y apt-utils 
+
+    - uses: actions/checkout@v3
+      with:
+        submodules: 'recursive'
+
+    - uses: cachix/install-nix-action@v23
+      with:
+        extra_nix_config: |
+          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build TON
+      run: |
+        cp assembly/nix/build-toncryptolib-linux-x86-64-nix-debug.sh .
+        chmod +x build-toncryptolib-linux-x86-64-nix-debug.sh
+        ./build-toncryptolib-linux-x86-64-nix-debug.sh
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@master
+      with:
+        name: ton_crypto_lib-x86_64-linux-debug
+        path: artifacts
