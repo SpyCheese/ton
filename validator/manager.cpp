@@ -1482,7 +1482,7 @@ void ValidatorManagerImpl::written_handle(BlockHandle handle, td::Promise<td::Un
       td::actor::send_closure(it->second.actor_, &WaitBlockData::force_read_from_db);
     }
   }
-  if (inited_state) {
+  if (inited_state && inited_proof) {
     auto it = wait_state_.find(handle->id());
     if (it != wait_state_.end()) {
       td::actor::send_closure(it->second.actor_, &WaitBlockState::force_read_from_db);
@@ -1866,6 +1866,7 @@ void ValidatorManagerImpl::start_up() {
   }
 
   validator_manager_init(opts_, actor_id(this), db_.get(), std::move(P));
+  init_session_stats();
 
   check_waiters_at_ = td::Timestamp::in(1.0);
   alarm_timestamp().relax(check_waiters_at_);
@@ -3107,109 +3108,17 @@ void ValidatorManagerImpl::wait_shard_client_state(BlockSeqno seqno, td::Timesta
   shard_client_waiters_[seqno].waiting_.emplace_back(timeout, 0, std::move(promise));
 }
 
-void ValidatorManagerImpl::log_validator_session_stats(BlockIdExt block_id,
-                                                       validatorsession::ValidatorSessionStats stats) {
-  std::string fname = opts_->get_session_logs_file();
-  if (fname.empty()) {
-    return;
-  }
-
-  std::vector<tl_object_ptr<ton_api::validatorSession_statsRound>> rounds;
-  for (const auto &round : stats.rounds) {
-    std::vector<tl_object_ptr<ton_api::validatorSession_statsProducer>> producers;
-    for (const auto &producer : round.producers) {
-      BlockIdExt cur_block_id{block_id.id, producer.root_hash, producer.file_hash};
-      auto it = recorded_block_stats_.find(cur_block_id);
-      tl_object_ptr<ton_api::validatorSession_collationStats> collation_stats;
-      if (it != recorded_block_stats_.end() && it->second.collator_stats_) {
-        auto &stats = it->second.collator_stats_.value();
-        collation_stats = stats.tl();
-      }
-      std::string approvers, signers;
-      for (bool x : producer.approvers) {
-        approvers += (x ? '1' : '0');
-      }
-      for (bool x : producer.signers) {
-        signers += (x ? '1' : '0');
-      }
-      producers.push_back(create_tl_object<ton_api::validatorSession_statsProducer>(
-          producer.id.bits256_value(), producer.candidate_id, producer.block_status, producer.root_hash,
-          producer.file_hash, producer.comment, producer.block_timestamp, producer.is_accepted, producer.is_ours,
-          producer.got_submit_at, producer.collation_time, producer.collated_at, producer.collation_cached,
-          it == recorded_block_stats_.end() ? -1.0 : it->second.collator_work_time_,
-          it == recorded_block_stats_.end() ? -1.0 : it->second.collator_cpu_work_time_, std::move(collation_stats),
-          producer.validation_time, producer.validated_at, producer.validation_cached,
-          it == recorded_block_stats_.end() ? -1.0 : it->second.validator_work_time_,
-          it == recorded_block_stats_.end() ? -1.0 : it->second.validator_cpu_work_time_, producer.gen_utime,
-          producer.approved_weight, producer.approved_33pct_at, producer.approved_66pct_at, std::move(approvers),
-          producer.signed_weight, producer.signed_33pct_at, producer.signed_66pct_at, std::move(signers),
-          producer.serialize_time, producer.deserialize_time, producer.serialized_size));
-    }
-    rounds.push_back(create_tl_object<ton_api::validatorSession_statsRound>(round.timestamp, std::move(producers)));
-  }
-
-  auto obj = create_tl_object<ton_api::validatorSession_stats>(
-      stats.success, create_tl_block_id(block_id), stats.timestamp, stats.self.bits256_value(), stats.session_id,
-      stats.cc_seqno, stats.creator.bits256_value(), stats.total_validators, stats.total_weight, stats.signatures,
-      stats.signatures_weight, stats.approve_signatures, stats.approve_signatures_weight, stats.first_round,
-      std::move(rounds));
-  auto s = td::json_encode<std::string>(td::ToJson(*obj.get()), false);
-  s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return c == '\n' || c == '\r'; }), s.end());
-
-  std::ofstream file;
-  file.open(fname, std::ios_base::app);
-  file << s << "\n";
-  file.close();
-
-  LOG(INFO) << "Writing validator session stats for " << block_id.id.to_str();
+void ValidatorManagerImpl::log_validator_session_stats(validatorsession::ValidatorSessionStats stats) {
+  stats.fix_block_ids();
+  write_session_stats(stats);
 }
 
 void ValidatorManagerImpl::log_new_validator_group_stats(validatorsession::NewValidatorGroupStats stats) {
-  std::string fname = opts_->get_session_logs_file();
-  if (fname.empty()) {
-    return;
-  }
-  std::vector<tl_object_ptr<ton_api::validatorSession_newValidatorGroupStats_node>> nodes;
-  for (const auto &node : stats.nodes) {
-    nodes.push_back(
-        create_tl_object<ton_api::validatorSession_newValidatorGroupStats_node>(node.id.bits256_value(), node.weight));
-  }
-  auto obj = create_tl_object<ton_api::validatorSession_newValidatorGroupStats>(
-      stats.session_id, stats.shard.workchain, stats.shard.shard, stats.cc_seqno, stats.last_key_block_seqno,
-      stats.timestamp, stats.self_idx, std::move(nodes));
-  auto s = td::json_encode<std::string>(td::ToJson(*obj.get()), false);
-  s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return c == '\n' || c == '\r'; }), s.end());
-
-  std::ofstream file;
-  file.open(fname, std::ios_base::app);
-  file << s << "\n";
-  file.close();
-
-  LOG(INFO) << "Writing new validator group stats for " << stats.session_id << " shard=" << stats.shard.to_str()
-            << " cc_seqno=" << stats.cc_seqno;
+  write_session_stats(stats);
 }
 
 void ValidatorManagerImpl::log_end_validator_group_stats(validatorsession::EndValidatorGroupStats stats) {
-  std::string fname = opts_->get_session_logs_file();
-  if (fname.empty()) {
-    return;
-  }
-  std::vector<tl_object_ptr<ton_api::validatorSession_endValidatorGroupStats_node>> nodes;
-  for (const auto &node : stats.nodes) {
-    nodes.push_back(create_tl_object<ton_api::validatorSession_endValidatorGroupStats_node>(node.id.bits256_value(),
-                                                                                            node.catchain_blocks));
-  }
-  auto obj = create_tl_object<ton_api::validatorSession_endValidatorGroupStats>(stats.session_id, stats.timestamp,
-                                                                                std::move(nodes));
-  auto s = td::json_encode<std::string>(td::ToJson(*obj.get()), false);
-  s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return c == '\n' || c == '\r'; }), s.end());
-
-  std::ofstream file;
-  file.open(fname, std::ios_base::app);
-  file << s << "\n";
-  file.close();
-
-  LOG(INFO) << "Writing end validator group stats for " << stats.session_id;
+  write_session_stats(stats);
 }
 
 void ValidatorManagerImpl::get_block_handle_for_litequery(BlockIdExt block_id, td::Promise<ConstBlockHandle> promise) {
@@ -3501,6 +3410,7 @@ void ValidatorManagerImpl::update_options(td::Ref<ValidatorManagerOptions> opts)
     td::actor::send_closure(c, &CollationManager::update_options, opts);
   }
   opts_ = std::move(opts);
+  init_session_stats();
 }
 
 void ValidatorManagerImpl::add_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) {
@@ -3657,45 +3567,16 @@ td::actor::ActorOwn<ValidatorManagerInterface> ValidatorManagerFactory::create(
                                                                   rldp, overlays);
 }
 
-void ValidatorManagerImpl::record_collate_query_stats(BlockIdExt block_id, CollationStats stats) {
-  auto &record = new_block_stats_record(block_id);
-  record.collator_work_time_ = stats.work_time;
-  record.collator_cpu_work_time_ = stats.cpu_work_time;
-  record.collator_stats_ = std::move(stats);
-
-  std::string fname = opts_->get_session_logs_file();
-  if (fname.empty()) {
-    return;
-  }
-
-  auto obj = create_tl_object<ton_api::validatorSession_statsCollatedBlock>(td::Clocks::system(),
-                                                                            create_tl_block_id(block_id), stats.tl());
-  auto s = td::json_encode<std::string>(td::ToJson(*obj.get()), false);
-  s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return c == '\n' || c == '\r'; }), s.end());
-
-  std::ofstream file;
-  file.open(fname, std::ios_base::app);
-  file << s << "\n";
-  file.close();
-
-  LOG(DEBUG) << "Writing collation stats stats for " << block_id.id.to_str();
+void ValidatorManagerImpl::log_collate_query_stats(CollationStats stats) {
+  write_session_stats(stats);
 }
 
-void ValidatorManagerImpl::record_validate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time) {
-  auto &record = new_block_stats_record(block_id);
-  record.validator_work_time_ = work_time;
-  record.validator_cpu_work_time_ = cpu_work_time;
+void ValidatorManagerImpl::log_validate_query_stats(ValidationStats stats) {
+  write_session_stats(stats);
 }
 
-ValidatorManagerImpl::RecordedBlockStats &ValidatorManagerImpl::new_block_stats_record(BlockIdExt block_id) {
-  if (!recorded_block_stats_.count(block_id)) {
-    recorded_block_stats_lru_.push(block_id);
-    if (recorded_block_stats_lru_.size() > 4096) {
-      recorded_block_stats_.erase(recorded_block_stats_lru_.front());
-      recorded_block_stats_lru_.pop();
-    }
-  }
-  return recorded_block_stats_[block_id];
+void ValidatorManagerImpl::log_collator_node_response_stats(CollatorNodeResponseStats stats) {
+  write_session_stats(stats);
 }
 
 size_t ValidatorManagerImpl::CheckedExtMsgCounter::get_msg_count(WorkchainId wc, StdSmcAddress addr) {
@@ -3753,6 +3634,53 @@ void ValidatorManagerImpl::init_validator_telemetry() {
     } else {
       it = validator_telemetry_.erase(it);
     }
+  }
+}
+
+void ValidatorManagerImpl::init_session_stats() {
+  if (opts_->get_session_logs_file() == session_stats_filename_) {
+    return;
+  }
+  session_stats_filename_ = opts_->get_session_logs_file();
+  if (session_stats_filename_.empty()) {
+    session_stats_enabled_ = false;
+    session_stats_fd_.close();
+    return;
+  }
+  auto r_fd = td::FileFd::open(session_stats_filename_,
+                               td::FileFd::Flags::Write | td::FileFd::Flags::Append | td::FileFd::Create);
+  if (r_fd.is_error()) {
+    LOG(ERROR) << "Failed to open session stats file for writing: " << r_fd.move_as_error();
+    session_stats_filename_.clear();
+    session_stats_enabled_ = false;
+    return;
+  }
+  session_stats_fd_ = r_fd.move_as_ok();
+  session_stats_enabled_ = true;
+}
+
+template<typename T>
+void ValidatorManagerImpl::write_session_stats(const T &obj) {
+  if (!session_stats_enabled_) {
+    return;
+  }
+  auto s = td::json_encode<std::string>(td::ToJson(*obj.tl()), false);
+  s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return c == '\n' || c == '\r'; }), s.end());
+  s += '\n';
+  td::Slice slice{s};
+  while (!slice.empty()) {
+    auto R = session_stats_fd_.write(slice);
+    if (R.is_error()) {
+      LOG(WARNING) << "Failed to write to session stats: " << R.move_as_error();
+    }
+    if (R.ok() == 0) {
+      LOG(WARNING) << "Failed to write to session stats";
+    }
+    slice.remove_prefix(R.ok());
+  }
+  auto S = session_stats_fd_.sync();
+  if (S.is_error()) {
+    LOG(WARNING) << "Failed to write to session stats: " << S;
   }
 }
 

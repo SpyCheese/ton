@@ -77,6 +77,7 @@ static inline bool dbg(int c) {
  * @param manager The ActorId of the ValidatorManager.
  * @param timeout The timeout for the collator.
  * @param promise The promise to return the result.
+ * @param collator_node_id ADNL id of the collator node that generates the block (zero if it's not a collator node)
  * @param cancellation_token Token to cancel collation.
  * @param mode +1 - skip storing candidate to disk, +2 - called from CollatorNode.
  * @param attempt_idx The index of the attempt, starting from 0. On later attempts collator decreases block limits and skips some steps.
@@ -84,8 +85,8 @@ static inline bool dbg(int c) {
 Collator::Collator(ShardIdFull shard, bool is_hardfork, BlockIdExt min_masterchain_block_id,
                    std::vector<BlockIdExt> prev, td::Ref<ValidatorSet> validator_set, Ed25519_PublicKey collator_id,
                    Ref<CollatorOptions> collator_opts, td::actor::ActorId<ValidatorManager> manager,
-                   td::Timestamp timeout, td::Promise<BlockCandidate> promise, td::CancellationToken cancellation_token,
-                   unsigned mode, int attempt_idx)
+                   td::Timestamp timeout, td::Promise<BlockCandidate> promise, adnl::AdnlNodeIdShort collator_node_id,
+                   td::CancellationToken cancellation_token, unsigned mode, int attempt_idx)
     : shard_(shard)
     , is_hardfork_(is_hardfork)
     , min_mc_block_id{min_masterchain_block_id}
@@ -100,6 +101,7 @@ Collator::Collator(ShardIdFull shard, bool is_hardfork, BlockIdExt min_mastercha
     , soft_timeout_(td::Timestamp::at(timeout.at() - 3.0))
     , medium_timeout_(td::Timestamp::at(timeout.at() - 1.5))
     , main_promise(std::move(promise))
+    , collator_node_id_(collator_node_id)
     , mode_(mode)
     , attempt_idx_(attempt_idx)
     , perf_timer_("collate", 0.1,
@@ -374,8 +376,8 @@ bool Collator::fatal_error(td::Status error) {
         !is_hardfork_ && !timeout.is_in_past()) {
       LOG(WARNING) << "Repeating collation (attempt #" << attempt_idx_ + 1 << ")";
       run_collate_query(shard_, min_mc_block_id, prev_blocks, created_by_, validator_set_, collator_opts_, manager,
-                        td::Timestamp::in(10.0), std::move(main_promise), std::move(cancellation_token_), mode_,
-                        attempt_idx_ + 1);
+                        td::Timestamp::in(10.0), std::move(main_promise), collator_node_id_,
+                        std::move(cancellation_token_), mode_, attempt_idx_ + 1);
     } else {
       LOG(INFO) << "collation failed in " << perf_timer_.elapsed() << " s " << error;
       LOG(INFO) << perf_log_;
@@ -1213,6 +1215,7 @@ bool Collator::import_shard_state_data(block::ShardState& ss) {
   processed_upto_ = std::move(ss.processed_upto_);
   ihr_pending = std::move(ss.ihr_pending_);
   dispatch_queue_ = std::move(ss.dispatch_queue_);
+  old_dispatch_queue_ = std::make_unique<vm::AugmentedDictionary>(*dispatch_queue_);
   block_create_stats_ = std::move(ss.block_create_stats_);
   if (ss.out_msg_queue_size_) {
     have_out_msg_queue_size_in_state_ = true;
@@ -5706,6 +5709,11 @@ Ref<vm::Cell> Collator::collate_shard_block_descr_set() {
   return cell;
 }
 
+/**
+ * Visits certain cells in out msg queue and dispatch queue to add them to the proof
+ *
+ * @returns True on success, Falise if error occurred
+ */
 bool Collator::prepare_msg_queue_proof() {
   auto res = old_out_msg_queue_->scan_diff(
       *out_msg_queue_,
@@ -5730,7 +5738,32 @@ bool Collator::prepare_msg_queue_proof() {
         }
         return true;
       },
-      3);
+      2);
+  if (!res) {
+    return false;
+  }
+  res = old_dispatch_queue_->scan_diff(
+      *dispatch_queue_,
+      [this](td::ConstBitPtr, int, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value) {
+        if (old_value.not_null()) {
+          old_value = old_dispatch_queue_->extract_value(std::move(old_value));
+          vm::Dictionary dispatch_dict{64};
+          td::uint64 dispatch_dict_size;
+          CHECK(block::unpack_account_dispatch_queue(old_value, dispatch_dict, dispatch_dict_size));
+          td::BitArray<64> max_lt;
+          CHECK(dispatch_dict.get_minmax_key(max_lt, true).not_null());
+        }
+        if (new_value.not_null()) {
+          new_value = dispatch_queue_->extract_value(std::move(new_value));
+          vm::Dictionary dispatch_dict{64};
+          td::uint64 dispatch_dict_size;
+          CHECK(block::unpack_account_dispatch_queue(new_value, dispatch_dict, dispatch_dict_size));
+          td::BitArray<64> min_lt;
+          CHECK(dispatch_dict.get_minmax_key(min_lt, false).not_null());
+        }
+        return true;
+      },
+      2);
   return res;
 }
 
@@ -5927,8 +5960,16 @@ bool Collator::create_block_candidate() {
   double work_time = work_timer_.elapsed();
   double cpu_work_time = cpu_work_timer_.elapsed();
   LOG(WARNING) << "Collate query work time = " << work_time << "s, cpu time = " << cpu_work_time << "s";
+  stats_.block_id = block_candidate->id;
+  stats_.collated_data_hash = block_candidate->collated_file_hash;
+  stats_.cc_seqno = validator_set_->get_catchain_seqno();
+  stats_.collated_at = td::Clocks::system();
   stats_.actual_bytes = block_candidate->data.size();
   stats_.actual_collated_data_bytes = block_candidate->collated_data.size();
+  stats_.attempt = attempt_idx_;
+  stats_.is_validator = !(mode_ & CollateMode::from_collator_node);
+  stats_.self = stats_.is_validator ? PublicKey(pubkeys::Ed25519(created_by_)).compute_short_id()
+                                    : collator_node_id_.pubkey_hash();
   stats_.estimated_bytes = block_limit_status_->estimate_block_size();
   stats_.gas = block_limit_status_->gas_used;
   stats_.lt_delta = block_limit_status_->cur_lt - block_limit_status_->limits.start_lt;
@@ -5938,20 +5979,12 @@ bool Collator::create_block_candidate() {
   stats_.cat_lt_delta = block_limit_status_->limits.classify_lt(block_limit_status_->cur_lt);
   stats_.cat_collated_data_bytes =
       block_limit_status_->limits.classify_collated_data_size(stats_.estimated_collated_data_bytes);
+  stats_.total_time = perf_timer_.elapsed();
   stats_.work_time = work_time;
   stats_.cpu_work_time = cpu_work_time;
+  stats_.time_stats = (PSTRING() << perf_log_);
 
-  // TODO: remove this later (currently needed to collect stats)
-  if (mode_ & CollateMode::from_collator_node) {
-    size_t d;
-    stats_.serialized_size =
-        validatorsession::compress_candidate_data(block_candidate->data, block_candidate->collated_data, d).ok().size();
-    stats_.serialized_size_no_collated_data =
-        validatorsession::compress_candidate_data(block_candidate->data, td::Slice{}, d).ok().size();
-  }
-
-  td::actor::send_closure(manager, &ValidatorManager::record_collate_query_stats, block_candidate->id,
-                          std::move(stats_));
+  td::actor::send_closure(manager, &ValidatorManager::log_collate_query_stats, std::move(stats_));
   return true;
 }
 

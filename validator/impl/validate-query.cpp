@@ -67,16 +67,17 @@ std::string ErrorCtx::as_string() const {
  * @param promise The Promise to return the ValidateCandidateResult to.
  * @param mode +1 - fake mode
  */
-ValidateQuery::ValidateQuery(ShardIdFull shard, BlockIdExt min_masterchain_block_id,
-                             std::vector<BlockIdExt> prev, BlockCandidate candidate, Ref<ValidatorSet> validator_set,
-                             td::actor::ActorId<ValidatorManager> manager, td::Timestamp timeout,
-                             td::Promise<ValidateCandidateResult> promise, unsigned mode)
+ValidateQuery::ValidateQuery(ShardIdFull shard, BlockIdExt min_masterchain_block_id, std::vector<BlockIdExt> prev,
+                             BlockCandidate candidate, Ref<ValidatorSet> validator_set,
+                             PublicKeyHash local_validator_id, td::actor::ActorId<ValidatorManager> manager,
+                             td::Timestamp timeout, td::Promise<ValidateCandidateResult> promise, unsigned mode)
     : shard_(shard)
     , id_(candidate.id)
     , min_mc_block_id(min_masterchain_block_id)
     , prev_blocks(std::move(prev))
     , block_candidate(std::move(candidate))
     , validator_set_(std::move(validator_set))
+    , local_validator_id_(local_validator_id)
     , manager(manager)
     , timeout(timeout)
     , main_promise(std::move(promise))
@@ -116,13 +117,12 @@ bool ValidateQuery::reject_query(std::string error, td::BufferSlice reason) {
   error = error_ctx() + error;
   LOG(ERROR) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
-    record_stats();
+    record_stats(false, error);
     errorlog::ErrorLog::log(PSTRING() << "REJECT: aborting validation of block candidate for " << shard_.to_str()
                                       << " : " << error << ": data=" << block_candidate.id.file_hash.to_hex()
                                       << " collated_data=" << block_candidate.collated_file_hash.to_hex());
     errorlog::ErrorLog::log_file(block_candidate.data.clone());
     errorlog::ErrorLog::log_file(block_candidate.collated_data.clone());
-    LOG(INFO) << "validation took " << perf_timer_.elapsed() << " s";
     main_promise.set_result(CandidateReject{std::move(error), std::move(reason)});
   }
   stop();
@@ -155,13 +155,12 @@ bool ValidateQuery::soft_reject_query(std::string error, td::BufferSlice reason)
   error = error_ctx() + error;
   LOG(ERROR) << "SOFT REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
-    record_stats();
+    record_stats(false, error);
     errorlog::ErrorLog::log(PSTRING() << "SOFT REJECT: aborting validation of block candidate for " << shard_.to_str()
                                       << " : " << error << ": data=" << block_candidate.id.file_hash.to_hex()
                                       << " collated_data=" << block_candidate.collated_file_hash.to_hex());
     errorlog::ErrorLog::log_file(block_candidate.data.clone());
     errorlog::ErrorLog::log_file(block_candidate.collated_data.clone());
-    LOG(INFO) << "validation took " << perf_timer_.elapsed() << " s";
     main_promise.set_result(CandidateReject{std::move(error), std::move(reason)});
   }
   stop();
@@ -179,7 +178,7 @@ bool ValidateQuery::fatal_error(td::Status error) {
   error.ensure_error();
   LOG(ERROR) << "aborting validation of block candidate for " << shard_.to_str() << " : " << error.to_string();
   if (main_promise) {
-    record_stats();
+    record_stats(false, error.message().str());
     auto c = error.code();
     if (c <= -667 && c >= -670) {
       errorlog::ErrorLog::log(PSTRING() << "FATAL ERROR: aborting validation of block candidate for " << shard_.to_str()
@@ -188,7 +187,6 @@ bool ValidateQuery::fatal_error(td::Status error) {
       errorlog::ErrorLog::log_file(block_candidate.data.clone());
       errorlog::ErrorLog::log_file(block_candidate.collated_data.clone());
     }
-    LOG(INFO) << "validation took " << perf_timer_.elapsed() << " s";
     main_promise(std::move(error));
   }
   stop();
@@ -238,9 +236,8 @@ bool ValidateQuery::fatal_error(std::string err_msg, int err_code) {
  */
 void ValidateQuery::finish_query() {
   if (main_promise) {
-    record_stats();
+    record_stats(true);
     LOG(WARNING) << "validate query done";
-    LOG(WARNING) << "validation took " << perf_timer_.elapsed() << " s";
     main_promise.set_result(now_);
   }
   stop();
@@ -380,16 +377,8 @@ void ValidateQuery::start_up() {
                                     });
     }
   }
-  // 5. request masterchain state referred to in the block
+  // 4. request masterchain handle and state referred to in the block
   if (!is_masterchain()) {
-    ++pending;
-    td::actor::send_closure_later(manager, &ValidatorManager::wait_block_state_short, mc_blkid_, priority(), timeout,
-                                  [self = get_self()](td::Result<Ref<ShardState>> res) {
-                                    LOG(DEBUG) << "got answer to wait_block_state() query for masterchain block";
-                                    td::actor::send_closure_later(std::move(self), &ValidateQuery::after_get_mc_state,
-                                                                  std::move(res));
-                                  });
-    // 5.1. request corresponding block handle
     ++pending;
     td::actor::send_closure_later(manager, &ValidatorManager::get_block_handle, mc_blkid_, true,
                                   [self = get_self()](td::Result<BlockHandle> res) {
@@ -675,6 +664,19 @@ bool ValidateQuery::extract_collated_data() {
 }
 
 /**
+ * Send get_top_masterchain_state_block to manager, call after_get_latest_mc_state afterwards
+ */
+void ValidateQuery::request_latest_mc_state() {
+  ++pending;
+  td::actor::send_closure_later(manager, &ValidatorManager::get_top_masterchain_state_block,
+                                [self = get_self()](td::Result<std::pair<Ref<MasterchainState>, BlockIdExt>> res) {
+                                  LOG(DEBUG) << "got answer to get_top_masterchain_state_block";
+                                  td::actor::send_closure_later(
+                                      std::move(self), &ValidateQuery::after_get_latest_mc_state, std::move(res));
+                                });
+}
+
+/**
  * Callback function called after retrieving the latest masterchain state.
  *
  * @param res The result of the retrieval of the latest masterchain state.
@@ -721,6 +723,7 @@ void ValidateQuery::after_get_latest_mc_state(td::Result<std::pair<Ref<Mastercha
  * @param res The result of the masterchain state retrieval.
  */
 void ValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
+  CHECK(!is_masterchain());
   LOG(WARNING) << "in ValidateQuery::after_get_mc_state() for " << mc_blkid_.to_str();
   --pending;
   if (res.is_error()) {
@@ -731,6 +734,7 @@ void ValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
     fatal_error("cannot process masterchain state for "s + mc_blkid_.to_str());
     return;
   }
+  request_latest_mc_state();
   if (!pending) {
     if (!try_validate()) {
       fatal_error("cannot validate new block");
@@ -745,17 +749,21 @@ void ValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
  */
 void ValidateQuery::got_mc_handle(td::Result<BlockHandle> res) {
   LOG(DEBUG) << "in ValidateQuery::got_mc_handle() for " << mc_blkid_.to_str();
-  --pending;
   if (res.is_error()) {
     fatal_error(res.move_as_error());
     return;
   }
-  auto handle = res.move_as_ok();
-  if (!handle->inited_proof() && mc_blkid_.seqno()) {
-    fatal_error(-666, "reference masterchain block "s + mc_blkid_.to_str() + " for block " + id_.to_str() +
-                          " does not have a valid proof");
-    return;
-  }
+  auto mc_handle = res.move_as_ok();
+  td::actor::send_closure_later(
+      manager, &ValidatorManager::wait_block_state, mc_handle, priority(), timeout,
+      [self = get_self(), id = id_, mc_handle](td::Result<Ref<ShardState>> res) {
+        LOG(DEBUG) << "got answer to wait_block_state() query for masterchain block";
+        if (res.is_ok() && mc_handle->id().seqno() > 0 && !mc_handle->inited_proof()) {
+          res = td::Status::Error(-666, "reference masterchain block "s + mc_handle->id().to_str() + " for block " +
+                                            id.to_str() + " does not have a valid proof");
+        }
+        td::actor::send_closure_later(std::move(self), &ValidateQuery::after_get_mc_state, std::move(res));
+      });
 }
 
 /**
@@ -788,6 +796,9 @@ void ValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardState>> r
       fatal_error("cannot process masterchain state for "s + mc_blkid_.to_str());
       return;
     }
+  }
+  if (is_masterchain()) {
+    request_latest_mc_state();
   }
   if (!pending) {
     if (!try_validate()) {
@@ -1008,6 +1019,7 @@ bool ValidateQuery::fetch_config_params() {
     action_phase_cfg_.bounce_on_fail_enabled = config_->get_global_version() >= 4;
     action_phase_cfg_.message_skip_enabled = config_->get_global_version() >= 8;
     action_phase_cfg_.disable_custom_fess = config_->get_global_version() >= 8;
+    action_phase_cfg_.reserve_extra_enabled = config_->get_global_version() >= 9;
     action_phase_cfg_.mc_blackhole_addr = config_->get_burning_config().blackhole_addr;
   }
   {
@@ -2926,7 +2938,7 @@ bool ValidateQuery::precheck_account_updates() {
               CHECK(key_len == 256);
               return precheck_one_account_update(key, std::move(old_val_extra), std::move(new_val_extra));
             },
-            3 /* check augmentation of changed nodes */)) {
+            2 /* check augmentation of changed nodes in the new dict */)) {
       return reject_query("invalid ShardAccounts dictionary in the new state");
     }
   } catch (vm::VmError& err) {
@@ -3375,7 +3387,7 @@ bool ValidateQuery::precheck_message_queue_update() {
               CHECK(key_len == 352);
               return precheck_one_message_queue_update(key, std::move(old_val_extra), std::move(new_val_extra));
             },
-            3 /* check augmentation of changed nodes */)) {
+            2 /* check augmentation of changed nodes in the new dict */)) {
       return reject_query("invalid OutMsgQueue dictionary in the new state");
     }
   } catch (vm::VmError& err) {
@@ -3536,7 +3548,7 @@ bool ValidateQuery::unpack_dispatch_queue_update() {
           return check_account_dispatch_queue_update(key, ps_.dispatch_queue_->extract_value(std::move(old_val_extra)),
                                                      ns_.dispatch_queue_->extract_value(std::move(new_val_extra)));
         },
-        3 /* check augmentation of changed nodes */);
+        2 /* check augmentation of changed nodes in the new dict */);
     if (!res) {
       return reject_query("invalid DispatchQueue dictionary in the new state");
     }
@@ -7061,13 +7073,26 @@ void ValidateQuery::written_candidate() {
 /**
  * Sends validation work time to manager.
  */
-void ValidateQuery::record_stats() {
-  double work_time = work_timer_.elapsed();
-  double cpu_work_time = cpu_work_timer_.elapsed();
+void ValidateQuery::record_stats(bool valid, std::string error_message) {
+  ValidationStats stats;
+  stats.block_id = id_;
+  stats.collated_data_hash = block_candidate.collated_file_hash;
+  stats.validated_at = td::Clocks::system();
+  stats.self = local_validator_id_;
+  stats.valid = valid;
+  if (valid) {
+    stats.comment = (PSTRING() << "OK ts=" << now_);
+  } else {
+    stats.comment = std::move(error_message);
+  }
+  stats.actual_bytes = block_candidate.data.size();
+  stats.actual_collated_data_bytes = block_candidate.collated_data.size();
+  stats.total_time = perf_timer_.elapsed();
+  stats.work_time = work_timer_.elapsed();
+  stats.cpu_work_time = cpu_work_timer_.elapsed();
   LOG(WARNING) << "validation took " << perf_timer_.elapsed() << "s";
-  LOG(WARNING) << "Validate query work time = " << work_time << "s, cpu time = " << cpu_work_time << "s";
-  td::actor::send_closure(manager, &ValidatorManager::record_validate_query_stats, block_candidate.id, work_time,
-                          cpu_work_time);
+  LOG(WARNING) << "Validate query work time = " << stats.work_time << "s, cpu time = " << stats.cpu_work_time << "s";
+  td::actor::send_closure(manager, &ValidatorManager::log_validate_query_stats, std::move(stats));
 }
 
 }  // namespace validator

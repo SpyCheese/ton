@@ -118,7 +118,7 @@ class ValidateQuery : public td::actor::Actor {
 
  public:
   ValidateQuery(ShardIdFull shard, BlockIdExt min_masterchain_block_id, std::vector<BlockIdExt> prev,
-                BlockCandidate candidate, td::Ref<ValidatorSet> validator_set,
+                BlockCandidate candidate, td::Ref<ValidatorSet> validator_set, PublicKeyHash local_validator_id,
                 td::actor::ActorId<ValidatorManager> manager, td::Timestamp timeout,
                 td::Promise<ValidateCandidateResult> promise, unsigned mode = 0);
 
@@ -132,6 +132,7 @@ class ValidateQuery : public td::actor::Actor {
   std::vector<Ref<ShardState>> prev_states;
   BlockCandidate block_candidate;
   td::Ref<ValidatorSet> validator_set_;
+  PublicKeyHash local_validator_id_ = PublicKeyHash::zero();
   td::actor::ActorId<ValidatorManager> manager;
   td::Timestamp timeout;
   td::Promise<ValidateCandidateResult> main_promise;
@@ -288,6 +289,7 @@ class ValidateQuery : public td::actor::Actor {
     return actor_id(this);
   }
 
+  void request_latest_mc_state();
   void after_get_latest_mc_state(td::Result<std::pair<Ref<MasterchainState>, BlockIdExt>> res);
   void after_get_mc_state(td::Result<Ref<ShardState>> res);
   void got_mc_handle(td::Result<BlockHandle> res);
@@ -407,7 +409,7 @@ class ValidateQuery : public td::actor::Actor {
 
   td::Timer work_timer_{true};
   td::ThreadCpuTimer cpu_work_timer_{true};
-  void record_stats();
+  void record_stats(bool valid, std::string error_message = "");
 };
 
 }  // namespace validator

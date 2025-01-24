@@ -82,14 +82,15 @@ void run_check_proof_query(BlockIdExt id, td::Ref<Proof> proof, td::actor::Actor
 void run_check_proof_link_query(BlockIdExt id, td::Ref<ProofLink> proof, td::actor::ActorId<ValidatorManager> manager,
                                 td::Timestamp timeout, td::Promise<BlockHandle> promise);
 void run_validate_query(ShardIdFull shard, BlockIdExt min_masterchain_block_id, std::vector<BlockIdExt> prev,
-                        BlockCandidate candidate, td::Ref<ValidatorSet> validator_set,
+                        BlockCandidate candidate, td::Ref<ValidatorSet> validator_set, PublicKeyHash local_validator_id,
                         td::actor::ActorId<ValidatorManager> manager, td::Timestamp timeout,
                         td::Promise<ValidateCandidateResult> promise, unsigned mode = 0);
 void run_collate_query(ShardIdFull shard, const BlockIdExt& min_masterchain_block_id, std::vector<BlockIdExt> prev,
                        Ed25519_PublicKey creator, td::Ref<ValidatorSet> validator_set,
                        td::Ref<CollatorOptions> collator_opts, td::actor::ActorId<ValidatorManager> manager,
                        td::Timestamp timeout, td::Promise<BlockCandidate> promise,
-                       td::CancellationToken cancellation_token, unsigned mode, int attempt_idx = 0);
+                       adnl::AdnlNodeIdShort collator_node_id, td::CancellationToken cancellation_token, unsigned mode,
+                       int attempt_idx = 0);
 void run_collate_hardfork(ShardIdFull shard, const BlockIdExt& min_masterchain_block_id, std::vector<BlockIdExt> prev,
                           td::actor::ActorId<ValidatorManager> manager, td::Timestamp timeout,
                           td::Promise<BlockCandidate> promise);
