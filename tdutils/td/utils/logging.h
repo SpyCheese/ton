@@ -264,8 +264,8 @@ class Logger {
     sb_ << other;
     return *this;
   }
-  LambdaPrintHelper<td::Logger> operator<<(const LambdaPrint &) {
-    return LambdaPrintHelper<td::Logger>{*this};
+  LambdaPrintHelper<td::StringBuilder> operator<<(const LambdaPrint &) {
+    return LambdaPrintHelper<td::StringBuilder>{sb_};
   }
 
   MutableCSlice as_cslice() {
@@ -343,7 +343,10 @@ class TsLog : public LogInterface {
 
  private:
   LogInterface *log_ = nullptr;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-pragma"
   std::atomic_flag lock_ = ATOMIC_FLAG_INIT;
+#pragma clang diagnostic pop
   void enter_critical() {
     while (lock_.test_and_set(std::memory_order_acquire)) {
       // spin
