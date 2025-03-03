@@ -149,19 +149,20 @@ td::Ref<vm::Tuple> prepare_vm_c7(SmartContract::Args args, td::Ref<vm::Cell> cod
   }
 
   std::vector<vm::StackEntry> tuple = {
-      td::make_refint(0x076ef1ea),                            // [ magic:0x076ef1ea
-      td::make_refint(0),                                     //   actions:Integer
-      td::make_refint(0),                                     //   msgs_sent:Integer
-      td::make_refint(now),                                   //   unixtime:Integer
-      td::make_refint(0),              //TODO:                //   block_lt:Integer
-      td::make_refint(0),              //TODO:                //   trans_lt:Integer
-      std::move(rand_seed_int),                               //   rand_seed:Integer
-      block::CurrencyCollection(args.balance).as_vm_tuple(),  //   balance_remaining:[Integer (Maybe Cell)]
-      vm::load_cell_slice_ref(address),                       //  myself:MsgAddressInt
-      vm::StackEntry::maybe(config)                           //vm::StackEntry::maybe(td::Ref<vm::Cell>())
+      td::make_refint(0x076ef1ea),  // [ magic:0x076ef1ea
+      td::make_refint(0),           //   actions:Integer
+      td::make_refint(0),           //   msgs_sent:Integer
+      td::make_refint(now),         //   unixtime:Integer
+      td::make_refint(0),           //   block_lt:Integer (TODO)
+      td::make_refint(0),           //   trans_lt:Integer (TODO)
+      std::move(rand_seed_int),     //   rand_seed:Integer
+      block::CurrencyCollection(args.balance, args.extra_currencies)
+          .as_vm_tuple(),                //   balance_remaining:[Integer (Maybe Cell)]
+      vm::load_cell_slice_ref(address),  //   myself:MsgAddressInt
+      vm::StackEntry::maybe(config)      //   vm::StackEntry::maybe(td::Ref<vm::Cell>())
   };
   if (args.config && args.config.value()->get_global_version() >= 4) {
-    tuple.push_back(code.not_null() ? code : vm::StackEntry{});        // code:Cell
+    tuple.push_back(vm::StackEntry::maybe(code));                      // code:Cell
     tuple.push_back(block::CurrencyCollection::zero().as_vm_tuple());  // in_msg_value:[Integer (Maybe Cell)]
     tuple.push_back(td::zero_refint());                                // storage_fees:Integer
 
@@ -175,7 +176,10 @@ td::Ref<vm::Tuple> prepare_vm_c7(SmartContract::Args args, td::Ref<vm::Cell> cod
     tuple.push_back(args.config.value()->get_unpacked_config_tuple(now));  // unpacked_config_tuple
     tuple.push_back(td::zero_refint());                                    // due_payment
     // precomiled_gas_usage:(Maybe Integer)
-    auto precompiled = args.config.value()->get_precompiled_contracts_config().get_contract(code->get_hash().bits());
+    td::optional<block::PrecompiledContractsConfig::Contract> precompiled;
+    if (code.not_null()) {
+      precompiled = args.config.value()->get_precompiled_contracts_config().get_contract(code->get_hash().bits());
+    }
     tuple.push_back(precompiled ? td::make_refint(precompiled.value().gas_usage) : vm::StackEntry());
   }
   auto tuple_ref = td::make_cnt_ref<std::vector<vm::StackEntry>>(std::move(tuple));
@@ -219,14 +223,14 @@ SmartContract::Answer run_smartcont(SmartContract::State state, td::Ref<vm::Stac
     stack->dump(os, 2);
     LOG(DEBUG) << "VM stack:\n" << os.str();
   }
-  vm::VmState vm{state.code, std::move(stack), gas, 1, state.data, log};
+  int global_version = config ? config->get_global_version() : 0;
+  vm::VmState vm{state.code, global_version, std::move(stack), gas, 1, state.data, log};
   vm.set_c7(std::move(c7));
   vm.set_chksig_always_succeed(ignore_chksig);
   if (!libraries.is_null()) {
     vm.register_library_collection(libraries);
   }
   if (config) {
-    vm.set_global_version(config->get_global_version());
     auto r_limits = config->get_size_limits_config();
     if (r_limits.is_ok()) {
       vm.set_max_data_depth(r_limits.ok().max_vm_data_depth);

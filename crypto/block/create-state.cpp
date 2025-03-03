@@ -426,7 +426,7 @@ bool store_validator_list_hash(vm::CellBuilder& cb) {
   LOG_CHECK(vset) << "unpacked validator set is empty";
   auto ccvc = block::Config::unpack_catchain_validators_config(config_dict.lookup_ref(td::BitArray<32>{28}));
   ton::ShardIdFull shard{ton::masterchainId};
-  auto nodes = block::Config::do_compute_validator_set(ccvc, shard, *vset, now, 0);
+  auto nodes = block::Config::do_compute_validator_set(ccvc, shard, *vset, 0);
   LOG_CHECK(!nodes.empty()) << "validator node list in unpacked validator set is empty";
   auto vset_hash = block::compute_validator_set_hash(0, shard, std::move(nodes));
   LOG(DEBUG) << "initial validator set hash is " << vset_hash;
@@ -814,11 +814,16 @@ void usage(const char* progname) {
 void parse_include_path_set(std::string include_path_set, std::vector<std::string>& res) {
   td::Parser parser(include_path_set);
   while (!parser.empty()) {
-    auto path = parser.read_till_nofail(':');
+    #if TD_WINDOWS
+    auto path_separator = '@';
+    #else
+    auto path_separator = ':';
+    #endif
+    auto path = parser.read_till_nofail(path_separator);
     if (!path.empty()) {
       res.push_back(path.str());
     }
-    parser.skip_nofail(':');
+    parser.skip_nofail(path_separator);
   }
 }
 

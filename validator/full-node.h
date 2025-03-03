@@ -55,6 +55,23 @@ struct FullNodeConfig {
   bool ext_messages_broadcast_disabled_ = false;
 };
 
+struct FullNodeOptions {
+  FullNodeConfig config_;
+  double public_broadcast_speed_multiplier_ = 1.0;
+  double private_broadcast_speed_multiplier_ = 1.0;
+};
+
+struct CustomOverlayParams {
+  std::string name_;
+  std::vector<adnl::AdnlNodeIdShort> nodes_;
+  std::map<adnl::AdnlNodeIdShort, int> msg_senders_;
+  std::set<adnl::AdnlNodeIdShort> block_senders_;
+  std::vector<ShardIdFull> sender_shards_;
+
+  bool send_shard(const ShardIdFull& shard) const;
+  static CustomOverlayParams fetch(const ton_api::engine_validator_customOverlay& f);
+};
+
 class FullNode : public td::actor::Actor {
  public:
   virtual ~FullNode() = default;
@@ -74,10 +91,15 @@ class FullNode : public td::actor::Actor {
   virtual void update_adnl_id(adnl::AdnlNodeIdShort adnl_id, td::Promise<td::Unit> promise) = 0;
   virtual void set_config(FullNodeConfig config) = 0;
 
-  virtual void add_ext_msg_overlay(std::vector<adnl::AdnlNodeIdShort> nodes,
-                                   std::map<adnl::AdnlNodeIdShort, int> senders, std::string name,
-                                   td::Promise<td::Unit> promise) = 0;
-  virtual void del_ext_msg_overlay(std::string name, td::Promise<td::Unit> promise) = 0;
+  virtual void add_custom_overlay(CustomOverlayParams params, td::Promise<td::Unit> promise) = 0;
+  virtual void del_custom_overlay(std::string name, td::Promise<td::Unit> promise) = 0;
+
+  virtual void process_block_broadcast(BlockBroadcast broadcast) = 0;
+  virtual void process_block_candidate_broadcast(BlockIdExt block_id, CatchainSeqno cc_seqno,
+                                                 td::uint32 validator_set_hash, td::BufferSlice data) = 0;
+  virtual void get_out_msg_queue_query_token(td::Promise<std::unique_ptr<ActionToken>> promise) = 0;
+
+  virtual void set_validator_telemetry_filename(std::string value) = 0;
 
   static constexpr td::uint32 max_block_size() {
     return 4 << 20;
@@ -88,15 +110,14 @@ class FullNode : public td::actor::Actor {
   static constexpr td::uint64 max_state_size() {
     return 4ull << 30;
   }
+  enum { broadcast_mode_public = 1, broadcast_mode_private_block = 2, broadcast_mode_custom = 4 };
 
-  static td::actor::ActorOwn<FullNode> create(ton::PublicKeyHash local_id, adnl::AdnlNodeIdShort adnl_id,
-                                              FileHash zero_state_file_hash, FullNodeConfig config,
-                                              td::actor::ActorId<keyring::Keyring> keyring,
-                                              td::actor::ActorId<adnl::Adnl> adnl, td::actor::ActorId<rldp::Rldp> rldp,
-                                              td::actor::ActorId<rldp2::Rldp> rldp2, td::actor::ActorId<dht::Dht> dht,
-                                              td::actor::ActorId<overlay::Overlays> overlays,
-                                              td::actor::ActorId<ValidatorManagerInterface> validator_manager,
-                                              td::actor::ActorId<adnl::AdnlExtClient> client, std::string db_root);
+  static td::actor::ActorOwn<FullNode> create(
+      ton::PublicKeyHash local_id, adnl::AdnlNodeIdShort adnl_id, FileHash zero_state_file_hash, FullNodeOptions opts,
+      td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
+      td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<rldp2::Rldp> rldp2, td::actor::ActorId<dht::Dht> dht,
+      td::actor::ActorId<overlay::Overlays> overlays, td::actor::ActorId<ValidatorManagerInterface> validator_manager,
+      td::actor::ActorId<adnl::AdnlExtClient> client, std::string db_root, td::Promise<td::Unit> started_promise);
 };
 
 }  // namespace fullnode

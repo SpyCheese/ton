@@ -32,11 +32,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   BlockIdExt init_block_id() const override {
     return init_block_id_;
   }
-  bool need_monitor(ShardIdFull shard) const override {
-    return check_shard_(shard, 0, ShardCheckMode::m_monitor);
-  }
-  bool need_validate(ShardIdFull shard, CatchainSeqno cc_seqno) const override {
-    return check_shard_(shard, cc_seqno, ShardCheckMode::m_validate);
+  bool need_monitor(ShardIdFull shard, const td::Ref<MasterchainState>& state) const override {
+    td::uint32 min_split = state->monitor_min_split_depth(shard.workchain);
+    return check_shard_((td::uint32)shard.pfx_len() <= min_split ? shard : shard_prefix(shard, min_split));
   }
   bool allow_blockchain_init() const override {
     return allow_blockchain_init_;
@@ -129,6 +127,36 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   bool nonfinal_ls_queries_enabled() const override {
     return nonfinal_ls_queries_enabled_;
   }
+  td::optional<td::uint64> get_celldb_cache_size() const override {
+    return celldb_cache_size_;
+  }
+  bool get_celldb_direct_io() const override {
+    return celldb_direct_io_;
+  }
+  bool get_celldb_preload_all() const override {
+    return celldb_preload_all_;
+  }
+  bool get_celldb_in_memory() const override {
+    return celldb_in_memory_;
+  }
+  td::optional<double> get_catchain_max_block_delay() const override {
+    return catchain_max_block_delay_;
+  }
+  td::optional<double> get_catchain_max_block_delay_slow() const override {
+    return catchain_max_block_delay_slow_;
+  }
+  bool get_state_serializer_enabled() const override {
+    return state_serializer_enabled_;
+  }
+  td::Ref<CollatorOptions> get_collator_options() const override {
+    return collator_options_;
+  }
+  bool get_fast_state_serializer_enabled() const override {
+    return fast_state_serializer_enabled_;
+  }
+  double get_catchain_broadcast_speed_multiplier() const override {
+    return catchain_broadcast_speed_multipliers_;
+  }
   double get_bench_duplicate_collate_queries() const override {
     return bench_duplicate_collate_queries_;
   }
@@ -139,7 +167,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_init_block_id(BlockIdExt block_id) override {
     init_block_id_ = block_id;
   }
-  void set_shard_check_function(std::function<bool(ShardIdFull, CatchainSeqno, ShardCheckMode)> check_shard) override {
+  void set_shard_check_function(std::function<bool(ShardIdFull)> check_shard) override {
     check_shard_ = std::move(check_shard);
   }
   void set_allow_blockchain_init(bool value) override {
@@ -200,6 +228,36 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_nonfinal_ls_queries_enabled(bool value) override {
     nonfinal_ls_queries_enabled_ = value;
   }
+  void set_celldb_cache_size(td::uint64 value) override {
+    celldb_cache_size_ = value;
+  }
+  void set_celldb_direct_io(bool value) override {
+    celldb_direct_io_ = value;
+  }
+  void set_celldb_preload_all(bool value) override {
+    celldb_preload_all_ = value;
+  }
+  void set_celldb_in_memory(bool value) override {
+    celldb_in_memory_ = value;
+  }
+  void set_catchain_max_block_delay(double value) override {
+    catchain_max_block_delay_ = value;
+  }
+  void set_catchain_max_block_delay_slow(double value) override {
+    catchain_max_block_delay_slow_ = value;
+  }
+  void set_state_serializer_enabled(bool value) override {
+    state_serializer_enabled_ = value;
+  }
+  void set_collator_options(td::Ref<CollatorOptions> value) override {
+    collator_options_ = std::move(value);
+  }
+  void set_fast_state_serializer_enabled(bool value) override {
+    fast_state_serializer_enabled_ = value;
+  }
+  void set_catchain_broadcast_speed_multiplier(double value) override {
+    catchain_broadcast_speed_multipliers_ = value;
+  }
   void set_bench_duplicate_collate_queries(double value) override {
     bench_duplicate_collate_queries_ = value;
   }
@@ -209,11 +267,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   }
 
   ValidatorManagerOptionsImpl(BlockIdExt zero_block_id, BlockIdExt init_block_id,
-                              std::function<bool(ShardIdFull, CatchainSeqno, ShardCheckMode)> check_shard,
-                              bool allow_blockchain_init, double sync_blocks_before,
-                              double block_ttl, double state_ttl, double max_mempool_num,
-                              double archive_ttl, double key_proof_ttl,
-                              bool initial_sync_disabled)
+                              std::function<bool(ShardIdFull)> check_shard, bool allow_blockchain_init,
+                              double sync_blocks_before, double block_ttl, double state_ttl, double max_mempool_num,
+                              double archive_ttl, double key_proof_ttl, bool initial_sync_disabled)
       : zero_block_id_(zero_block_id)
       , init_block_id_(init_block_id)
       , check_shard_(std::move(check_shard))
@@ -230,7 +286,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
  private:
   BlockIdExt zero_block_id_;
   BlockIdExt init_block_id_;
-  std::function<bool(ShardIdFull, CatchainSeqno, ShardCheckMode)> check_shard_;
+  std::function<bool(ShardIdFull)> check_shard_;
   bool allow_blockchain_init_;
   double sync_blocks_before_;
   double block_ttl_;
@@ -250,6 +306,15 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   double archive_preload_period_ = 0.0;
   bool disable_rocksdb_stats_;
   bool nonfinal_ls_queries_enabled_ = false;
+  td::optional<td::uint64> celldb_cache_size_;
+  bool celldb_direct_io_ = false;
+  bool celldb_preload_all_ = false;
+  bool celldb_in_memory_ = false;
+  td::optional<double> catchain_max_block_delay_, catchain_max_block_delay_slow_;
+  bool state_serializer_enabled_ = true;
+  td::Ref<CollatorOptions> collator_options_{true};
+  bool fast_state_serializer_enabled_ = false;
+  double catchain_broadcast_speed_multipliers_;
   double bench_duplicate_collate_queries_ = 0.0;
 };
 

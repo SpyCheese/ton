@@ -28,8 +28,11 @@ cp ./result-bin/bin/* artifacts/
 test $? -eq 0 || { echo "No artifacts have been built..."; exit 1; }
 chmod +x artifacts/*
 rm -rf result-bin
+
 nix-build macos-tonlib.nix
+
 cp ./result/lib/libtonlibjson.dylib artifacts/
 cp ./result/lib/libemulator.dylib artifacts/
 cp ./result/lib/fift/* artifacts/lib/
 cp -r ./result/share/ton/smartcont artifacts/
+chmod -R +x artifacts
