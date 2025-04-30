@@ -139,6 +139,12 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   bool get_celldb_in_memory() const override {
     return celldb_in_memory_;
   }
+  bool get_celldb_v2() const override {
+    return celldb_v2_;
+  }
+  bool get_celldb_disable_bloom_filter() const override {
+    return celldb_disable_bloom_filter_;
+  }
   td::optional<double> get_catchain_max_block_delay() const override {
     return catchain_max_block_delay_;
   }
@@ -162,6 +168,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   }
   bool check_collator_node_whitelist(adnl::AdnlNodeIdShort id) const override {
     return !collator_node_whitelist_enabled_ || collator_node_whitelist_.contains(id);
+  }
+  td::Ref<ShardBlockVerifierConfig> get_shard_block_verifier_config() const override {
+    return shard_block_verifier_config_;
   }
 
   void set_zero_block_id(BlockIdExt block_id) override {
@@ -243,6 +252,12 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_celldb_in_memory(bool value) override {
     celldb_in_memory_ = value;
   }
+  void set_celldb_v2(bool value) override {
+    celldb_v2_ = value;
+  }
+  void set_celldb_disable_bloom_filter(bool value) override {
+    celldb_disable_bloom_filter_ = value;
+  }
   void set_catchain_max_block_delay(double value) override {
     catchain_max_block_delay_ = value;
   }
@@ -273,6 +288,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   }
   void set_collator_node_whitelist_enabled(bool enabled) override {
     collator_node_whitelist_enabled_ = enabled;
+  }
+  void set_shard_block_verifier_config(td::Ref<ShardBlockVerifierConfig> config) override {
+    shard_block_verifier_config_ = std::move(config);
   }
 
   ValidatorManagerOptionsImpl *make_copy() const override {
@@ -323,6 +341,8 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   bool celldb_direct_io_ = false;
   bool celldb_preload_all_ = false;
   bool celldb_in_memory_ = false;
+  bool celldb_v2_ = false;
+  bool celldb_disable_bloom_filter_ = false;
   td::optional<double> catchain_max_block_delay_, catchain_max_block_delay_slow_;
   bool state_serializer_enabled_ = true;
   td::Ref<CollatorOptions> collator_options_{true};
@@ -331,6 +351,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   td::Ref<CollatorsList> collators_list_{true, CollatorsList::default_list()};
   std::set<adnl::AdnlNodeIdShort> collator_node_whitelist_;
   bool collator_node_whitelist_enabled_ = false;
+  td::Ref<ShardBlockVerifierConfig> shard_block_verifier_config_{true};
 };
 
 }  // namespace validator

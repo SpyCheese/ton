@@ -1547,6 +1547,9 @@ td::Status ValidatorEngine::load_global_config() {
   if (zero_state.root_hash.is_zero() || zero_state.file_hash.is_zero()) {
     return td::Status::Error(ton::ErrorCode::error, "[validator] section contains incomplete [zero_state]");
   }
+  if (celldb_in_memory_ && celldb_v2_) {
+    return td::Status::Error(ton::ErrorCode::error, "at most one of --celldb-in-memory --celldb-v2 could be used");
+  }
 
   ton::BlockIdExt init_block;
   if (!conf.validator_->init_block_) {
@@ -1599,6 +1602,8 @@ td::Status ValidatorEngine::load_global_config() {
   }
   validator_options_.write().set_celldb_compress_depth(celldb_compress_depth_);
   validator_options_.write().set_celldb_in_memory(celldb_in_memory_);
+  validator_options_.write().set_celldb_v2(celldb_v2_);
+  validator_options_.write().set_celldb_disable_bloom_filter(celldb_disable_bloom_filter_);
   validator_options_.write().set_max_open_archive_files(max_open_archive_files_);
   validator_options_.write().set_archive_preload_period(archive_preload_period_);
   validator_options_.write().set_disable_rocksdb_stats(disable_rocksdb_stats_);
@@ -1700,6 +1705,36 @@ void ValidatorEngine::load_collators_list() {
   } else {
     LOG(ERROR) << "Invalid collators list: " << S.move_as_error();
     collators_list_ = {};
+  }
+}
+
+void ValidatorEngine::load_shard_block_verifier_config() {
+  shard_block_verifier_config_ = {};
+  auto data_R = td::read_file(shard_block_verifier_config_file());
+  if (data_R.is_error()) {
+    return;
+  }
+  auto data = data_R.move_as_ok();
+  auto json_R = td::json_decode(data.as_slice());
+  if (json_R.is_error()) {
+    LOG(ERROR) << "Failed to parse shard block verifier config: " << json_R.move_as_error();
+    return;
+  }
+  auto json = json_R.move_as_ok();
+  shard_block_verifier_config_ = ton::create_tl_object<ton::ton_api::engine_validator_shardBlockVerifierConfig>();
+  auto S = ton::ton_api::from_json(*shard_block_verifier_config_, json.get_object());
+  if (S.is_error()) {
+    LOG(ERROR) << "Failed to parse shard block verifier config: " << S;
+    shard_block_verifier_config_ = {};
+    return;
+  }
+  td::Ref<ton::validator::ShardBlockVerifierConfig> config{true};
+  S = config.write().unpack(*shard_block_verifier_config_);
+  if (S.is_ok()) {
+    validator_options_.write().set_shard_block_verifier_config(std::move(config));
+  } else {
+    LOG(ERROR) << "Invalid shard block verifier config: " << S.move_as_error();
+    shard_block_verifier_config_ = {};
   }
 }
 
@@ -2013,6 +2048,7 @@ void ValidatorEngine::got_key(ton::PublicKey key) {
 void ValidatorEngine::start() {
   set_shard_check_function();
   load_collators_list();
+  load_shard_block_verifier_config();
   read_config_ = true;
   start_adnl();
 }
@@ -2145,6 +2181,15 @@ void ValidatorEngine::start_validator() {
     for (auto &t : v.second.temp_keys) {
       td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::add_temp_key, t.first,
                               [](td::Unit) {});
+    }
+  }
+
+  if (!shard_block_retainer_adnl_id_.is_zero()) {
+    if (config_.adnl_ids.contains(shard_block_retainer_adnl_id_.pubkey_hash())) {
+      td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::add_shard_block_retainer,
+                              shard_block_retainer_adnl_id_);
+    } else {
+      LOG(ERROR) << "Cannot start shard block retainer: no adnl id " << shard_block_retainer_adnl_id_;
     }
   }
 
@@ -4969,6 +5014,55 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_delFastSy
   });
 }
 
+void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_setShardBlockVerifierConfig &query,
+                                        td::BufferSlice data, ton::PublicKeyHash src, td::uint32 perm,
+                                        td::Promise<td::BufferSlice> promise) {
+  if (!(perm & ValidatorEnginePermissions::vep_modify)) {
+    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::error, "not authorized")));
+    return;
+  }
+  if (!started_) {
+    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::notready, "not started")));
+    return;
+  }
+
+  td::Ref<ton::validator::ShardBlockVerifierConfig> config{true};
+  auto S = config.write().unpack(*query.config_);
+  if (S.is_error()) {
+    promise.set_value(create_control_query_error(S.move_as_error_prefix("Invalid config: ")));
+    return;
+  }
+  auto s = td::json_encode<std::string>(td::ToJson(*query.config_), true);
+  S = td::write_file(shard_block_verifier_config_file(), s);
+  if (S.is_error()) {
+    promise.set_value(create_control_query_error(std::move(S)));
+    return;
+  }
+  shard_block_verifier_config_ = std::move(query.config_);
+  validator_options_.write().set_shard_block_verifier_config(std::move(config));
+  td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::update_options,
+                          validator_options_);
+  promise.set_value(ton::serialize_tl_object(ton::create_tl_object<ton::ton_api::engine_validator_success>(), true));
+}
+
+void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_showShardBlockVerifierConfig &query,
+                                        td::BufferSlice data, ton::PublicKeyHash src, td::uint32 perm,
+                                        td::Promise<td::BufferSlice> promise) {
+  if (!(perm & ValidatorEnginePermissions::vep_default)) {
+    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::error, "not authorized")));
+    return;
+  }
+  if (!started_) {
+    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::notready, "not started")));
+    return;
+  }
+  if (shard_block_verifier_config_) {
+    promise.set_value(ton::serialize_tl_object(shard_block_verifier_config_, true));
+  } else {
+    promise.set_value(create_control_query_error(td::Status::Error("shard block verifier config is empty")));
+  }
+}
+
 void ValidatorEngine::process_control_query(td::uint16 port, ton::adnl::AdnlNodeIdShort src,
                                             ton::adnl::AdnlNodeIdShort dst, td::BufferSlice data,
                                             td::Promise<td::BufferSlice> promise) {
@@ -5194,7 +5288,7 @@ int main(int argc, char *argv[]) {
     acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_max_mempool_num, v); });
     return td::Status::OK();
   });
-  p.add_checked_option('b', "block-ttl", "blocks will be gc'd after this time (in seconds) default=86400",
+  p.add_checked_option('b', "block-ttl", "deprecated",
                        [&](td::Slice fname) {
                          auto v = td::to_double(fname);
                          if (v <= 0) {
@@ -5204,7 +5298,9 @@ int main(int argc, char *argv[]) {
                          return td::Status::OK();
                        });
   p.add_checked_option(
-      'A', "archive-ttl", "archived blocks will be deleted after this time (in seconds) default=7*86400",
+      'A', "archive-ttl",
+      "ttl for archived blocks (in seconds) default=7*86400. Note: archived blocks are gc'd after state-ttl + "
+      "archive-ttl seconds",
       [&](td::Slice fname) {
         auto v = td::to_double(fname);
         if (v <= 0) {
@@ -5214,7 +5310,7 @@ int main(int argc, char *argv[]) {
         return td::Status::OK();
       });
   p.add_checked_option(
-      'K', "key-proof-ttl", "key blocks will be deleted after this time (in seconds) default=365*86400*10",
+      'K', "key-proof-ttl", "deprecated",
       [&](td::Slice fname) {
         auto v = td::to_double(fname);
         if (v <= 0) {
@@ -5365,6 +5461,18 @@ int main(int argc, char *argv[]) {
       [&]() {
         acts.push_back([&x]() { td::actor::send_closure(x, &ValidatorEngine::set_celldb_in_memory, true); });
       });
+  p.add_option(
+      '\0', "celldb-v2",
+      "use new version off celldb",
+      [&]() {
+        acts.push_back([&x]() { td::actor::send_closure(x, &ValidatorEngine::set_celldb_v2, true); });
+      });
+  p.add_option(
+      '\0', "celldb-disable-bloom-filter",
+      "disable using bloom filter in CellDb. Enabled bloom filter reduces read latency, but increases memory usage", 
+      [&]() {
+        acts.push_back([&x]() { td::actor::send_closure(x, &ValidatorEngine::set_celldb_disable_bloom_filter, true); });
+      });
   p.add_checked_option(
       '\0', "catchain-max-block-delay", "delay before creating a new catchain block, in seconds (default: 0.4)",
       [&](td::Slice s) -> td::Status {
@@ -5408,7 +5516,7 @@ int main(int argc, char *argv[]) {
       });
   p.add_checked_option(
       '\0', "broadcast-speed-catchain",
-      "multiplier for broadcast speed in catchain overlays (experimental, default is 1.0, which is ~300 KB/s)",
+      "multiplier for broadcast speed in catchain overlays (experimental, default is 3.33, which is ~1 MB/s)",
       [&](td::Slice s) -> td::Status {
         auto v = td::to_double(s);
         if (v <= 0.0) {
@@ -5420,7 +5528,7 @@ int main(int argc, char *argv[]) {
       });
   p.add_checked_option(
       '\0', "broadcast-speed-public",
-      "multiplier for broadcast speed in public shard overlays (experimental, default is 1.0, which is ~300 KB/s)",
+      "multiplier for broadcast speed in public shard overlays (experimental, default is 3.33, which is ~1 MB/s)",
       [&](td::Slice s) -> td::Status {
         auto v = td::to_double(s);
         if (v <= 0.0) {
@@ -5432,7 +5540,7 @@ int main(int argc, char *argv[]) {
       });
   p.add_checked_option(
       '\0', "broadcast-speed-private",
-      "multiplier for broadcast speed in private block overlays (experimental, default is 1.0, which is ~300 KB/s)",
+      "multiplier for broadcast speed in private block overlays (experimental, default is 3.33, which is ~1 MB/s)",
       [&](td::Slice s) -> td::Status {
         auto v = td::to_double(s);
         if (v <= 0.0) {
@@ -5440,6 +5548,17 @@ int main(int argc, char *argv[]) {
         }
         acts.push_back(
             [&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_broadcast_speed_multiplier_private, v); });
+        return td::Status::OK();
+      });
+  p.add_checked_option(
+      '\0', "shard-block-retainer", "adnl id for shard block retainer (hex)", [&](td::Slice arg) -> td::Status {
+        td::Bits256 v;
+        if (v.from_hex(arg) != 256) {
+          return td::Status::Error("invalid adnl-id");
+        }
+        acts.push_back([&x, v]() {
+          td::actor::send_closure(x, &ValidatorEngine::set_shard_block_retainer_adnl_id, ton::adnl::AdnlNodeIdShort{v});
+        });
         return td::Status::OK();
       });
   auto S = p.run(argc, argv);

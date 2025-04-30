@@ -234,6 +234,8 @@ overlay.nodeV2 id:PublicKey overlay:int256 flags:int version:int signature:bytes
 overlay.nodes nodes:(vector overlay.node) = overlay.Nodes;
 overlay.nodesV2 nodes:(vector overlay.NodeV2) = overlay.NodesV2;
 
+overlay.pong = overlay.Pong;
+
 overlay.messageExtra flags:# certificate:flags.0?overlay.MemberCertificate = overlay.MessageExtra;
 overlay.message overlay:int256 = overlay.Message;
 overlay.messageWithExtra overlay:int256 extra:overlay.messageExtra = overlay.Message;
@@ -270,6 +272,7 @@ overlay.broadcastNotFound = overlay.Broadcast;
 
 overlay.getRandomPeers peers:overlay.nodes = overlay.Nodes;
 overlay.getRandomPeersV2 peers:overlay.NodesV2 = overlay.NodesV2;
+overlay.ping = overlay.Pong;
 
 overlay.query overlay:int256 = True;
 overlay.queryWithExtra overlay:int256 extra:overlay.messageExtra = True;
@@ -406,6 +409,7 @@ tonNode.preparedProof = tonNode.PreparedProof;
 tonNode.preparedProofLink = tonNode.PreparedProof;
 tonNode.preparedState = tonNode.PreparedState;
 tonNode.notFoundState = tonNode.PreparedState;
+tonNode.persistentStateSize size:long = tonNode.PersistentStateSize;
 tonNode.prepared = tonNode.Prepared;
 tonNode.notFound = tonNode.Prepared;
 tonNode.data data:bytes = tonNode.Data;
@@ -479,6 +483,7 @@ tonNode.prepareKeyBlockProofs blocks:(vector tonNode.blockIdExt) allow_partial:B
 tonNode.prepareBlock block:tonNode.blockIdExt = tonNode.Prepared;
 tonNode.prepareBlocks blocks:(vector tonNode.blockIdExt) = tonNode.Prepared;
 tonNode.preparePersistentState block:tonNode.blockIdExt masterchain_block:tonNode.blockIdExt = tonNode.PreparedState;
+tonNode.getPersistentStateSize block:tonNode.blockIdExt masterchain_block:tonNode.blockIdExt = tonNode.PersistentStateSize;
 tonNode.prepareZeroState block:tonNode.blockIdExt = tonNode.PreparedState;
 tonNode.getNextKeyBlockIds block:tonNode.blockIdExt max_size:int = tonNode.KeyBlocks;
 tonNode.downloadNextBlockFull prev_block:tonNode.blockIdExt = tonNode.DataFull;
@@ -691,6 +696,11 @@ engine.validator.collatorsList.shard shard_id:tonNode.shardId collators:(vector 
     self_collate:Bool select_mode:string = engine.validator.collatorsList.Shard;
 engine.validator.collatorsList shards:(vector engine.validator.collatorsList.shard) = engine.validator.CollatorsList;
 
+engine.validator.shardBlockVerifierConfig.shard shard_id:(tonNode.shardId) trusted_nodes:(vector int256)
+    required_confirms:int = engine.validator.shardBlockVerifierConfig.Shard;
+engine.validator.shardBlockVerifierConfig shards:(vector engine.validator.shardBlockVerifierConfig.shard)
+    = engine.validator.ShardBlockVerifierConfig;
+
 ---functions---
 ---types---
 
@@ -734,7 +744,8 @@ engine.validator.overlayStatsTraffic t_out_bytes:long t_in_bytes:long t_out_pckt
 
 engine.validator.overlayStatsNode adnl_id:int256 ip_addr:string is_neighbour:Bool is_alive:Bool node_flags:int
     bdcst_errors:int fec_bdcst_errors:int last_in_query:int last_out_query:int
-    traffic:engine.validator.overlayStatsTraffic traffic_responses:engine.validator.overlayStatsTraffic = engine.validator.OverlayStatsNode;
+    traffic:engine.validator.overlayStatsTraffic traffic_responses:engine.validator.overlayStatsTraffic
+    last_ping_at:double last_ping_time:double = engine.validator.OverlayStatsNode;
 
 engine.validator.overlayStats overlay_id:int256 overlay_id_full:PublicKey adnl_id:int256 scope:string
     nodes:(vector engine.validator.overlayStatsNode) stats:(vector engine.validator.oneStat)
@@ -849,6 +860,9 @@ engine.validator.importFastSyncMemberCertificate adnl_id:int256 certificate:over
 engine.validator.addFastSyncClient adnl_id:int256 slot:int = engine.validator.Success;
 engine.validator.delFastSyncClient adnl_id:int256 = engine.validator.Success;
 
+engine.validator.setShardBlockVerifierConfig config:engine.validator.shardBlockVerifierConfig = engine.validator.Success;
+engine.validator.showShardBlockVerifierConfig = engine.validator.ShardBlockVerifierConfig;
+
 ---types---
 
 storage.pong = storage.Pong;
@@ -956,10 +970,15 @@ collatorNode.compressedCandidate flags:# source:PublicKey id:tonNode.blockIdExt 
 collatorNode.pong flags:# = collatorNode.Pong;
 collatorNode.error code:int message:string = collatorNode.Error;
 
+shardBlockVerifier.subscribed flags:# = shardBlockVerifier.Subscribed;
+shardBlockVerifier.confirmBlocks blocks:(vector tonNode.blockIdExt) = shardBlockVerifier.ConfirmBlocks;
+
 ---functions---
 collatorNode.generateBlock shard:tonNode.shardId cc_seqno:int prev_blocks:(vector tonNode.blockIdExt)
     creator:int256 round:int first_block_round:int priority:int = collatorNode.Candidate;
 collatorNode.ping flags:# = collatorNode.Pong;
+
+shardBlockVerifier.subscribe shard:tonNode.shardId flags:# = shardBlockVerifier.Subscribed;
 
 ---types---
 

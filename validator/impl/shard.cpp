@@ -390,12 +390,12 @@ td::Status MasterchainStateQ::mc_reinit() {
 
   auto cv_root = config_->get_config_param(35, 34);
   if (cv_root.not_null()) {
-    TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(cv_root)));
+    TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(cv_root), true));
     cur_validators_ = std::move(validators);
   }
   auto nv_root = config_->get_config_param(37, 36);
   if (nv_root.not_null()) {
-    TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(nv_root)));
+    TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(nv_root), true));
     next_validators_ = std::move(validators);
   }
 
@@ -501,11 +501,11 @@ std::vector<Ref<McShardHash>> MasterchainStateQ::get_shards() const {
   return v;
 }
 
-td::Ref<McShardHash> MasterchainStateQ::get_shard_from_config(ShardIdFull shard) const {
+td::Ref<McShardHash> MasterchainStateQ::get_shard_from_config(ShardIdFull shard, bool exact) const {
   if (!config_) {
     return {};
   }
-  return config_->get_shard_hash(shard);
+  return config_->get_shard_hash(shard, exact);
 }
 
 bool MasterchainStateQ::rotated_all_shards() const {

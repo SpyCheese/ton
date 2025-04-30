@@ -916,6 +916,10 @@ td::Status GetOverlaysStatsQuery::receive(td::BufferSlice data) {
          << "\n";
       sb << "   is_neighbour: " << n->is_neighbour_ << "  is_alive: " << n->is_alive_
          << "  node_flags: " << n->node_flags_ << "\n";
+      if (n->last_ping_time_ >= 0.0) {
+        sb << "   last_ping_at: " << (td::uint32)n->last_ping_at_ << " (" << time_to_human((td::uint32)n->last_ping_at_)
+           << ")  last_ping_time: " << n->last_ping_time_ << "\n";
+      }
       print_traffic("throughput", "   ", n->traffic_);
       print_traffic("throughput (responses only)", "   ", n->traffic_responses_);
     }
@@ -981,8 +985,12 @@ td::Status GetOverlaysStatsJsonQuery::receive(td::BufferSlice data) {
          << ",\n    \"last_in_query_unix\": " << n->last_in_query_ << ",\n    \"last_in_query_human\": \""
          << time_to_human(n->last_in_query_) << "\",\n"
          << "    \"last_out_query_unix\": " << n->last_out_query_ << ",\n    \"last_out_query_human\": \""
-         << time_to_human(n->last_out_query_) << "\",\n"
-         << "\n    ";
+         << time_to_human(n->last_out_query_) << "\",\n";
+      if (n->last_ping_time_ >= 0.0) {
+        sb << "    \"last_ping_at\": " << (td::uint32)n->last_ping_at_ << ", \"last_ping_at_human\": \""
+           << time_to_human((td::uint32)n->last_ping_at_) << "\", \"last_ping_time\": " << n->last_ping_time_ << ",\n";
+      }
+      sb << "\n    ";
       print_traffic("throughput", n->traffic_);
       sb << ",\n    ";
       print_traffic("throughput_responses", n->traffic_responses_);
@@ -1936,5 +1944,79 @@ td::Status DelFastSyncOverlayClientQuery::receive(td::BufferSlice data) {
   TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
                     "received incorrect answer: ");
   td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status SetShardBlockVerifierConfigQuery::run() {
+  TRY_RESULT_ASSIGN(file_name_, tokenizer_.get_token<std::string>());
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status SetShardBlockVerifierConfigQuery::send() {
+  TRY_RESULT(data, td::read_file(file_name_));
+  TRY_RESULT(json, td::json_decode(data.as_slice()));
+  auto list = ton::create_tl_object<ton::ton_api::engine_validator_shardBlockVerifierConfig>();
+  TRY_STATUS(ton::ton_api::from_json(*list, json.get_object()));
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_setShardBlockVerifierConfig>(std::move(list));
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status SetShardBlockVerifierConfigQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status ClearShardBlockVerifierConfigQuery::run() {
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status ClearShardBlockVerifierConfigQuery::send() {
+  auto list = ton::create_tl_object<ton::ton_api::engine_validator_shardBlockVerifierConfig>();
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_setShardBlockVerifierConfig>(std::move(list));
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status ClearShardBlockVerifierConfigQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(f, ton::fetch_tl_object<ton::ton_api::engine_validator_success>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << "success\n";
+  return td::Status::OK();
+}
+
+td::Status ShowShardBlockVerifierConfigQuery::run() {
+  TRY_STATUS(tokenizer_.check_endl());
+  return td::Status::OK();
+}
+
+td::Status ShowShardBlockVerifierConfigQuery::send() {
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_showShardBlockVerifierConfig>();
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status ShowShardBlockVerifierConfigQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(
+      config, ton::fetch_tl_object<ton::ton_api::engine_validator_shardBlockVerifierConfig>(data.as_slice(), true),
+      "received incorrect answer: ");
+  td::TerminalIO::out() << "Shard block verifier config:\n";
+  if (config->shards_.empty()) {
+    td::TerminalIO::out() << "Config is empty\n";
+    return td::Status::OK();
+  }
+  for (const auto &shard : config->shards_) {
+    td::TerminalIO::out() << "Shard " << create_shard_id(shard->shard_id_).to_str() << "\n";
+    td::TerminalIO::out() << "  Required confirms = " << shard->required_confirms_ << "/"
+                          << shard->trusted_nodes_.size() << "\n";
+    td::TerminalIO::out() << "  Trusted nodes:\n";
+    for (const auto &node : shard->trusted_nodes_) {
+      td::TerminalIO::out() << "    " << node << "\n";
+    }
+  }
   return td::Status::OK();
 }

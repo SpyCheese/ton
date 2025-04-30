@@ -633,6 +633,23 @@ bool ValidateQuery::extract_collated_data_from(Ref<vm::Cell> croot, int idx) {
     top_shard_descr_dict_ = std::make_unique<vm::Dictionary>(cs.prefetch_ref(), 96);
     return true;
   }
+  if (block::gen::t_AccountStorageDictProof.has_valid_tag(cs)) {
+    if (!block::gen::t_AccountStorageDictProof.validate_upto(10000, cs)) {
+      return reject_query("invalid AccountStorageDictProof");
+    }
+    // account_storage_dict_proof#37c1e3fc proof:^Cell = AccountStorageDictProof;
+    Ref<vm::Cell> proof = cs.prefetch_ref();
+    auto virt_root = vm::MerkleProof::virtualize(proof, 1);
+    if (virt_root.is_null()) {
+      return reject_query("invalid Merkle proof in AccountStorageDictProof");
+    }
+    LOG(DEBUG) << "collated datum # " << idx << " is an AccountStorageDictProof with hash "
+               << virt_root->get_hash().to_hex();
+    if (!virt_account_storage_dicts_.emplace(virt_root->get_hash().bits(), virt_root).second) {
+      return reject_query("duplicate AccountStorageDictProof");
+    }
+    return true;
+  }
   LOG(WARNING) << "collated datum # " << idx << " has unknown type (magic " << cs.prefetch_ulong(32) << "), ignoring";
   return true;
 }
@@ -994,6 +1011,7 @@ bool ValidateQuery::fetch_config_params() {
     compute_phase_cfg_.size_limits = size_limits;
     compute_phase_cfg_.precompiled_contracts = config_->get_precompiled_contracts_config();
     compute_phase_cfg_.allow_external_unfreeze = compute_phase_cfg_.global_version >= 8;
+    compute_phase_cfg_.disable_anycast = config_->get_global_version() >= 10;
   }
   {
     // compute action_phase_cfg
@@ -1021,6 +1039,13 @@ bool ValidateQuery::fetch_config_params() {
     action_phase_cfg_.disable_custom_fess = config_->get_global_version() >= 8;
     action_phase_cfg_.reserve_extra_enabled = config_->get_global_version() >= 9;
     action_phase_cfg_.mc_blackhole_addr = config_->get_burning_config().blackhole_addr;
+    action_phase_cfg_.extra_currency_v2 = config_->get_global_version() >= 10;
+    action_phase_cfg_.disable_anycast = config_->get_global_version() >= 10;
+  }
+  {
+    serialize_cfg_.extra_currency_v2 = config_->get_global_version() >= 10;
+    serialize_cfg_.disable_anycast = config_->get_global_version() >= 10;
+    serialize_cfg_.store_storage_dict_hash = config_->get_global_version() >= 11;
   }
   {
     // fetch block_grams_created
@@ -1776,11 +1801,13 @@ void ValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<
  * @param sibling The sibling shard information.
  * @param wc_info The workchain information.
  * @param ccvc The Catchain validators configuration.
+ * @param is_new Set to true if the top shard block is new, false if it existed in the previous shard configuration.
  *
  * @returns True if the validation wasa successful, false otherwise.
  */
 bool ValidateQuery::check_one_shard(const block::McShardHash& info, const block::McShardHash* sibling,
-                                    const block::WorkchainInfo* wc_info, const block::CatchainValidatorsConfig& ccvc) {
+                                    const block::WorkchainInfo* wc_info, const block::CatchainValidatorsConfig& ccvc,
+                                    bool& is_new) {
   auto shard = info.shard();
   LOG(DEBUG) << "checking shard " << shard.to_str() << " in new shard configuration";
   if (info.next_validator_shard_ != shard.shard) {
@@ -1789,6 +1816,7 @@ bool ValidateQuery::check_one_shard(const block::McShardHash& info, const block:
                         ton::ShardIdFull{shard.workchain, info.next_validator_shard_}.to_str());
   }
   auto old = old_shard_conf_->get_shard_hash(shard - 1, false);
+  is_new = (old.is_null() || old->top_block_id() != info.top_block_id());
   Ref<block::McShardHash> prev;
   CatchainSeqno cc_seqno;
   bool old_before_merge = false, fsm_inherited = false, workchain_created = false;
@@ -2088,8 +2116,10 @@ bool ValidateQuery::check_shard_layout() {
   WorkchainId wc_id{ton::workchainInvalid};
   Ref<block::WorkchainInfo> wc_info;
 
-  if (!new_shard_conf_->process_sibling_shard_hashes([self = this, &wc_set, &wc_id, &wc_info, &ccvc](
-                                                         block::McShardHash& cur, const block::McShardHash* sibling) {
+  std::vector<BlockIdExt> new_top_shard_blocks;
+  if (!new_shard_conf_->process_sibling_shard_hashes([self = this, &new_top_shard_blocks, &wc_set, &wc_id, &wc_info,
+                                                      &ccvc](block::McShardHash& cur,
+                                                             const block::McShardHash* sibling) {
         if (!cur.is_valid()) {
           return -2;
         }
@@ -2106,7 +2136,15 @@ bool ValidateQuery::check_shard_layout() {
             wc_info = it->second;
           }
         }
-        return self->check_one_shard(cur, sibling, wc_info.get(), ccvc) ? 0 : -1;
+        bool is_new;
+        int res = self->check_one_shard(cur, sibling, wc_info.get(), ccvc, is_new);
+        if (!res) {
+          return -1;
+        }
+        if (is_new) {
+          new_top_shard_blocks.push_back(cur.top_block_id());
+        }
+        return 0;
       })) {
     return reject_query("new shard configuration is invalid");
   }
@@ -2122,6 +2160,14 @@ bool ValidateQuery::check_shard_layout() {
       return reject_query(PSTRING() << "workchain " << pair.first
                                     << " is active, but is absent from new shard configuration");
     }
+  }
+  if (!new_top_shard_blocks.empty()) {
+    ++pending;
+    td::actor::send_closure(manager, &ValidatorManager::wait_verify_shard_blocks, std::move(new_top_shard_blocks),
+                            [SelfId = actor_id(this)](td::Result<td::Unit> R) {
+                              td::actor::send_closure(SelfId, &ValidateQuery::verified_shard_blocks,
+                                                      R.move_as_status());
+                            });
   }
   return check_mc_validator_info(is_key_block_ || (now_ / ccvc.mc_cc_lifetime > prev_now_ / ccvc.mc_cc_lifetime));
 }
@@ -2323,6 +2369,23 @@ void ValidateQuery::got_out_queue_size(size_t i, td::Result<td::uint64> res) {
   td::uint64 size = res.move_as_ok();
   LOG(DEBUG) << "got outbound queue size from prev block #" << i << ": " << size;
   old_out_msg_queue_size_ += size;
+  try_validate();
+}
+
+/**
+ * Handles the result of ValidatorManager::wait_verify_shard_blocks.
+ *
+ * This is called after new top shard blocks were confirmed by trusted nodes.
+ *
+ * @param S The status of the operation (OK on success).
+ */
+void ValidateQuery::verified_shard_blocks(td::Status S) {
+  --pending;
+  if (S.is_error()) {
+    fatal_error(S.move_as_error_prefix("failed to verify shard blocks: "));
+    return;
+  }
+  LOG(DEBUG) << "Verified shard blocks";
   try_validate();
 }
 
@@ -5248,6 +5311,18 @@ std::unique_ptr<block::Account> ValidateQuery::unpack_account(td::ConstBitPtr ad
                            << " does not really belong to current shard");
     return {};
   }
+  if (new_acc->storage_dict_hash) {
+    auto it = virt_account_storage_dicts_.find(new_acc->storage_dict_hash.value());
+    if (it != virt_account_storage_dicts_.end()) {
+      LOG(DEBUG) << "Using account storage dict proof for account " << addr.to_hex(256)
+                 << ", hash=" << it->second->get_hash().to_hex();
+      auto S = new_acc->init_account_storage_stat(it->second);
+      if (S.is_error()) {
+        reject_query(PSTRING() << "Failed to init account storage stat for account " << addr.to_hex(256), std::move(S));
+        return {};
+      }
+    }
+  }
   return new_acc;
 }
 
@@ -5707,7 +5782,7 @@ bool ValidateQuery::check_one_transaction(block::Account& account, ton::LogicalT
     return reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
-  if (!trs->serialize()) {
+  if (!trs->serialize(serialize_cfg_)) {
     return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }

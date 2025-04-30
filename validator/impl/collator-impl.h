@@ -114,14 +114,11 @@ class Collator final : public td::actor::Actor {
     return 2;
   }
 
-  static td::Result<std::unique_ptr<block::transaction::Transaction>>
-                        impl_create_ordinary_transaction(Ref<vm::Cell> msg_root,
-                                                         block::Account* acc,
-                                                         UnixTime utime, LogicalTime lt,
-                                                         block::StoragePhaseConfig* storage_phase_cfg,
-                                                         block::ComputePhaseConfig* compute_phase_cfg,
-                                                         block::ActionPhaseConfig* action_phase_cfg,
-                                                         bool external, LogicalTime after_lt);
+  static td::Result<std::unique_ptr<block::transaction::Transaction>> impl_create_ordinary_transaction(
+      Ref<vm::Cell> msg_root, block::Account* acc, UnixTime utime, LogicalTime lt,
+      block::StoragePhaseConfig* storage_phase_cfg, block::ComputePhaseConfig* compute_phase_cfg,
+      block::ActionPhaseConfig* action_phase_cfg, block::SerializeConfig* serialize_cfg, bool external,
+      LogicalTime after_lt);
 
  private:
   void start_up() override;
@@ -184,9 +181,11 @@ class Collator final : public td::actor::Actor {
   block::StoragePhaseConfig storage_phase_cfg_{&storage_prices_};
   block::ComputePhaseConfig compute_phase_cfg_;
   block::ActionPhaseConfig action_phase_cfg_;
+  block::SerializeConfig serialize_cfg_;
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
   std::unique_ptr<block::BlockLimits> block_limits_;
   std::unique_ptr<block::BlockLimitStatus> block_limit_status_;
+  vm::ProofStorageStat collated_data_stat;
   int block_limit_class_ = 0;
   ton::LogicalTime min_new_msg_lt{std::numeric_limits<td::uint64>::max()};
   block::CurrencyCollection total_balance_, old_total_balance_, total_validator_fees_;
@@ -222,6 +221,15 @@ class Collator final : public td::actor::Actor {
   std::vector<vm::MerkleProofBuilder> neighbor_proof_builders_;
   std::vector<Ref<vm::Cell>> collated_roots_;
 
+  struct AccountStorageDict {
+    bool inited = false;
+    vm::MerkleProofBuilder mpb;
+    vm::ProofStorageStat proof_stat;
+    bool add_to_collated_data = false;
+    std::vector<Ref<vm::Cell>> storage_stat_updates;
+  };
+  std::map<td::Bits256, AccountStorageDict> account_storage_dicts_;
+
   std::unique_ptr<ton::BlockCandidate> block_candidate;
 
   std::unique_ptr<vm::AugmentedDictionary> dispatch_queue_, old_dispatch_queue_;
@@ -247,6 +255,7 @@ class Collator final : public td::actor::Actor {
   block::Account* lookup_account(td::ConstBitPtr addr) const;
   std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account,
                                                     bool force_create);
+  bool init_account_storage_dict(block::Account& account);
   td::Result<block::Account*> make_account(td::ConstBitPtr addr, bool force_create = false);
   td::actor::ActorId<Collator> get_self() {
     return actor_id(this);
@@ -345,7 +354,9 @@ class Collator final : public td::actor::Actor {
   bool register_out_msg_queue_op(bool force = false);
   bool register_dispatch_queue_op(bool force = false);
   bool update_account_dict_estimation(const block::transaction::Transaction& trans);
+  void update_account_storage_dict_info(const block::transaction::Transaction& trans);
   bool update_min_mc_seqno(ton::BlockSeqno some_mc_seqno);
+  bool process_account_storage_dict(const block::Account& account);
   bool combine_account_transactions();
   bool update_public_libraries();
   bool update_account_public_libraries(Ref<vm::Cell> orig_libs, Ref<vm::Cell> final_libs, const td::Bits256& addr);
@@ -394,6 +405,11 @@ class Collator final : public td::actor::Actor {
   CollationStats stats_;
 
   void finalize_stats();
+
+  AccountStorageDict* current_tx_storage_dict_ = nullptr;
+
+  void on_cell_loaded(const vm::LoadedCell& cell);
+  void set_current_tx_storage_dict(const block::Account& account);
 };
 
 }  // namespace validator

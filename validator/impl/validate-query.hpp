@@ -170,6 +170,7 @@ class ValidateQuery : public td::actor::Actor {
   std::vector<Ref<vm::Cell>> collated_roots_;
   std::map<RootHash, Ref<vm::Cell>> virt_roots_;
   std::unique_ptr<vm::Dictionary> top_shard_descr_dict_;
+  std::map<td::Bits256, Ref<vm::Cell>> virt_account_storage_dicts_;
 
   Ref<vm::CellSlice> shard_hashes_;              // from McBlockExtra
   Ref<vm::CellSlice> blk_config_params_;         // from McBlockExtra
@@ -207,6 +208,7 @@ class ValidateQuery : public td::actor::Actor {
   block::StoragePhaseConfig storage_phase_cfg_{&storage_prices_};
   block::ComputePhaseConfig compute_phase_cfg_;
   block::ActionPhaseConfig action_phase_cfg_;
+  block::SerializeConfig serialize_cfg_;
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
   std::vector<block::McShardDescr> neighbors_;
@@ -321,7 +323,7 @@ class ValidateQuery : public td::actor::Actor {
   void after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res);
 
   bool check_one_shard(const block::McShardHash& info, const block::McShardHash* sibling,
-                       const block::WorkchainInfo* wc_info, const block::CatchainValidatorsConfig& ccvc);
+                       const block::WorkchainInfo* wc_info, const block::CatchainValidatorsConfig& ccvc, bool& is_new);
   bool check_shard_layout();
   bool register_shard_block_creators(std::vector<td::Bits256> creator_list);
   bool check_cur_validator_set();
@@ -329,6 +331,7 @@ class ValidateQuery : public td::actor::Actor {
   bool check_utime_lt();
   bool prepare_out_msg_queue_size();
   void got_out_queue_size(size_t i, td::Result<td::uint64> res);
+  void verified_shard_blocks(td::Status S);
 
   bool fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::ShardIdFull owner, bool allow_cur = false);
   bool fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur = false);
