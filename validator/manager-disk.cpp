@@ -64,7 +64,7 @@ void ValidatorManagerImpl::validate_block(ReceivedBlock block, td::Promise<Block
   UNREACHABLE();
 }
 
-void ValidatorManagerImpl::prevalidate_block(BlockBroadcast broadcast, td::Promise<td::Unit> promise) {
+void ValidatorManagerImpl::new_block_broadcast(BlockBroadcast broadcast, td::Promise<td::Unit> promise) {
   UNREACHABLE();
 }
 
@@ -277,7 +277,8 @@ void ValidatorManagerImpl::new_ihr_message(td::BufferSlice data) {
   }
 }
 
-void ValidatorManagerImpl::new_shard_block(BlockIdExt block_id, CatchainSeqno cc_seqno, td::BufferSlice data) {
+void ValidatorManagerImpl::new_shard_block_description_broadcast(BlockIdExt block_id, CatchainSeqno cc_seqno,
+                                                                 td::BufferSlice data) {
   if (!last_masterchain_block_handle_) {
     shard_blocks_raw_.push_back(std::move(data));
     return;
@@ -322,8 +323,8 @@ void ValidatorManagerImpl::wait_block_state(BlockHandle handle, td::uint32 prior
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), handle](td::Result<td::Ref<ShardState>> R) {
       td::actor::send_closure(SelfId, &ValidatorManagerImpl::finished_wait_state, handle->id(), std::move(R));
     });
-    auto id = td::actor::create_actor<WaitBlockState>("waitstate", handle, 0, actor_id(this), td::Timestamp::in(10.0),
-                                                      std::move(P))
+    auto id = td::actor::create_actor<WaitBlockState>("waitstate", handle, 0, opts_, last_masterchain_state_,
+                                                      actor_id(this), td::Timestamp::in(10.0), std::move(P))
                   .release();
     wait_state_[handle->id()].actor_ = id;
     it = wait_state_.find(handle->id());
@@ -529,7 +530,7 @@ void ValidatorManagerImpl::get_shard_blocks_for_collator(
   }
   if (!shard_blocks_raw_.empty()) {
     for (auto &raw : shard_blocks_raw_) {
-      new_shard_block(BlockIdExt{}, 0, std::move(raw));
+      new_shard_block_description_broadcast(BlockIdExt{}, 0, std::move(raw));
     }
     shard_blocks_raw_.clear();
   }
@@ -687,6 +688,16 @@ void ValidatorManagerImpl::set_block_state(BlockHandle handle, td::Ref<ShardStat
   td::actor::send_closure(db_, &Db::store_block_state, handle, state, std::move(promise));
 }
 
+void ValidatorManagerImpl::set_block_state_from_data(BlockHandle handle, td::Ref<BlockData> block,
+                                                     td::Promise<td::Ref<ShardState>> promise) {
+  td::actor::send_closure(db_, &Db::store_block_state_from_data, handle, block, std::move(promise));
+}
+
+void ValidatorManagerImpl::set_block_state_from_data_preliminary(std::vector<td::Ref<BlockData>> blocks,
+                                                                 td::Promise<td::Unit> promise) {
+  td::actor::send_closure(db_, &Db::store_block_state_from_data_preliminary, std::move(blocks), std::move(promise));
+}
+
 void ValidatorManagerImpl::get_cell_db_reader(td::Promise<std::shared_ptr<vm::CellDbReader>> promise) {
   td::actor::send_closure(db_, &Db::get_cell_db_reader, std::move(promise));
 }
@@ -787,8 +798,9 @@ void ValidatorManagerImpl::set_block_candidate(BlockIdExt id, BlockCandidate can
 }
 
 void ValidatorManagerImpl::send_block_candidate_broadcast(BlockIdExt id, CatchainSeqno cc_seqno,
-                                                          td::uint32 validator_set_hash, td::BufferSlice data) {
-  callback_->send_block_candidate(id, cc_seqno, validator_set_hash, std::move(data));
+                                                          td::uint32 validator_set_hash, td::BufferSlice data,
+                                                          int mode) {
+  callback_->send_block_candidate(id, cc_seqno, validator_set_hash, std::move(data), mode);
 }
 
 void ValidatorManagerImpl::write_handle(BlockHandle handle, td::Promise<td::Unit> promise) {
@@ -948,7 +960,7 @@ void ValidatorManagerImpl::update_shard_blocks() {
   }
   if (!shard_blocks_raw_.empty()) {
     for (auto &raw : shard_blocks_raw_) {
-      new_shard_block(BlockIdExt{}, 0, std::move(raw));
+      new_shard_block_description_broadcast(BlockIdExt{}, 0, std::move(raw));
     }
     shard_blocks_raw_.clear();
   }
