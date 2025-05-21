@@ -36,7 +36,8 @@ AccountStorageStat::AccountStorageStat(const AccountStorageStat* parent)
   CHECK(parent_->parent_ == nullptr);
 }
 
-td::Status AccountStorageStat::replace_roots(std::vector<Ref<vm::Cell>> new_roots, bool check_merkle_depth) {
+td::Status AccountStorageStat::replace_roots(std::vector<Ref<vm::Cell>> new_roots, bool check_merkle_depth,
+                                             td::HashSet<vm::CellHash>* store_added) {
   std::erase_if(new_roots, [](const Ref<vm::Cell>& c) { return c.is_null(); });
   if (new_roots.empty()) {
     roots_.clear();
@@ -73,6 +74,9 @@ td::Status AccountStorageStat::replace_roots(std::vector<Ref<vm::Cell>> new_root
   roots_ = std::move(new_roots);
   dict_up_to_date_ = false;
   for (auto& [_, e] : cache_) {
+    if (store_added && !e.exists && e.refcnt_diff > 0) {
+      store_added->insert(e.hash);
+    }
     TRY_STATUS(finalize_entry(e));
   }
   return td::Status::OK();
@@ -154,7 +158,7 @@ td::Status AccountStorageStat::remove_cell(const Ref<vm::Cell>& cell) {
   if (e.refcnt_diff < 0 && !e.refcnt) {
     TRY_STATUS(fetch_from_dict(e));
   }
-  if (e.refcnt.value() + e.refcnt_diff != 0) {
+  if (e.refcnt_diff >= 0 || e.refcnt.value() + e.refcnt_diff != 0) {
     return td::Status::OK();
   }
   bool spec;
