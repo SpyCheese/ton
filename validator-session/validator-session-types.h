@@ -143,7 +143,9 @@ struct ValidatorSessionStats {
         signers_str[i] = '0' + signers[i];
       }
       int flags =
-          (block_status != status_none ? ton_api::validatorStats_stats_producer::Flags::BLOCK_ID_MASK : 0) |
+          (block_status != status_none || !candidate_id.is_zero()
+               ? ton_api::validatorStats_stats_producer::Flags::BLOCK_ID_MASK
+               : 0) |
           (collated_at >= 0.0 ? ton_api::validatorStats_stats_producer::Flags::COLLATED_AT_MASK : 0) |
           (!collator_node_id.is_zero() ? ton_api::validatorStats_stats_producer::Flags::COLLATOR_NODE_ID_MASK : 0) |
           (validated_at >= 0.0 ? ton_api::validatorStats_stats_producer::Flags::VALIDATED_AT_MASK : 0) |
@@ -223,19 +225,24 @@ struct NewValidatorGroupStats {
   CatchainSeqno cc_seqno = 0;
   BlockSeqno last_key_block_seqno = 0;
   double started_at = -1.0;
+  std::vector<BlockIdExt> prev;
   td::uint32 self_idx = 0;
   PublicKeyHash self = PublicKeyHash::zero();
   std::vector<Node> nodes;
 
   tl_object_ptr<ton_api::validatorStats_newValidatorGroup> tl() const {
+    std::vector<tl_object_ptr<ton_api::tonNode_blockIdExt>> prev_arr;
+    for (const auto &p : prev) {
+      prev_arr.push_back(create_tl_block_id(p));
+    }
     std::vector<tl_object_ptr<ton_api::validatorStats_newValidatorGroup_node>> nodes_arr;
     for (const auto &node : nodes) {
       nodes_arr.push_back(create_tl_object<ton_api::validatorStats_newValidatorGroup_node>(
           node.id.bits256_value(), node.pubkey.tl(), node.adnl_id.bits256_value(), node.weight));
     }
-    return create_tl_object<ton_api::validatorStats_newValidatorGroup>(session_id, create_tl_shard_id(shard), cc_seqno,
-                                                                       last_key_block_seqno, started_at, self_idx,
-                                                                       self.bits256_value(), std::move(nodes_arr));
+    return create_tl_object<ton_api::validatorStats_newValidatorGroup>(
+        session_id, create_tl_shard_id(shard), cc_seqno, last_key_block_seqno, started_at, std::move(prev_arr),
+        self_idx, self.bits256_value(), std::move(nodes_arr));
   }
 };
 
