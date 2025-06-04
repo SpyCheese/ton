@@ -913,7 +913,7 @@ validatorStats.stats.producer flags:#
   validator_id:int256 block_status:int
   candidate_id:flags.0?int256 block_id:flags.0?tonNode.blockIdExt collated_data_hash:flags.0?int256
   is_accepted:flags.0?Bool is_ours:flags.0?Bool
-  got_block_at:flags.0?double got_submit_at:flags.0?double gen_utime:flags.0?int comment:flags.0?string
+  got_block_at:flags.0?double got_block_by:flags.0?int got_submit_at:flags.0?double gen_utime:flags.0?int comment:flags.0?string
   collation_time:flags.1?double collated_at:flags.1?double collation_cached:flags.1?Bool self_collated:flags.1?Bool collator_node_id:flags.2?int256
   validation_time:flags.3?double validated_at:flags.3?double validation_cached:flags.3?Bool
   approved_weight:flags.0?long approved_33pct_at:flags.0?double approved_66pct_at:flags.0?double approvers:flags.0?string
@@ -933,11 +933,18 @@ validatorStats.stats flags:#
 validatorStats.blockLimitsStatus
     bytes:int gas:int lt_delta:int collated_data_bytes:int
     cat_bytes:int cat_gas:int cat_lt_delta:int cat_collated_data_bytes:int
+    load_fraction_queue_cleanup:double load_fraction_dispatch:double
+    load_fraction_internals:double load_fraction_externals:double
+    load_fraction_new_msgs:double
     limits_log:string = validatorStats.BlockLimitsStatus;
-validatorStats.extMsgsStats
+validatorStats.blockStats.extMsgsStats
     ext_msgs_total:int ext_msgs_filtered:int ext_msgs_accepted:int ext_msgs_rejected:int = validatorStats.ExtMsgsStats;
+validatorStats.blockStats.neighborStats shard:tonNode.shardId is_trivial:Bool is_local:Bool msg_limit:int
+    processed_msgs:int skipped_msgs:int limit_reached:Bool = validatorStats.blockStats.NeighborStats;
 validatorStats.blockStats
-    ext_msgs:validatorStats.extMsgsStats transactions:int = validatorStats.BlockStats;
+    ext_msgs:validatorStats.blockStats.extMsgsStats transactions:int shard_configuration:(vector tonNode.blockIdExt)
+    old_out_msg_queue_size:long new_out_msg_queue_size:long msg_queue_cleaned:int
+    neighbors:(vector validatorStats.blockStats.neighborStats) = validatorStats.BlockStats;
 
 validatorStats.collatedBlock
     block_id:tonNode.blockIdExt collated_data_hash:int256 cc_seqno:int collated_at:double

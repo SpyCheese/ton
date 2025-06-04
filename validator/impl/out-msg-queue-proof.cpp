@@ -196,7 +196,7 @@ td::Result<std::vector<td::Ref<OutMsgQueueProof>>> OutMsgQueueProof::fetch(Shard
       if (state_root->get_hash().as_slice() != state_root_hash.as_slice()) {
         return td::Status::Error("state root hash mismatch");
       }
-      res.emplace_back(true, blocks[i], state_root, block_state_proof, f.msg_counts_[i]);
+      res.emplace_back(true, blocks[i], state_root, block_state_proof, false, f.msg_counts_[i]);
 
       data[i].first = blocks[i];
       TRY_RESULT(state, ShardStateQ::fetch(blocks[i], {}, state_root));
@@ -346,7 +346,7 @@ void OutMsgQueueImporter::get_proof_local(std::shared_ptr<CacheEntry> entry, Blo
         auto state = R.move_as_ok();
         if (block.seqno() == 0) {
           std::vector<td::Ref<OutMsgQueueProof>> proof = {
-              td::Ref<OutMsgQueueProof>(true, block, state->root_cell(), td::Ref<vm::Cell>{})};
+              td::Ref<OutMsgQueueProof>(true, block, state->root_cell(), td::Ref<vm::Cell>{}, true)};
           td::actor::send_closure(SelfId, &OutMsgQueueImporter::got_proof, entry, std::move(proof), ProofSource::Local);
           return;
         }
@@ -362,7 +362,7 @@ void OutMsgQueueImporter::get_proof_local(std::shared_ptr<CacheEntry> entry, Blo
               }
               Ref<vm::Cell> block_state_proof = create_block_state_proof(R.ok()->root_cell()).move_as_ok();
               std::vector<td::Ref<OutMsgQueueProof>> proof = {
-                  td::Ref<OutMsgQueueProof>(true, block, state->root_cell(), std::move(block_state_proof))};
+                  td::Ref<OutMsgQueueProof>(true, block, state->root_cell(), std::move(block_state_proof), true)};
               td::actor::send_closure(SelfId, &OutMsgQueueImporter::got_proof, entry, std::move(proof),
                                       ProofSource::Local);
             });
@@ -528,11 +528,11 @@ void OutMsgQueueImporter::alarm() {
     td::remove_if(it->second.pending_entries,
                   [](const std::shared_ptr<CacheEntry>& entry) { return entry->done || entry->promises.empty(); });
     if (it->second.timeout.is_in_past()) {
-        if (it->second.pending_entries.empty()) {
-            it = small_cache_.erase(it);
-        } else {
-            ++it;
-        }
+      if (it->second.pending_entries.empty()) {
+        it = small_cache_.erase(it);
+      } else {
+        ++it;
+      }
     } else {
       alarm_timestamp().relax(it->second.timeout);
       ++it;
@@ -571,6 +571,33 @@ void BuildOutMsgQueueProof::abort_query(td::Status reason) {
 }
 
 void BuildOutMsgQueueProof::start_up() {
+  if (blocks_.size() > 16) {
+    abort_query(td::Status::Error("too many blocks"));
+    return;
+  }
+  td::actor::send_closure(manager_, &ValidatorManagerInterface::get_top_masterchain_state,
+                          [SelfId = actor_id(this)](td::Result<Ref<MasterchainState>> R) {
+                            if (R.is_error()) {
+                              td::actor::send_closure(SelfId, &BuildOutMsgQueueProof::abort_query,
+                                                      R.move_as_error_prefix("failed to get masterchain state: "));
+                            } else {
+                              td::actor::send_closure(SelfId, &BuildOutMsgQueueProof::got_masterchain_state,
+                                                      R.move_as_ok());
+                            }
+                          });
+}
+
+void BuildOutMsgQueueProof::got_masterchain_state(Ref<MasterchainState> mc_state) {
+  auto config_limits = mc_state->get_imported_msg_queue_limits(dst_shard_.is_masterchain());
+  if ((td::uint64)config_limits.max_msgs * blocks_.size() < limits_.max_msgs) {
+    abort_query(td::Status::Error("too big max_msgs"));
+    return;
+  }
+  if ((td::uint64)config_limits.max_bytes * blocks_.size() < limits_.max_bytes) {
+    abort_query(td::Status::Error("too big max_bytes"));
+    return;
+  }
+
   for (size_t i = 0; i < blocks_.size(); ++i) {
     BlockIdExt id = blocks_[i].id;
     ++pending;
