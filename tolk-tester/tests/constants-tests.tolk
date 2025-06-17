@@ -22,12 +22,20 @@ const nibbles: int = 4;
 const strange_zero = (!10 as int);
 const strange_minus_1: MInt = (!0 as int);
 
+const addr1 = address("Ef8zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM0vF");
+
 const true1 = true;
 const true2 = !!true;
 const true3 = true1 && true2;
 
 const false1 = !true;
 const false2 = false1 || false;
+
+const tens1 = (1, 2);
+const tens2: (int, int, (int8, int16)) = (tens1.1, tens1.0 << 2, tens1);
+
+const intOrN: int? = null;
+const int32Or64: int32 | int64 = 7 as int64;
 
 fun iget1(): int { return int1; }
 fun iget2(): int { return int2; }
@@ -47,13 +55,13 @@ fun iget240(): MInt { return int240; }
 fun newc(): builder
 asm "NEWC";
 @pure
-fun endcs(b: builder): slice
+fun builder.endcs(self): slice
 asm "ENDC" "CTOS";
 @pure
 fun sdeq(s1: slice, s2: slice): MInt
 asm "SDEQ";
 @pure
-fun stslicer(b: builder, s: slice): builder
+fun builder.stslicer(self, s: slice): builder
 asm "STSLICER";
 
 @method_id(101)
@@ -69,6 +77,23 @@ fun test2() {
 @method_id(103)
 fun test3() {
     return (false1, false2);
+}
+
+@method_id(104)
+fun test4() {
+    __expect_type(tens1, "(int, int)");
+    return (tens1.0, tens2.2);
+}
+
+@method_id(105)
+fun test5() {
+    return (intOrN == null, int32Or64 is int32, int32Or64);
+}
+
+@method_id(106)
+fun test6() {
+    __expect_type(addr1, "address");
+    return (addr1 == addr1, addr1 != addr1, addr1 == createAddressNone(), addr1.getWorkchain());
 }
 
 fun main() {
@@ -98,6 +123,9 @@ fun main() {
 @testcase | 101 |   | 0 -1
 @testcase | 102 |   | -1 -1 -1
 @testcase | 103 |   | 0 0
+@testcase | 104 |   | 1 1 2
+@testcase | 105 |   | -1 0 7 48
+@testcase | 106 |   | -1 0 0 -1
 
-@code_hash 28102194299745406750019953961984060488024870092664444642078578246708959881688
+@code_hash 85012002134196298607946339234948178079079623823648671175958399073436861460061
 */

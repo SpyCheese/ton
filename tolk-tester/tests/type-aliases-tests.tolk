@@ -1,3 +1,5 @@
+import "@stdlib/tvm-dicts.tolk"
+
 type MIntN = MInt?;
 type MInt = int;
 type MInt_v2 = int;
@@ -7,6 +9,12 @@ type Pair2_v2 = (MInt, MInt);
 type MBool = bool;
 type Tuple2Int = [int, int];
 
+struct Point { x: int; y: int }
+type PointAlias = Point;
+type PointAlias2 = PointAlias;
+
+fun rand(): uint256
+    asm "RANDU256";
 
 fun test1(x: MInt): MVoid {
     var y = x;
@@ -21,20 +29,24 @@ fun test1(x: MInt): MVoid {
     __expect_type(~x, "int");
     __expect_type(x as int, "int");
     __expect_type(x as int8, "int8");
-    __expect_type(random() ? x : y, "MInt");
+    __expect_type(rand() ? x : y, "MInt");
     __expect_type((x, 1, y), "(MInt, int, MInt)");
 
-    __expect_type(random() ? (1, 2) : (1, 2) as Pair2_v1, "(int, int)");
-    __expect_type(random() ? (1, 2) : (1, 2) as Pair2_v2, "(int, int)");
-    __expect_type(random() ? (1, 2) as Pair2_v1 : (1, 2), "Pair2_v1");
-    __expect_type(random() ? (1, 2) as Pair2_v1 : (1, 2) as Pair2_v2, "(int, int)");
-    __expect_type(random() ? (1, 2) as Pair2_v2 : (1, 2) as Pair2_v2, "Pair2_v2");
+    __expect_type(rand() ? (1, 2) : (1, 2) as Pair2_v1, "(int, int)");
+    __expect_type(rand() ? (1, 2) : (1, 2) as Pair2_v2, "(int, int)");
+    __expect_type(rand() ? (1, 2) as Pair2_v1 : (1, 2), "Pair2_v1");
+    __expect_type(rand() ? (1, 2) as Pair2_v1 : (1, 2) as Pair2_v2, "(int, int)");
+    __expect_type(rand() ? (1, 2) as Pair2_v2 : (1, 2) as Pair2_v2, "Pair2_v2");
 
     __expect_type(!x, "bool");
 
     __expect_type(x as int?, "int?");
     __expect_type(x as MInt?, "MInt?");
     __expect_type(x as MIntN, "MIntN");
+
+    __expect_type(PointAlias{x:0,y:0}, "Point");
+    __expect_type(PointAlias2{x:0,y:0}, "Point");
+    __expect_type(Point{x:0,y:0} as PointAlias, "PointAlias");
 
     if (x) { return; }
 }
@@ -66,10 +78,10 @@ fun test4(x: MIntN, y: MIntN) {
     }
     __expect_type(x, "MInt?");
     __expect_type(x!, "MInt");
-    __expect_type(random() ? x : y, "MInt?");
-    __expect_type(random() ? x : 0, "MInt?");
-    __expect_type(random() ? 0 : x, "int?");
-    __expect_type(random() ? 0 : x!, "int");
+    __expect_type(rand() ? x : y, "MInt?");
+    __expect_type(rand() ? x : 0, "MInt?");
+    __expect_type(rand() ? 0 : x, "int?");
+    __expect_type(rand() ? 0 : x!, "int");
     return y!;
 }
 
@@ -165,6 +177,27 @@ fun test11() {
     __expect_type(analyzeTensor2(x3), "(MInt, MInt)?");
 }
 
+fun dict.getFakeDepth(self) { return 1; }
+fun cell.getFakeDepth(self) { return 2; }
+
+@method_id(112)
+fun test12(makeNotNull: bool) {
+    var d = createEmptyDict();
+    if (makeNotNull) {
+        d.iDictSet(32, 123, "");
+    }
+    var t = createEmptyTuple();
+    if (d != null) {
+        __expect_type(d.getFakeDepth, "(cell) -> int");
+        t.push(d.getFakeDepth());
+    } else {
+        __expect_type(d.getFakeDepth, "(dict) -> int");
+        t.push(d.getFakeDepth());
+    }
+    t.push(d.getFakeDepth());
+    return t;
+}
+
 
 fun main(x: MInt, y: MInt?) {
     return y == null ? x : x + y;
@@ -174,15 +207,16 @@ fun main(x: MInt, y: MInt?) {
 @testcase | 0   | 3 4 | 7
 @testcase | 104 | 1 2 | 3
 @testcase | 110 |     | 41
+@testcase | 112 | 0   | [ 1 1 ]
+@testcase | 112 | -1  | [ 2 1 ]
 
 @fif_codegen
 """
-  test9 PROC:<{
-    //  b
-    DUP	//  b b
+  test9 PROC:<{ //  b
+    DUP	        //  b b
     IFNOTJMP:<{	//  b
       NOT	//  '2
-    }>	//  b
+    }>	    //  b
     DROP	//
     TRUE	//  '5
   }>

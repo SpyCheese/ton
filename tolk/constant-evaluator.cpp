@@ -17,6 +17,7 @@
 #include "constant-evaluator.h"
 #include "ast.h"
 #include "tolk.h"
+#include "type-system.h"
 #include "openssl/digest.hpp"
 #include "crypto/common/util.h"
 #include "td/utils/crypto.h"
@@ -73,9 +74,9 @@ static bool parse_raw_address(std::string_view acc_string, int& workchain, ton::
     int x;
     if (c >= '0' && c <= '9') {
       x = c - '0';
-    } else if (c >= 'a' && c <= 'z') {
+    } else if (c >= 'a' && c <= 'f') {
       x = c - 'a' + 10;
-    } else if (c >= 'A' && c <= 'Z') {
+    } else if (c >= 'A' && c <= 'F') {
       x = c - 'A' + 10;
     } else {
       return false;
@@ -88,6 +89,23 @@ static bool parse_raw_address(std::string_view acc_string, int& workchain, ton::
     }
   }
   return true;
+}
+
+static void parse_any_std_address(std::string_view str, SrcLocation loc, unsigned char (*data)[3 + 8 + 256]) {
+  ton::WorkchainId workchain;
+  ton::StdSmcAddress addr;
+  bool correct = (str.size() == 48 && parse_friendly_address(str.data(), workchain, addr)) ||
+                 (str.size() != 48 && parse_raw_address(str, workchain, addr));
+  if (!correct) {
+    throw ParseError(loc, "invalid standard address");
+  }
+  if (workchain < -128 || workchain >= 128) {
+    throw ParseError(loc, "anycast addresses not supported");
+  }
+
+  td::bitstring::bits_store_long_top(*data, 0, static_cast<uint64_t>(4) << (64 - 3), 3);
+  td::bitstring::bits_store_long_top(*data, 3, static_cast<uint64_t>(workchain) << (64 - 8), 8);
+  td::bitstring::bits_memcpy(*data, 3 + 8, addr.bits().ptr, 0, ton::StdSmcAddress::size());
 }
 
 // internal helper: for `ton("0.05")`, parse string literal "0.05" to 50000000
@@ -106,6 +124,7 @@ static td::RefInt256 parse_nanotons_as_floating_string(SrcLocation loc, std::str
   // parse "0.05" into integer part (before dot) and fractional (after)
   int64_t integer_part = 0;
   int64_t fractional_part = 0;
+  int integer_digits = 0;
   int fractional_digits = 0;
   bool seen_dot = false;
 
@@ -119,6 +138,9 @@ static td::RefInt256 parse_nanotons_as_floating_string(SrcLocation loc, std::str
     } else if (c >= '0' && c <= '9') {
       if (!seen_dot) {
         integer_part = integer_part * 10 + (c - '0');
+        if (++integer_digits > 9) {
+          throw ParseError(loc, "argument is too big and leads to overflow");
+        }
       } else if (fractional_digits < 9) {
         fractional_part = fractional_part * 10 + (c - '0');
         fractional_digits++;
@@ -137,16 +159,24 @@ static td::RefInt256 parse_nanotons_as_floating_string(SrcLocation loc, std::str
   return td::make_refint(is_negative ? -result : result);
 }
 
-static ConstantValue parse_vertex_string_const(V<ast_string_const> v) {
-  td::Slice str_slice = td::Slice(v->str_val.data(), v->str_val.size());
-  return ConstantValue(td::hex_encode(str_slice));
-}
-
 // given `ton("0.05")` evaluate it to 50000000
 // given `stringCrc32("some_str")` evaluate it
 // etc.
-// currently, all compile-time functions accept 1 argument, a literal string
-static ConstantValue parse_vertex_call_to_compile_time_function(V<ast_function_call> v, std::string_view f_name) {
+static CompileTimeFunctionResult parse_vertex_call_to_compile_time_function(V<ast_function_call> v, std::string_view f_name) {
+  // most functions accept 1 argument, but static compile-time methods like `MyStruct.getDeclaredPackPrefix()` have 0 args
+  if (v->get_num_args() == 0) {
+    TypePtr receiver = v->fun_maybe->receiver_type;
+    f_name = v->fun_maybe->method_name;
+
+    if (f_name == "getDeclaredPackPrefix" || f_name == "getDeclaredPackPrefixLen") {
+      const TypeDataStruct* t_struct = receiver->try_as<TypeDataStruct>();
+      if (!t_struct || !t_struct->struct_ref->opcode.exists()) {
+        throw ParseError(v->loc, "type `" + receiver->as_human_readable() + "` does not have a serialization prefix");
+      }
+      return td::make_refint(f_name.ends_with('x') ? t_struct->struct_ref->opcode.pack_prefix : t_struct->struct_ref->opcode.prefix_len);
+    }
+  }
+
   tolk_assert(v->get_num_args() == 1);    // checked by type inferring
   AnyExprV v_arg = v->get_arg(0)->get_expr();
 
@@ -163,46 +193,33 @@ static ConstantValue parse_vertex_call_to_compile_time_function(V<ast_function_c
   }
 
   if (f_name == "ton") {
-    return ConstantValue(parse_nanotons_as_floating_string(v_arg->loc, str));
+    return parse_nanotons_as_floating_string(v_arg->loc, str);
+  }
+
+  if (f_name == "address")     {          // previously, postfix "..."a, but it returned `slice` (now returns `address`)
+    unsigned char data[3 + 8 + 256];      // addr_std$10 anycast:(Maybe Anycast) workchain_id:int8 address:bits256 = MsgAddressInt;
+    parse_any_std_address(str, v_arg->loc, &data);
+    return td::BitSlice{data, sizeof(data)}.to_hex();
   }
 
   if (f_name == "stringCrc32") {          // previously, postfix "..."c
-    return ConstantValue(td::make_refint(td::crc32(td::Slice{str.data(), str.size()})));
+    return td::make_refint(td::crc32(td::Slice{str.data(), str.size()}));
   }
 
   if (f_name == "stringCrc16") {          // previously, there was no postfix in FunC, no way to calc at compile-time
-    return ConstantValue(td::make_refint(td::crc16(td::Slice{str.data(), str.size()})));
+    return td::make_refint(td::crc16(td::Slice{str.data(), str.size()}));
   }
 
   if (f_name == "stringSha256") {         // previously, postfix "..."H
     unsigned char hash[32];
     digest::hash_str<digest::SHA256>(hash, str.data(), str.size());
-    return ConstantValue(td::bits_to_refint(hash, 256, false));
+    return td::bits_to_refint(hash, 256, false);
   }
 
   if (f_name == "stringSha256_32") {      // previously, postfix "..."h
     unsigned char hash[32];
     digest::hash_str<digest::SHA256>(hash, str.data(), str.size());
-    return ConstantValue(td::bits_to_refint(hash, 32, false));
-  }
-
-  if (f_name == "stringAddressToSlice") { // previously, postfix "..."a
-    ton::WorkchainId workchain;
-    ton::StdSmcAddress addr;
-    bool correct = (str.size() == 48 && parse_friendly_address(str.data(), workchain, addr)) ||
-                   (str.size() != 48 && parse_raw_address(str, workchain, addr));
-    if (!correct) {
-      v_arg->error("invalid standard address");
-    }
-    if (workchain < -128 || workchain >= 128) {
-      v_arg->error("anycast addresses not supported");
-    }
-
-    unsigned char data[3 + 8 + 256];  // addr_std$10 anycast:(Maybe Anycast) workchain_id:int8 address:bits256 = MsgAddressInt;
-    td::bitstring::bits_store_long_top(data, 0, static_cast<uint64_t>(4) << (64 - 3), 3);
-    td::bitstring::bits_store_long_top(data, 3, static_cast<uint64_t>(workchain) << (64 - 8), 8);
-    td::bitstring::bits_memcpy(data, 3 + 8, addr.bits().ptr, 0, ton::StdSmcAddress::size());
-    return ConstantValue(td::BitSlice{data, sizeof(data)}.to_hex());
+    return td::bits_to_refint(hash, 32, false);
   }
 
   if (f_name == "stringHexToSlice") {     // previously, postfix "..."s
@@ -211,7 +228,7 @@ static ConstantValue parse_vertex_call_to_compile_time_function(V<ast_function_c
     if (bits < 0) {
       v_arg->error("invalid hex bitstring constant");
     }
-    return ConstantValue(static_cast<std::string>(str));
+    return static_cast<std::string>(str);
   }
 
   if (f_name == "stringToBase256") {      // previously, postfix "..."u
@@ -222,149 +239,63 @@ static ConstantValue parse_vertex_call_to_compile_time_function(V<ast_function_c
     if (intval.is_null()) {
       v_arg->error("too long integer ascii-constant");
     }
-    return ConstantValue(std::move(intval));
+    return std::move(intval);
   }
 
   tolk_assert(false);
-  return ConstantValue();
 }
 
 
-struct ConstantEvaluator {
-  static bool is_overflow(const td::RefInt256& intval) {
-    return intval.is_null() || !intval->signed_fits_bits(257);
+struct ConstantExpressionChecker {
+  static void handle_unary_operator(V<ast_unary_operator> v) {
+    visit(v->get_rhs());
   }
 
-  static ConstantValue handle_unary_operator(V<ast_unary_operator> v, const ConstantValue& rhs) {
-    tolk_assert(rhs.is_int());   // type inferring has passed before, so it's int/bool
-    td::RefInt256 intval = rhs.as_int();
-
-    switch (v->tok) {
-      case tok_minus:
-        intval = -intval;
-        break;
-      case tok_plus:
-        break;
-      case tok_bitwise_not:
-        intval = ~intval;
-        break;
-      case tok_logical_not:
-        intval = td::make_refint(intval == 0 ? -1 : 0);
-        break;
-      default:
-        v->error("not a constant expression");
-    }
-
-    if (is_overflow(intval)) {
-      v->error("integer overflow");
-    }
-    return ConstantValue(std::move(intval));
-  }
-
-  static ConstantValue handle_binary_operator(V<ast_binary_operator> v, const ConstantValue& lhs, const ConstantValue& rhs) {
-    tolk_assert(lhs.is_int() && rhs.is_int());   // type inferring has passed before, so they are int/bool
-    td::RefInt256 lhs_intval = lhs.as_int();
-    td::RefInt256 rhs_intval = rhs.as_int();
-    td::RefInt256 intval;
-
-    switch (v->tok) {
-      case tok_minus:
-        intval = lhs_intval - rhs_intval;
-        break;
-      case tok_plus:
-        intval = lhs_intval + rhs_intval;
-        break;
-      case tok_mul:
-        intval = lhs_intval * rhs_intval;
-        break;
-      case tok_div:
-        intval = lhs_intval / rhs_intval;
-        break;
-      case tok_mod:
-        intval = lhs_intval % rhs_intval;
-        break;
-      case tok_lshift:
-        intval = lhs_intval << static_cast<int>(rhs_intval->to_long());
-        break;
-      case tok_rshift:
-        intval = lhs_intval >> static_cast<int>(rhs_intval->to_long());
-        break;
-      case tok_bitwise_and:
-        intval = lhs_intval & rhs_intval;
-        break;
-      case tok_bitwise_or:
-        intval = lhs_intval | rhs_intval;
-        break;
-      case tok_bitwise_xor:
-        intval = lhs_intval ^ rhs_intval;
-        break;
-      case tok_eq:
-        intval = td::make_refint(lhs_intval == rhs_intval ? -1 : 0);
-        break;
-      case tok_lt:
-        intval = td::make_refint(lhs_intval < rhs_intval ? -1 : 0);
-        break;
-      case tok_gt:
-        intval = td::make_refint(lhs_intval > rhs_intval ? -1 : 0);
-        break;
-      case tok_leq:
-        intval = td::make_refint(lhs_intval <= rhs_intval ? -1 : 0);
-        break;
-      case tok_geq:
-        intval = td::make_refint(lhs_intval >= rhs_intval ? -1 : 0);
-        break;
-      case tok_neq:
-        intval = td::make_refint(lhs_intval != rhs_intval ? -1 : 0);
-        break;
-      case tok_logical_and:
-        intval = td::make_refint(lhs_intval != 0 && rhs_intval != 0 ? -1 : 0);
-        break;
-      case tok_logical_or:
-        intval = td::make_refint(lhs_intval != 0 || rhs_intval != 0 ? -1 : 0);
-        break;
-      default:
-        v->error("unsupported binary operator in constant expression");
-    }
-
-    if (is_overflow(intval)) {
-      v->error("integer overflow");
-    }
-    return ConstantValue(std::move(intval));
+  static void handle_binary_operator(V<ast_binary_operator> v) {
+    visit(v->get_lhs());
+    visit(v->get_rhs());
   }
 
   // `const a = 1 + b`, we met `b`
-  static ConstantValue handle_reference(V<ast_reference> v) {
+  static void handle_reference(V<ast_reference> v) {
     GlobalConstPtr const_ref = v->sym->try_as<GlobalConstPtr>();
     if (!const_ref) {
       v->error("symbol `" + static_cast<std::string>(v->get_name()) + "` is not a constant");
     }
-
-    if (!const_ref->value.initialized()) {          // maybe, `b` was already calculated
-      eval_and_assign_const_init_value(const_ref);  // if not, dig recursively into `b`
-    }
-    return const_ref->value;
   }
 
   // `const a = ton("0.05")`, we met `ton("0.05")`
-  static ConstantValue handle_function_call(V<ast_function_call> v) {
-    if (v->fun_maybe && v->fun_maybe->is_compile_time_only()) {
-      return parse_vertex_call_to_compile_time_function(v, v->fun_maybe->name);
+  static void handle_function_call(V<ast_function_call> v) {
+    if (v->fun_maybe && v->fun_maybe->is_compile_time_const_val()) {
+      // `ton(local_var)` is denied; it's validated not here, but when replacing its value with a calculated one
+      return;
     }
     v->error("not a constant expression");
   }
 
-  static ConstantValue visit(AnyExprV v) {
-    if (auto v_int = v->try_as<ast_int_const>()) {
-      return ConstantValue(v_int->intval);
+  // `const a = (1, 2)`, why not; or it's a default value of a field
+  static void handle_tensor(V<ast_tensor> v) {
+    for (int i = 0; i < v->size(); ++i) {
+      visit(v->get_item(i));
     }
-    if (auto v_bool = v->try_as<ast_bool_const>()) {
-      return ConstantValue(v_bool->bool_val ? -1 : 0);
+  }
+
+  // `a: Options = {}`, object literal may occur as a default value for parameters
+  static void handle_object_literal(V<ast_object_body> v) {
+    for (int i = 0; i < v->get_num_fields(); ++i) {
+      visit(v->get_field(i)->get_init_val());
+    }
+  }
+
+  static void visit(AnyExprV v) {
+    if (v->try_as<ast_int_const>() || v->try_as<ast_bool_const>() || v->try_as<ast_string_const>() || v->try_as<ast_null_keyword>()) {
+      return;
     }
     if (auto v_unop = v->try_as<ast_unary_operator>()) {
-      return handle_unary_operator(v_unop, visit(v_unop->get_rhs()));
+      return handle_unary_operator(v_unop);
     }
     if (auto v_binop = v->try_as<ast_binary_operator>()) {
-      return handle_binary_operator(v_binop, visit(v_binop->get_lhs()), visit(v_binop->get_rhs()));
+      return handle_binary_operator(v_binop);
     }
     if (auto v_ref = v->try_as<ast_reference>()) {
       return handle_reference(v_ref);
@@ -372,50 +303,48 @@ struct ConstantEvaluator {
     if (auto v_call = v->try_as<ast_function_call>()) {
       return handle_function_call(v_call);
     }
+    if (auto v_tensor = v->try_as<ast_tensor>()) {
+      return handle_tensor(v_tensor);
+    }
+    if (auto v_obj = v->try_as<ast_object_literal>()) {
+      return handle_object_literal(v_obj->get_body());
+    }
     if (auto v_par = v->try_as<ast_parenthesized_expression>()) {
       return visit(v_par->get_expr());
     }
     if (auto v_cast_to = v->try_as<ast_cast_as_operator>()) {
       return visit(v_cast_to->get_expr());
     }
-    if (auto v_string = v->try_as<ast_string_const>()) {
-      return parse_vertex_string_const(v_string);
+    if (auto v_dot = v->try_as<ast_dot_access>(); v_dot && (v_dot->is_target_indexed_access() || v_dot->is_target_fun_ref())) {
+      return visit(v_dot->get_obj());
     }
     v->error("not a constant expression");
   }
 
-  // evaluate `2 + 3` into 5
-  // type inferring has already passed, to types are correct, `1 + ""` can not occur
+  // check that `2 + 3` is constant
+  // type inferring has already passed, so types are correct, `1 + ""` can not occur
   // if v is not a constant expression like `foo()`, an exception is thrown
-  static ConstantValue eval_expression_expected_to_be_constant(AnyExprV v) {
-    return visit(v);
+  static void check_expression_expected_to_be_constant(AnyExprV v) {
+    visit(v);
   }
 };
 
-ConstantValue eval_string_const_standalone(AnyExprV v_string) {
-  auto v = v_string->try_as<ast_string_const>();
-  tolk_assert(v);
-  return parse_vertex_string_const(v);
+void check_expression_is_constant(AnyExprV v_expr) {
+  ConstantExpressionChecker::check_expression_expected_to_be_constant(v_expr);
 }
 
-ConstantValue eval_call_to_compile_time_function(AnyExprV v_call) {
+std::string eval_string_const_standalone(AnyExprV v_string) {
+  auto v = v_string->try_as<ast_string_const>();
+  tolk_assert(v);
+  td::Slice str_slice = td::Slice(v->str_val.data(), v->str_val.size());
+  return td::hex_encode(str_slice);
+}
+
+CompileTimeFunctionResult eval_call_to_compile_time_function(AnyExprV v_call) {
   auto v = v_call->try_as<ast_function_call>();
-  tolk_assert(v && v->fun_maybe->is_compile_time_only());
+  tolk_assert(v && v->fun_maybe->is_compile_time_const_val());
   return parse_vertex_call_to_compile_time_function(v, v->fun_maybe->name);
 }
 
-// evaluate `2 + 3` into `5`
-// if v is not a constant expression like `gVar`, an exception is thrown
-ConstantValue eval_expression_expected_to_be_constant(AnyExprV v) {
-  return ConstantEvaluator::eval_expression_expected_to_be_constant(v);
-}
-
-// evaluate `const a = 2 + 3` into `const a = 5`
-// recursive initializers `const a = b; const b = a` don't exist, checked on type inferring
-// if init_value is not a constant expression like `const a = foo()`, an exception is thrown
-void eval_and_assign_const_init_value(GlobalConstPtr const_ref) {
-  ConstantValue init_value = ConstantEvaluator::eval_expression_expected_to_be_constant(const_ref->init_value);
-  const_ref->mutate()->assign_const_value(std::move(init_value));
-}
 
 } // namespace tolk

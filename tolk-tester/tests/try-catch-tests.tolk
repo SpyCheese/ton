@@ -236,6 +236,16 @@ fun testCodegen3(numberId: int, paramVal: cell) {
   paramVal.beginParse();
 }
 
+@method_id(113)
+fun testBigExcno() {
+  try {
+    throw 2048;
+    return 10;
+  } catch (excno) {
+    return excno;
+  }
+}
+
 fun main() {
 }
 
@@ -264,13 +274,13 @@ fun main() {
 @testcase | 110 | 0     | 5
 @testcase | 111 | -1    | 123
 @testcase | 111 | 0     | 456
+@testcase | 113 |       | 2048
 
-@code_hash 57361460846265694653029920796509802052573595128418810728101968091567195330515
+@code_hash 26411074751358281917876479601714698321674833208179417883888954015536273820035
 
 @fif_codegen
 """
-  testCodegen1 PROC:<{
-    // x
+  testCodegen1 PROC:<{  // x
     DUP	//  x x
     10 GTINT	//  x '2
     IFJMP:<{	//  x
@@ -288,8 +298,7 @@ fun main() {
 
 @fif_codegen
 """
-  testCodegen2 PROC:<{
-    // x
+  testCodegen2 PROC:<{  // x
     DUP	//  x x
     10 GTINT	//  x '2
     IFJMP:<{	//  x
@@ -307,8 +316,7 @@ fun main() {
 
 @fif_codegen
 """
-  testCodegen3 PROC:<{
-    //  numberId paramVal
+  testCodegen3 PROC:<{  //  numberId paramVal
     SWAP
     -1000 PUSHINT	//  paramVal numberId '2=-1000
     EQUAL	    //  paramVal '3
@@ -319,5 +327,13 @@ fun main() {
     }>	    //  paramVal
     DROP	//
   }>
+"""
+
+@fif_codegen
+"""
+<{
+  11 PUSHPOW2
+  THROWANY
+}>CONT
 """
 */

@@ -21,7 +21,7 @@ fun typesAsIdentifiers(builder: builder) {
     {
         var cell: cell = cell;
         var tuple: tuple = createEmptyTuple();
-        var bool: bool = tuple.tupleAt<int>(0) > 0;
+        var bool: bool = tuple.get<int>(0) > 0;
     }
     return int;
 }
@@ -29,37 +29,37 @@ fun typesAsIdentifiers(builder: builder) {
 global callOrder: tuple;
 
 fun getTensor_12() {
-    callOrder.tuplePush(100);
+    callOrder.push(100);
     return (1, 2);
 }
 fun getTensor_1X(x: int) {
-    callOrder.tuplePush(101);
+    callOrder.push(101);
     return (1, x);
 }
 fun getTuple_12() {
-    callOrder.tuplePush(110);
+    callOrder.push(110);
     return [1, 2, ];
 }
 fun getTuple_1X(x: int) {
-    callOrder.tuplePush(111);
+    callOrder.push(111);
     return [1, x];
 }
 fun getUntypedTuple_12() {
-    callOrder.tuplePush(120);
-    var t = createEmptyTuple(); t.tuplePush(1); t.tuplePush(2);
+    callOrder.push(120);
+    var t = createEmptyTuple(); t.push(1); t.push(2);
     return t;
 }
 fun getUntypedTuple_1X(x: int) {
-    callOrder.tuplePush(121);
-    var t = createEmptyTuple(); t.tuplePush(1); t.tuplePush(x);
+    callOrder.push(121);
+    var t = createEmptyTuple(); t.push(1); t.push(x);
     return t;
 }
 fun getIntValue5() {
-    callOrder.tuplePush(10);
+    callOrder.push(10);
     return 5;
 }
 fun getIntValueX(x: int) {
-    callOrder.tuplePush(11);
+    callOrder.push(11);
     return x;
 }
 
@@ -212,6 +212,43 @@ fun test117() {
     return c;
 }
 
+struct Storage {
+    owner: slice;
+}
+
+@method_id(118)
+fun test118(x: int) {
+    var i1: int;
+    if (10 > 3) {
+        i1 = 10;
+    } else { { (_, i1) = (5, 20); } }
+
+    var i2: int10;
+    match (x) {
+        1 => i2 = 1,
+        2 => i2 = 2,
+        3 => i2 = 3,
+        else => i2 = 4,
+    }
+
+    var st: Storage?;
+    if (x > 100) {
+        throw 123;
+    } else {
+        if (x < -100) { throw 456; }
+        else { st = { owner: "" }}
+    }
+
+    var i3: (int, int) | builder;
+    match (i1) {
+        int => i3 = (1, 2),
+    }
+
+    var unused: int8;
+
+    return (i1, i2, st.owner.remainingBitsCount(), i3.0);
+}
+
 
 
 fun main(value: int, ) {
@@ -241,20 +278,20 @@ fun main(value: int, ) {
 @testcase | 115 |        | [ 101 111 ] 9 9
 @testcase | 116 |        | 1 2 3 4 [ 1 2 3 4 ]
 @testcase | 117 |        | [ 20 ]
+@testcase | 118 | 3      | 10 3 0 1
 
 
 @fif_codegen
 """
-  test116 PROC:<{
-    //
-    1 PUSHINT	//  '10=1
-    2 PUSHINT	//  '10=1 '11=2
-    3 PUSHINT	//  '10=1 '11=2 '12=3
-    4 PUSHINT	//  '10=1 '11=2 '12=3 '13=4
-    4 TUPLE	//  rhs
-    DUP	//  rhs rhs
-    4 UNTUPLE	//  rhs2 a b c d
-    4 ROLL	//  a b c d rhs2
+  test116 PROC:<{   //
+    1 PUSHINT	    //  '10=1
+    2 PUSHINT	    //  '10=1 '11=2
+    3 PUSHINT	    //  '10=1 '11=2 '12=3
+    4 PUSHINT	    //  '10=1 '11=2 '12=3 '13=4
+    4 TUPLE	        //  rhs
+    DUP	            //  rhs rhs
+    4 UNTUPLE	    //  rhs2 a b c d
+    4 ROLL	        //  a b c d rhs2
   }>
 """
 */
