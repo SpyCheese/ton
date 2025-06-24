@@ -389,6 +389,10 @@ class SerializePersistentState : public td::actor::Actor {
   struct ShardInfo {
     BlockIdExt block_id;
     td::uint32 split_depth;
+
+    ShardInfo() = default;
+    ShardInfo(BlockIdExt block_id, td::uint32 split_depth) : block_id(block_id), split_depth(split_depth) {
+    }
   };
   std::vector<ShardInfo> shards_;
   size_t shard_idx_ = 0;
