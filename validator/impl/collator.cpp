@@ -260,7 +260,8 @@ void Collator::start_up() {
   if (!is_hardfork_) {
     LOG(DEBUG) << "sending get_external_messages() query to Manager";
     ++pending;
-    td::actor::send_closure_later(manager, &ValidatorManager::get_external_messages, shard_,
+    td::actor::send_closure_later(
+        manager, &ValidatorManager::get_external_messages, shard_,
         [self = get_self()](td::Result<std::vector<std::pair<Ref<ExtMessage>, int>>> res) -> void {
           LOG(DEBUG) << "got answer to get_external_messages() query";
           td::actor::send_closure_later(std::move(self), &Collator::after_get_external_messages, std::move(res));
@@ -282,7 +283,8 @@ void Collator::start_up() {
   LOG(DEBUG) << "sending get_storage_stat_cache() query to Manager";
   td::actor::send_closure_later(
       manager, &ValidatorManager::get_storage_stat_cache,
-      [self = get_self()](td::Result<std::function<td::Ref<vm::Cell>(const td::Bits256&)>> res) {
+      [self = get_self()](
+          td::Result<std::function<td::optional<StorageStatCache::CacheEntry>(const block::Account&)>> res) {
         LOG(DEBUG) << "got answer to get_storage_stat_cache() query";
         td::actor::send_closure_later(std::move(self), &Collator::after_get_storage_stat_cache, std::move(res));
       });
@@ -361,8 +363,9 @@ bool Collator::fatal_error(td::Status error) {
                         attempt_idx_ + 1);
     } else {
       main_promise(std::move(error));
-      td::actor::send_closure(manager, &ValidatorManager::record_collate_query_stats, BlockIdExt{new_id, RootHash::zero(), FileHash::zero()},
-                              work_timer_.elapsed(), cpu_work_timer_.elapsed(), td::optional<CollationStats>{});
+      td::actor::send_closure(manager, &ValidatorManager::record_collate_query_stats,
+                              BlockIdExt{new_id, RootHash::zero(), FileHash::zero()}, work_timer_.elapsed(),
+                              cpu_work_timer_.elapsed(), td::optional<CollationStats>{});
     }
     busy_ = false;
   }
@@ -700,7 +703,8 @@ void Collator::after_get_shard_blocks(td::Result<std::vector<Ref<ShardTopBlockDe
  *
  * @param res The retrieved storage stat cache.
  */
-void Collator::after_get_storage_stat_cache(td::Result<std::function<td::Ref<vm::Cell>(const td::Bits256&)>> res) {
+void Collator::after_get_storage_stat_cache(
+    td::Result<std::function<td::optional<StorageStatCache::CacheEntry>(const block::Account&)>> res) {
   --pending;
   if (res.is_error()) {
     LOG(INFO) << "after_get_storage_stat_cache : " << res.error();
@@ -2473,10 +2477,11 @@ std::unique_ptr<block::Account> Collator::make_account_from(td::ConstBitPtr addr
     return nullptr;
   }
   ptr->block_lt = start_lt;
-  if (storage_stat_cache_ && ptr->storage_dict_hash) {
-    auto dict_root = storage_stat_cache_(ptr->storage_dict_hash.value());
-    if (dict_root.not_null()) {
-      auto S = ptr->init_account_storage_stat(dict_root);
+  if (storage_stat_cache_) {
+    auto res = storage_stat_cache_(*ptr);
+    if (res) {
+      auto& cache_entry = res.value();
+      auto S = ptr->init_account_storage_stat(cache_entry.dict_root);
       if (S.is_error()) {
         fatal_error(S.move_as_error_prefix(PSTRING() << "failed to init storage stat from cache for account "
                                                      << addr.to_hex(256) << ": "));
@@ -2484,7 +2489,7 @@ std::unique_ptr<block::Account> Collator::make_account_from(td::ConstBitPtr addr
       }
       LOG(DEBUG) << "Inited storage stat from cache for account " << addr.to_hex(256) << " (" << ptr->storage_used.cells
                  << " cells)";
-      storage_stat_cache_update_.emplace_back(dict_root, ptr->storage_used.cells);
+      storage_stat_cache_update_.push_back(std::move(cache_entry));
     }
   }
   return ptr;
@@ -2599,7 +2604,7 @@ bool Collator::combine_account_transactions() {
                 && account_dict->set_builder(acc.addr, cb, vm::Dictionary::SetMode::Add))) {
             return fatal_error(std::string{"cannot add newly-created account "} + acc.addr.to_hex() +
                                " into ShardAccounts");
-          }
+                }
         } else if (acc.status == block::Account::acc_nonexist) {
           // account deleted
           if (verbosity > 2) {
@@ -2628,9 +2633,9 @@ bool Collator::combine_account_transactions() {
           }
         }
       }
-      if (acc.storage_dict_hash && acc.account_storage_stat && acc.account_storage_stat.value().is_dict_ready()) {
-        storage_stat_cache_update_.emplace_back(acc.account_storage_stat.value().get_dict_root().move_as_ok(),
-                                                acc.storage_used.cells);
+      auto cache_entry = StorageStatCache::account_state_to_update(acc);
+      if (cache_entry) {
+        storage_stat_cache_update_.emplace_back(std::move(cache_entry.value()));
       }
     } else {
       if (acc.total_state->get_hash() != acc.orig_total_state->get_hash()) {

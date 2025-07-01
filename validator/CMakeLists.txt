@@ -111,6 +111,7 @@ set(DISK_VALIDATOR_SOURCE
   validator-group.cpp
   validator-options.cpp
   queue-size-counter.cpp
+  storage-stat-cache.cpp
 
   downloaders/wait-block-data-disk.cpp
   downloaders/wait-block-state.cpp
@@ -131,6 +132,7 @@ set(HARDFORK_VALIDATOR_SOURCE
   validator-group.cpp
   validator-options.cpp
   queue-size-counter.cpp
+  storage-stat-cache.cpp
 
   downloaders/wait-block-data-disk.cpp
   downloaders/wait-block-state.cpp

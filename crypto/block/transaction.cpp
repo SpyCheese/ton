@@ -580,9 +580,6 @@ td::Status Account::init_account_storage_stat(Ref<vm::Cell> dict_root) {
     account_storage_stat = {};
     return td::Status::OK();
   }
-  if (!storage_dict_hash) {
-    return td::Status::Error("cannot init storage dict: storage_dict_hash is not set");
-  }
   // Root of AccountStorage is not counted in AccountStorageStat
   if (storage_used.cells < 1 || storage_used.bits < storage->size()) {
     return td::Status::Error(PSTRING() << "storage_used is too small: cells=" << storage_used.cells
@@ -591,7 +588,7 @@ td::Status Account::init_account_storage_stat(Ref<vm::Cell> dict_root) {
   AccountStorageStat new_stat(std::move(dict_root), storage->prefetch_all_refs(), storage_used.cells - 1,
                               storage_used.bits - storage->size());
   TRY_RESULT(root_hash, new_stat.get_dict_hash());
-  if (storage_dict_hash.value() != root_hash) {
+  if (storage_dict_hash && storage_dict_hash.value() != root_hash) {
     return td::Status::Error(PSTRING() << "invalid storage dict hash: computed " << root_hash.to_hex() << ", found "
                                        << storage_dict_hash.value().to_hex());
   }

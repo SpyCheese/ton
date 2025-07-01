@@ -15,7 +15,8 @@
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
-#include "interfaces/validator-manager.h"
+#include "transaction.h"
+#include "td/actor/common.h"
 #include "td/utils/ConcurrentHashTable.h"
 #include "td/utils/LRUCache.h"
 
@@ -25,10 +26,15 @@ namespace ton::validator {
 
 class StorageStatCache : public td::actor::Actor {
  public:
-  void get_cache(td::Promise<std::function<td::Ref<vm::Cell>(const td::Bits256&)>> promise);
+  struct CacheEntry {
+    td::Bits256 key;
+    td::Ref<vm::Cell> dict_root;
+    td::uint64 size_cells;
+  };
 
-  // (storage dict root, account total cells)
-  void update(std::vector<std::pair<td::Ref<vm::Cell>, td::uint32>> data);
+  void get_cache(td::Promise<std::function<td::optional<CacheEntry>(const block::Account&)>> promise);
+  void update(std::vector<CacheEntry> data);
+  static td::optional<CacheEntry> account_state_to_update(const block::Account& account);
 
  private:
   vm::Dictionary cache_{256};
@@ -57,7 +63,10 @@ class StorageStatCache : public td::actor::Actor {
     td::Bits256 hash = td::Bits256::zero();
     vm::Dictionary* cache;
   };
-  td::LRUCache<td::Bits256, Deleter> lru_{1 << 24};
+  td::LRUCache<td::Bits256, Deleter> lru_{MAX_CACHE_TOTAL_CELLS};
+
+  static constexpr td::uint64 MAX_CACHE_TOTAL_CELLS = 1 << 24;
+  static constexpr td::uint64 MIN_ACCOUNT_CELLS = 4000;
 };
 
 }  // namespace ton::validator

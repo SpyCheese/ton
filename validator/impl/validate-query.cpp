@@ -386,7 +386,8 @@ void ValidateQuery::start_up() {
   LOG(DEBUG) << "sending get_storage_stat_cache() query to Manager";
   td::actor::send_closure_later(
       manager, &ValidatorManager::get_storage_stat_cache,
-      [self = get_self()](td::Result<std::function<td::Ref<vm::Cell>(const td::Bits256&)>> res) {
+      [self = get_self()](
+          td::Result<std::function<td::optional<StorageStatCache::CacheEntry>(const block::Account&)>> res) {
         LOG(DEBUG) << "got answer to get_storage_stat_cache() query";
         td::actor::send_closure_later(std::move(self), &ValidateQuery::after_get_storage_stat_cache, std::move(res));
       });
@@ -763,7 +764,8 @@ void ValidateQuery::got_mc_handle(td::Result<BlockHandle> res) {
  *
  * @param res The retrieved storage stat cache.
  */
-void ValidateQuery::after_get_storage_stat_cache(td::Result<std::function<td::Ref<vm::Cell>(const td::Bits256&)>> res) {
+void ValidateQuery::after_get_storage_stat_cache(
+    td::Result<std::function<td::optional<StorageStatCache::CacheEntry>(const block::Account&)>> res) {
   --pending;
   if (res.is_error()) {
     LOG(INFO) << "after_get_storage_stat_cache : " << res.error();
@@ -5162,10 +5164,11 @@ std::unique_ptr<block::Account> ValidateQuery::make_account_from(td::ConstBitPtr
     return nullptr;
   }
   ptr->block_lt = start_lt_;
-  if (storage_stat_cache_ && ptr->storage_dict_hash) {
-    auto dict_root = storage_stat_cache_(ptr->storage_dict_hash.value());
-    if (dict_root.not_null()) {
-      auto S = ptr->init_account_storage_stat(dict_root);
+  if (storage_stat_cache_) {
+    auto res = storage_stat_cache_(*ptr);
+    if (res) {
+      auto& cache_entry = res.value();
+      auto S = ptr->init_account_storage_stat(cache_entry.dict_root);
       if (S.is_error()) {
         fatal_error(S.move_as_error_prefix(PSTRING() << "failed to init storage stat from cache for account "
                                                      << addr.to_hex(256) << ": "));
@@ -5173,7 +5176,7 @@ std::unique_ptr<block::Account> ValidateQuery::make_account_from(td::ConstBitPtr
       }
       LOG(DEBUG) << "Inited storage stat from cache for account " << addr.to_hex(256) << " (" << ptr->storage_used.cells
                  << " cells)";
-      storage_stat_cache_update_.emplace_back(dict_root, ptr->storage_used.cells);
+      storage_stat_cache_update_.push_back(std::move(cache_entry));
     }
   }
   return ptr;
@@ -5789,10 +5792,9 @@ bool ValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Re
       })) {
     return reject_query("at least one Transaction of account "s + acc_addr.to_hex() + " is invalid");
   }
-  if (account.storage_dict_hash && account.account_storage_stat &&
-      account.account_storage_stat.value().is_dict_ready()) {
-    storage_stat_cache_update_.emplace_back(account.account_storage_stat.value().get_dict_root().move_as_ok(),
-                                            account.storage_used.cells);
+  auto cache_entry = StorageStatCache::account_state_to_update(account);
+  if (cache_entry) {
+    storage_stat_cache_update_.emplace_back(std::move(cache_entry.value()));
   }
   if (is_masterchain() && account.libraries_changed()) {
     return scan_account_libraries(account.orig_library, account.library, acc_addr);

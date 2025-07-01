@@ -649,10 +649,11 @@ class ValidatorManagerImpl : public ValidatorManager {
     ++(success ? total_ls_queries_ok_ : total_ls_queries_error_)[lite_query_id];
   }
 
-  void get_storage_stat_cache(td::Promise<std::function<td::Ref<vm::Cell>(const td::Bits256&)>> promise) override {
+  void get_storage_stat_cache(
+      td::Promise<std::function<td::optional<StorageStatCache::CacheEntry>(const block::Account &)>> promise) override {
     td::actor::send_closure(storage_stat_cache_, &StorageStatCache::get_cache, std::move(promise));
   }
-  void update_storage_stat_cache(std::vector<std::pair<td::Ref<vm::Cell>, td::uint32>> data) override {
+  void update_storage_stat_cache(std::vector<StorageStatCache::CacheEntry> data) override {
     td::actor::send_closure(storage_stat_cache_, &StorageStatCache::update, std::move(data));
   }
 
