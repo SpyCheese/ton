@@ -195,12 +195,12 @@ void FullNodeImpl::initial_read_complete(BlockHandle top_handle) {
 void FullNodeImpl::on_new_masterchain_block(td::Ref<MasterchainState> state, std::set<ShardIdFull> shards_to_monitor) {
   CHECK(shards_to_monitor.count(ShardIdFull(masterchainId)));
   bool join_all_overlays = !sign_cert_by_.is_zero();
-  std::set<ShardIdFull> all_shards;
-  std::set<ShardIdFull> new_active;
-  all_shards.insert(ShardIdFull(masterchainId));
-  std::set<WorkchainId> workchains;
+  //std::set<ShardIdFull> all_shards;
+  //std::set<ShardIdFull> new_active;
+  //all_shards.insert(ShardIdFull(masterchainId));
+  //std::set<WorkchainId> workchains;
   wc_monitor_min_split_ = state->monitor_min_split_depth(basechainId);
-  auto cut_shard = [&](ShardIdFull shard) -> ShardIdFull {
+  /*auto cut_shard = [&](ShardIdFull shard) -> ShardIdFull {
     return wc_monitor_min_split_ < shard.pfx_len() ? shard_prefix(shard, wc_monitor_min_split_) : shard;
   };
   for (auto &info : state->get_shards()) {
@@ -243,7 +243,15 @@ void FullNodeImpl::on_new_masterchain_block(td::Ref<MasterchainState> state, std
     if (active || join_all_overlays || overlay_exists) {
       update_shard_actor(shard, active);
     }
-  }
+  }*/
+  update_shard_actor(ShardIdFull{-1, 0x8000000000000000ULL}, true);
+  update_shard_actor(ShardIdFull{0, 0x8000000000000000ULL}, true);
+  update_shard_actor(ShardIdFull{0, 0x4000000000000000ULL}, true);
+  update_shard_actor(ShardIdFull{0, 0xc000000000000000ULL}, true);
+  update_shard_actor(ShardIdFull{0, 0x2000000000000000ULL}, true);
+  update_shard_actor(ShardIdFull{0, 0x6000000000000000ULL}, true);
+  update_shard_actor(ShardIdFull{0, 0xa000000000000000ULL}, true);
+  update_shard_actor(ShardIdFull{0, 0xe000000000000000ULL}, true);
 
   for (auto &[_, shard_info] : shards_) {
     if (!shard_info.active && shard_info.delete_at && shard_info.delete_at.is_in_past() && !join_all_overlays) {
