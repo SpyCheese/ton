@@ -118,20 +118,31 @@ Result<RocksDb> RocksDb::open(std::string path, RocksDbOptions options) {
     TRY_STATUS(from_rocksdb(rocksdb::DB::Open(db_options, std::move(path), &db)));
     return RocksDb(std::shared_ptr<rocksdb::DB>(db), std::move(options));
   } else {
-    rocksdb::OptimisticTransactionDB *db{nullptr};
     rocksdb::ColumnFamilyOptions cf_options(db_options);
     std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
     column_families.push_back(rocksdb::ColumnFamilyDescriptor(rocksdb::kDefaultColumnFamilyName, cf_options));
     std::vector<rocksdb::ColumnFamilyHandle *> handles;
     rocksdb::OptimisticTransactionDBOptions occ_options;
     occ_options.validate_policy = rocksdb::OccValidationPolicy::kValidateSerial;
-    TRY_STATUS(from_rocksdb(rocksdb::OptimisticTransactionDB::Open(db_options, occ_options, std::move(path),
-                                                                   column_families, &handles, &db)));
-    CHECK(handles.size() == 1);
-    // i can delete the handle since DBImpl is always holding a reference to
-    // default column family
-    delete handles[0];
-    return RocksDb(std::shared_ptr<rocksdb::OptimisticTransactionDB>(db), std::move(options));
+    if (options.read_only) {
+      rocksdb::DB *db{nullptr};
+      TRY_STATUS(
+          from_rocksdb(rocksdb::DB::OpenForReadOnly(db_options, std::move(path), column_families, &handles, &db)));
+      CHECK(handles.size() == 1);
+      // i can delete the handle since DBImpl is always holding a reference to
+      // default column family
+      delete handles[0];
+      return RocksDb(std::shared_ptr<rocksdb::DB>(db), std::move(options));
+    } else {
+      rocksdb::OptimisticTransactionDB *db{nullptr};
+      TRY_STATUS(from_rocksdb(rocksdb::OptimisticTransactionDB::Open(db_options, occ_options, std::move(path),
+                                                                     column_families, &handles, &db)));
+      CHECK(handles.size() == 1);
+      // i can delete the handle since DBImpl is always holding a reference to
+      // default column family
+      delete handles[0];
+      return RocksDb(std::shared_ptr<rocksdb::OptimisticTransactionDB>(db), std::move(options));
+    }
   }
 }
 
@@ -222,6 +233,9 @@ Result<std::vector<RocksDb::GetStatus>> RocksDb::get_multi(td::Span<Slice> keys,
 }
 
 Status RocksDb::set(Slice key, Slice value) {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   if (write_batch_) {
     return from_rocksdb(write_batch_->Put(to_rocksdb(key), to_rocksdb(value)));
   }
@@ -231,6 +245,9 @@ Status RocksDb::set(Slice key, Slice value) {
   return from_rocksdb(db_->Put({}, to_rocksdb(key), to_rocksdb(value)));
 }
 Status RocksDb::merge(Slice key, Slice value) {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   if (write_batch_) {
     return from_rocksdb(write_batch_->Merge(to_rocksdb(key), to_rocksdb(value)));
   }
@@ -240,10 +257,16 @@ Status RocksDb::merge(Slice key, Slice value) {
   return from_rocksdb(db_->Merge({}, to_rocksdb(key), to_rocksdb(value)));
 }
 Status RocksDb::run_gc() {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   return from_rocksdb(db_->CompactRange({}, nullptr, nullptr));
 }
 
 Status RocksDb::erase(Slice key) {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   if (write_batch_) {
     return from_rocksdb(write_batch_->Delete(to_rocksdb(key)));
   }
@@ -337,12 +360,18 @@ Status RocksDb::for_each_in_range(Slice begin, Slice end, std::function<Status(S
 }
 
 Status RocksDb::begin_write_batch() {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   CHECK(!transaction_);
   write_batch_ = std::make_unique<rocksdb::WriteBatch>();
   return Status::OK();
 }
 
 Status RocksDb::begin_transaction() {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   CHECK(!write_batch_);
   CHECK(transaction_db_);
   rocksdb::WriteOptions options;
@@ -352,6 +381,9 @@ Status RocksDb::begin_transaction() {
 }
 
 Status RocksDb::commit_write_batch() {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   CHECK(write_batch_);
   auto write_batch = std::move(write_batch_);
   rocksdb::WriteOptions options;
@@ -360,24 +392,36 @@ Status RocksDb::commit_write_batch() {
 }
 
 Status RocksDb::commit_transaction() {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   CHECK(transaction_);
   auto transaction = std::move(transaction_);
   return from_rocksdb(transaction->Commit());
 }
 
 Status RocksDb::abort_write_batch() {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   CHECK(write_batch_);
   write_batch_.reset();
   return Status::OK();
 }
 
 Status RocksDb::abort_transaction() {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   CHECK(transaction_);
   transaction_.reset();
   return Status::OK();
 }
 
 Status RocksDb::flush() {
+  if (options_.read_only) {
+    return td::Status::Error("trying to write to read-only database");
+  }
   return from_rocksdb(db_->Flush({}));
 }
 

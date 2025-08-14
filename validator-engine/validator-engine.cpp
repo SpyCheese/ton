@@ -1420,10 +1420,10 @@ void ValidatorEngine::alarm() {
         if (validator_set_.not_null() && validator_set_->is_validator(ton::NodeIdShort{val.first.bits256_value()})) {
           is_validator = true;
         }
-        if (!is_validator && val.second.election_date < cur_t.first && cur_t.first + 600 < state_->get_unix_time()) {
+        /*if (!is_validator && val.second.election_date < cur_t.first && cur_t.first + 600 < state_->get_unix_time()) {
           to_del.insert(val.first);
           continue;
-        }
+        }*/
       }
       for (auto &x : to_del) {
         config_.config_del_validator_permanent_key(x);
@@ -1624,6 +1624,9 @@ td::Status ValidatorEngine::load_global_config() {
   }
   validator_options_.write().set_permanent_celldb(permanent_celldb_);
   validator_options_.write().set_initial_sync_disabled(skip_key_sync_);
+  if (sync_upto_) {
+    validator_options_.write().set_sync_upto(sync_upto_.value());
+  }
 
   std::vector<ton::BlockIdExt> h;
   for (auto &x : conf.validator_->hardforks_) {
@@ -1645,6 +1648,9 @@ td::Status ValidatorEngine::load_global_config() {
   validator_options_.write().set_hardforks(std::move(h));
   validator_options_.write().set_fast_state_serializer_enabled(fast_state_serializer_enabled_);
   validator_options_.write().set_catchain_broadcast_speed_multiplier(broadcast_speed_multiplier_catchain_);
+  if (stop_at_block_) {
+    validator_options_.write().set_stop_at_block(stop_at_block_.value());
+  }
 
   for (auto& id : config_.collator_node_whitelist) {
     validator_options_.write().set_collator_node_whitelisted_validator(id, true);
@@ -5597,6 +5603,23 @@ int main(int argc, char *argv[]) {
                          }
                          return td::Status::OK();
                        });
+  p.add_checked_option(
+      '\0', "sync-upto", "", [&](td::Slice s) -> td::Status {
+        TRY_RESULT(v, td::to_integer_safe<ton::BlockSeqno>(s));
+        acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_sync_upto, v); });
+        return td::Status::OK();
+      });
+  p.add_checked_option(
+      '\0', "stop-at-block", "stor syncing masterchain at block <seqno>",
+      [&](td::Slice s) -> td::Status {
+        TRY_RESULT(seqno, td::to_integer_safe<ton::BlockSeqno>(s));
+        acts.push_back([&x, seqno]() { td::actor::send_closure(x, &ValidatorEngine::set_stop_at_block, seqno); });
+        return td::Status::OK();
+      });
+  p.add_option('\0', "time-shift", "system clock shift", [&](td::Slice s) {
+    td::time_shift = td::to_double(s);
+    LOG(WARNING) << "Time shift = " << td::time_shift;
+  });
   auto S = p.run(argc, argv);
   if (S.is_error()) {
     LOG(ERROR) << "failed to parse options: " << S.move_as_error();

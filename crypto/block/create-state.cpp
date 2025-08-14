@@ -459,7 +459,7 @@ bool store_custom(vm::CellBuilder& cb) {
 
 Ref<vm::Cell> create_state() {
   vm::CellBuilder cb, cb2;
-  now = static_cast<ton::UnixTime>(time(0));
+  now = static_cast<ton::UnixTime>(td::Clocks::system());
   bool ok = true;
   PDO(workchain_id != wc_undef);
   THRERR("workchain_id is unset, cannot generate state");
@@ -472,7 +472,7 @@ Ref<vm::Cell> create_state() {
       && cb.store_long_bool(0, 32)                                // seq_no:#
       && cb.store_zeroes_bool(32)                                 // vert_seq_no:#
       && cb.store_long_bool(now, 32)                              // gen_utime:uint32
-      && cb.store_zeroes_bool(64)                                 // gen_lt:uint64
+      && cb.store_long_bool(100000000000099LL, 64)               // gen_lt:uint64
       && cb.store_ones_bool(32)                                   // min_ref_mc_seqno:uint32
       && cb2.store_zeroes_bool(1 + 64 + 2)                        // OutMsgQueueInfo
       && cb.store_ref_bool(cb2.finalize())                        // out_msg_queue_info:^OutMsgQueueInfo
@@ -851,7 +851,7 @@ int main(int argc, char* const argv[]) {
 
   int i;
   int new_verbosity_level = VERBOSITY_NAME(INFO);
-  while (!script_mode && (i = getopt(argc, argv, "hinsI:L:v:V")) != -1) {
+  while (!script_mode && (i = getopt(argc, argv, "hinsI:L:v:VT:")) != -1) {
     switch (i) {
       case 'i':
         interactive = true;
@@ -869,6 +869,10 @@ int main(int argc, char* const argv[]) {
         break;
       case 'L':
         library_source_files.emplace_back(optarg);
+        break;
+      case 'T':
+        td::time_shift = td::to_double(td::as_slice(td::CSlice{optarg}));
+        LOG(WARNING) << "Time shift = " << td::time_shift;
         break;
       case 'v':
         new_verbosity_level = VERBOSITY_NAME(FATAL) + (verbosity = td::to_integer<int>(td::Slice(optarg)));

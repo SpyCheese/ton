@@ -17,6 +17,9 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "apply-block.hpp"
+
+#include "block-auto.h"
+#include "block-parse.h"
 #include "adnl/utils.hpp"
 #include "ton/ton-io.hpp"
 #include "validator/invariants.hpp"
@@ -26,6 +29,14 @@
 namespace ton {
 
 namespace validator {
+
+static bool need_write_stats() {
+  static bool x = []() -> bool {
+    const char* s = getenv("TON_STORE_APPLY_STATS");
+    return s != nullptr && strlen(s) > 0;
+  }();
+  return x;
+}
 
 void ApplyBlock::abort_query(td::Status reason) {
   if (promise_) {
@@ -84,7 +95,7 @@ void ApplyBlock::got_block_handle(BlockHandle handle) {
           R.ensure();
           auto h = R.move_as_ok();
           if (h.id.seqno < seqno) {
-            td::actor::send_closure(SelfId, &ApplyBlock::written_block_data);
+            td::actor::send_closure(SelfId, &ApplyBlock::written_block_data, td::Ref<BlockData>{});
           } else {
             td::actor::send_closure(SelfId, &ApplyBlock::finish_query);
           }
@@ -103,7 +114,7 @@ void ApplyBlock::got_block_handle(BlockHandle handle) {
     return;
   }
 
-  if (handle_->received()) {
+  if (handle_->received() && !(need_write_stats() && block_.is_null())) {
     written_block_data();
     return;
   }
@@ -113,7 +124,7 @@ void ApplyBlock::got_block_handle(BlockHandle handle) {
       if (R.is_error()) {
         td::actor::send_closure(SelfId, &ApplyBlock::abort_query, R.move_as_error());
       } else {
-        td::actor::send_closure(SelfId, &ApplyBlock::written_block_data);
+        td::actor::send_closure(SelfId, &ApplyBlock::written_block_data, td::Ref<BlockData>{});
       }
     });
 
@@ -124,7 +135,7 @@ void ApplyBlock::got_block_handle(BlockHandle handle) {
       if (R.is_error()) {
         td::actor::send_closure(SelfId, &ApplyBlock::abort_query, R.move_as_error());
       } else {
-        td::actor::send_closure(SelfId, &ApplyBlock::written_block_data);
+        td::actor::send_closure(SelfId, &ApplyBlock::written_block_data, R.move_as_ok());
       }
     });
 
@@ -133,7 +144,10 @@ void ApplyBlock::got_block_handle(BlockHandle handle) {
   }
 }
 
-void ApplyBlock::written_block_data() {
+void ApplyBlock::written_block_data(td::Ref<BlockData> data) {
+  if (data.not_null()) {
+    block_ = data;
+  }
   VLOG(VALIDATOR_DEBUG) << "apply block: written block data for " << id_;
   if (!handle_->id().seqno()) {
     CHECK(handle_->inited_split_after());
@@ -262,6 +276,44 @@ void ApplyBlock::applied_set() {
     CHECK(handle_->handle_moved_to_archive());
     CHECK(handle_->moved_to_archive());
   }
+
+  if (need_write_stats() && handle_->id().seqno() > 0) {
+    auto stats = create_tl_object<ton_api::validatorStats_appliedBlockStats>();
+    stats->block_id_ = create_tl_block_id(block_->block_id());
+    stats->applied_at_ = td::Clocks::system();
+    block::gen::Block::Record rec;
+    block::gen::BlockInfo::Record info;
+    block::gen::BlockExtra::Record extra;
+    CHECK(block::gen::unpack_cell(block_->root_cell(), rec) && block::gen::unpack_cell(rec.info, info) &&
+          block::gen::unpack_cell(rec.extra, extra));
+    stats->block_timestamp_ = info.gen_utime;
+
+    vm::AugmentedDictionary acc_dict{vm::load_cell_slice_ref(extra.account_blocks), 256,
+                                     block::tlb::aug_ShardAccountBlocks};
+    acc_dict.check_for_each([&](td::Ref<vm::CellSlice> value, td::ConstBitPtr key, int n) -> bool {
+      block::gen::CurrencyCollection::Record skip;
+      block::gen::csr_unpack_skip(value, skip);
+      block::gen::AccountBlock::Record acc_blk;
+      CHECK(tlb::csr_unpack(std::move(value), acc_blk));
+      vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64,
+                                         block::tlb::aug_AccountTransactions};
+      trans_dict.check_for_each_extra([&](td::Ref<vm::CellSlice> value, td::Ref<vm::CellSlice>, td::ConstBitPtr, int) -> bool {
+        ++stats->transactions_;
+        block::gen::Transaction::Record trans;
+        CHECK(tlb::unpack_cell(value->prefetch_ref(), trans));
+        if (trans.r1.in_msg->size_refs() > 0) {
+          vm::CellSlice msg{vm::NoVm(), trans.r1.in_msg->prefetch_ref()};
+          if (msg.prefetch_long(1)) {
+            ++stats->ext_msgs_;
+          }
+        }
+        return true;
+      });
+      return true;
+    });
+    td::actor::send_closure(manager_, &ValidatorManager::log_applied_block_stats, std::move(stats));
+  }
+
   if (handle_->need_flush()) {
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<td::Unit> R) {
       if (R.is_error()) {

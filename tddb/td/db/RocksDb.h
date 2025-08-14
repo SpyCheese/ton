@@ -77,6 +77,7 @@ struct RocksDbOptions {
   bool no_block_cache = false;
   bool enable_bloom_filter = false;
   bool two_level_index_and_filter = false;
+  bool read_only = false;
 };
 
 class RocksDb : public KeyValue {

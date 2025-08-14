@@ -21,6 +21,8 @@
 
 namespace td {
 
+extern double time_shift;
+
 struct Clocks {
   static int64 monotonic_nano();
 

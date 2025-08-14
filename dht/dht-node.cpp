@@ -37,8 +37,7 @@ td::Status DhtNode::update(tl_object_ptr<ton_api::dht_node> obj, td::int32 our_n
   } else {
     return td::Status::Error(ErrorCode::notready, "invalid length of signature");
   }
-  if (network_id != our_network_id && network_id != -1 && our_network_id != -1) {
-    // Remove (network_id != -1 && our_network_id != -1) after network update
+  if (network_id != our_network_id) {
     return td::Status::Error(ErrorCode::notready, PSTRING() << "wrong network id (expected " << our_network_id
                                                             << ", found " << network_id << ")");
   }

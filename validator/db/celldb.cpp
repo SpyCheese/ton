@@ -42,13 +42,13 @@ namespace ton {
 
 namespace validator {
 class CellDbAsyncExecutor : public vm::DynamicBagOfCellsDb::AsyncExecutor {
- public:
+public:
   explicit CellDbAsyncExecutor(td::actor::ActorId<CellDbBase> cell_db) : cell_db_(std::move(cell_db)) {
   }
 
   void execute_async(std::function<void()> f) override {
     class Runner : public td::actor::Actor {
-     public:
+    public:
       explicit Runner(std::function<void()> f) : f_(std::move(f)) {
       }
       void start_up() override {
@@ -56,7 +56,7 @@ class CellDbAsyncExecutor : public vm::DynamicBagOfCellsDb::AsyncExecutor {
         stop();
       }
 
-     private:
+    private:
       std::function<void()> f_;
     };
     td::actor::create_actor<Runner>("executeasync", std::move(f)).release();
@@ -66,7 +66,7 @@ class CellDbAsyncExecutor : public vm::DynamicBagOfCellsDb::AsyncExecutor {
     td::actor::send_closure(cell_db_, &CellDbBase::execute_sync, std::move(f));
   }
 
- private:
+private:
   td::actor::ActorId<CellDbBase> cell_db_;
 };
 
@@ -151,7 +151,7 @@ void CellDbIn::validate_meta() {
     if (!(tlb::unpack_cell(root, info) && shard.deserialize(info.shard_id.write()) &&
           tlb::unpack_cell(info.out_msg_queue_info, qinfo))) {
       LOG(FATAL) << "cannot create ShardDescr from a root in celldb";
-    }
+          }
     if (!partial_check && !root_hashes.contains(root->get_hash())) {
       unknown_roots++;
       LOG(ERROR) << "Unknown root" << ShardIdFull(shard).to_str() << ":" << info.seq_no;
@@ -179,18 +179,20 @@ void CellDbIn::validate_meta() {
 }
 
 void CellDbIn::start_up() {
-  on_load_callback_ = [actor = std::make_shared<td::actor::ActorOwn<MigrationProxy>>(
-                           td::actor::create_actor<MigrationProxy>("celldbmigration", actor_id(this))),
-                       compress_depth = opts_->get_celldb_compress_depth()](const vm::CellLoader::LoadResult& res) {
-    if (res.cell_.is_null()) {
-      return;
-    }
-    bool expected_stored_boc = res.cell_->get_depth() == compress_depth && compress_depth != 0;
-    if (expected_stored_boc != res.stored_boc_) {
-      td::actor::send_closure(*actor, &CellDbIn::MigrationProxy::migrate_cell,
-                              td::Bits256{res.cell_->get_hash().bits()});
-    }
-  };
+  if (!opts_->get_readonly_celldb()) {
+    on_load_callback_ = [actor = std::make_shared<td::actor::ActorOwn<MigrationProxy>>(
+                             td::actor::create_actor<MigrationProxy>("celldbmigration", actor_id(this))),
+                         compress_depth = opts_->get_celldb_compress_depth()](const vm::CellLoader::LoadResult& res) {
+      if (res.cell_.is_null()) {
+        return;
+      }
+      bool expected_stored_boc = res.cell_->get_depth() == compress_depth && compress_depth != 0;
+      if (expected_stored_boc != res.stored_boc_) {
+        td::actor::send_closure(*actor, &CellDbIn::MigrationProxy::migrate_cell,
+                                td::Bits256{res.cell_->get_hash().bits()});
+      }
+    };
+  }
 
   CellDbBase::start_up();
   td::RocksDbOptions db_options;
@@ -209,10 +211,10 @@ void CellDbIn::start_up() {
 
   if (opts_->get_celldb_v2()) {
     boc_v2_options = vm::DynamicBagOfCellsDb::CreateV2Options{
-        .extra_threads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u),
-        .executor = {},
-        .cache_ttl_max = 2000,
-        .cache_size_max = 1000000};
+      .extra_threads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u),
+      .executor = {},
+      .cache_ttl_max = 2000,
+      .cache_size_max = 1000000};
     size_t min_rocksdb_cache = std::max(size_t{1} << 30, boc_v2_options->cache_size_max * 5000);
     if (!o_celldb_cache_size || o_celldb_cache_size.value() < min_rocksdb_cache) {
       LOG(WARNING) << "Increase CellDb block cache size to " << td::format::as_size(min_rocksdb_cache) << " from "
@@ -223,11 +225,11 @@ void CellDbIn::start_up() {
   } else if (opts_->get_celldb_in_memory()) {
     // default options
     boc_in_memory_options = vm::DynamicBagOfCellsDb::CreateInMemoryOptions{
-        .extra_threads = std::thread::hardware_concurrency(),
-        .verbose = true,
-        .use_arena = false,
-        .use_less_memory_during_creation = true,
-    };
+      .extra_threads = std::thread::hardware_concurrency(),
+      .verbose = true,
+      .use_arena = false,
+      .use_less_memory_during_creation = true,
+  };
     LOG(WARNING) << "Using InMemory DynamicBagOfCells with options " << *boc_v2_options;
   } else {
     boc_v1_options = vm::DynamicBagOfCellsDb::CreateV1Options{};
@@ -252,12 +254,15 @@ void CellDbIn::start_up() {
   // to handle updates written by V2 or InMemory BoCs
   db_options.merge_operator = std::make_shared<MergeOperatorAddCellRefcnt>();
 
+  db_options.read_only = opts_->get_readonly_celldb();
+
   if (opts_->get_celldb_in_memory()) {
     td::RocksDbOptions read_db_options;
     read_db_options.use_direct_reads = true;
     read_db_options.no_block_cache = true;
     read_db_options.block_cache = {};
     read_db_options.merge_operator = std::make_shared<MergeOperatorAddCellRefcnt>();
+    read_db_options.read_only = opts_->get_readonly_celldb();
     LOG(WARNING) << "Loading all cells in memory (because of --celldb-in-memory)";
     td::Timer timer;
     auto read_cell_db =
@@ -282,12 +287,14 @@ void CellDbIn::start_up() {
     boc_->set_loader(std::make_unique<vm::CellLoader>(cell_db_->snapshot(), on_load_callback_)).ensure();
   }
 
-  validate_meta();
+  if (!opts_->get_readonly_celldb()) {
+    validate_meta();
+  }
 
   alarm_timestamp() = td::Timestamp::in(10.0);
 
   auto empty = get_empty_key_hash();
-  if (get_block(empty).is_error()) {
+  if (get_block(empty).is_error() && !opts_->get_readonly_celldb()) {
     DbEntry e{get_empty_key(), empty, empty, RootHash::zero()};
     vm::CellStorer stor{*cell_db_};
     cell_db_->begin_write_batch().ensure();
@@ -383,8 +390,24 @@ void CellDbIn::load_cell(RootHash hash, td::Promise<td::Ref<vm::DataCell>> promi
       td::Timestamp::now());
 }
 
+void CellDbIn::load_state_root(BlockIdExt block_id, td::Promise<td::Ref<vm::DataCell>> promise) {
+  if (db_busy_) {
+    action_queue_.push([self = this, block_id, promise = std::move(promise)](td::Result<td::Unit> R) mutable {
+      R.ensure();
+      self->load_state_root(block_id, std::move(promise));
+    });
+    return;
+  }
+  TRY_RESULT_PROMISE(promise, block, get_block(get_key_hash(block_id)));
+  load_cell(block.root_hash, std::move(promise));
+}
+
 void CellDbIn::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, KeyHash list_position,
                           td::Promise<td::Ref<vm::DataCell>> promise) {
+  if (opts_->get_readonly_celldb()) {
+    promise.set_error(td::Status::Error("celldb is read-only"));
+    return;
+  }
   if (db_busy_) {
     action_queue_.push(
         [=, self = this, cell = std::move(cell), promise = std::move(promise)](td::Result<td::Unit> R) mutable {
@@ -652,7 +675,7 @@ std::vector<std::pair<std::string, std::string>> CellDbIn::prepare_stats() {
   // do not clear statistics, it is needed for flush_db_stats
 }
 void CellDbIn::flush_db_stats() {
-  if (opts_->get_disable_rocksdb_stats()) {
+  if (opts_->get_disable_rocksdb_stats() || opts_->get_readonly_celldb()) {
     return;
   }
   if (db_busy_) {
@@ -705,13 +728,13 @@ void CellDbIn::alarm() {
               << " queue_size=" << cells_to_migrate_.size();
     migration_stats_ = {};
   }
-  if (permanent_mode_) {
+  if (permanent_mode_ || opts_->get_readonly_celldb() || root_db_.empty()) {
     skip_gc();
     return;
   }
   auto E = get_block(get_empty_key_hash()).move_as_ok();
   auto N = get_block(E.next).move_as_ok();
-  if (N.is_empty()) {
+  if (N.is_empty() || root_db_.empty()) {
     alarm_timestamp() = td::Timestamp::in(0.1);
     return;
   }
@@ -855,7 +878,7 @@ void CellDbIn::gc_cont3(BlockHandle handle) {
     });
     return;
   }
-  CHECK(!permanent_mode_);
+  CHECK(!permanent_mode_ && !opts_->get_readonly_celldb());
 
   td::PerfWarningTimer timer{"gccell", 0.1};
   td::PerfWarningTimer timer_all{"gccell_all", 0.05};
@@ -999,7 +1022,7 @@ void CellDbIn::set_block(KeyHash key_hash, DbEntry e) {
 }
 
 void CellDbIn::migrate_cell(td::Bits256 hash) {
-  if (permanent_mode_) {
+  if (permanent_mode_ || opts_->get_readonly_celldb()) {
     return;
   }
   cells_to_migrate_.insert(hash);
@@ -1110,6 +1133,11 @@ void CellDb::load_cell(RootHash hash, td::Promise<td::Ref<vm::DataCell>> promise
   }
 }
 
+void CellDb::load_state_root(BlockIdExt block_id, td::Promise<td::Ref<vm::DataCell>> promise) {
+  td::actor::send_closure(cell_db_, &CellDbIn::load_state_root, block_id, std::move(promise));
+}
+
+
 void CellDb::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, td::Promise<td::Ref<vm::DataCell>> promise) {
   td::actor::send_closure(cell_db_, &CellDbIn::store_cell, block_id, std::move(cell), CellDbIn::KeyHash::zero(),
                           std::move(promise));
@@ -1132,18 +1160,20 @@ void CellDb::start_up() {
   boc_ = vm::DynamicBagOfCellsDb::create();
   boc_->set_celldb_compress_depth(opts_->get_celldb_compress_depth());
   cell_db_ = td::actor::create_actor<CellDbIn>("celldbin", root_db_, actor_id(this), path_, opts_);
-  on_load_callback_ = [actor = std::make_shared<td::actor::ActorOwn<CellDbIn::MigrationProxy>>(
-                           td::actor::create_actor<CellDbIn::MigrationProxy>("celldbmigration", cell_db_.get())),
-                       compress_depth = opts_->get_celldb_compress_depth()](const vm::CellLoader::LoadResult& res) {
-    if (res.cell_.is_null()) {
-      return;
-    }
-    bool expected_stored_boc = res.cell_->get_depth() == compress_depth && compress_depth != 0;
-    if (expected_stored_boc != res.stored_boc_) {
-      td::actor::send_closure(*actor, &CellDbIn::MigrationProxy::migrate_cell,
-                              td::Bits256{res.cell_->get_hash().bits()});
-    }
-  };
+  if (!opts_->get_readonly_celldb()) {
+    on_load_callback_ = [actor = std::make_shared<td::actor::ActorOwn<CellDbIn::MigrationProxy>>(
+                             td::actor::create_actor<CellDbIn::MigrationProxy>("celldbmigration", cell_db_.get())),
+                         compress_depth = opts_->get_celldb_compress_depth()](const vm::CellLoader::LoadResult& res) {
+      if (res.cell_.is_null()) {
+        return;
+      }
+      bool expected_stored_boc = res.cell_->get_depth() == compress_depth && compress_depth != 0;
+      if (expected_stored_boc != res.stored_boc_) {
+        td::actor::send_closure(*actor, &CellDbIn::MigrationProxy::migrate_cell,
+                                td::Bits256{res.cell_->get_hash().bits()});
+      }
+    };
+  }
 }
 
 CellDbIn::DbEntry::DbEntry(tl_object_ptr<ton_api::db_celldb_value> entry)

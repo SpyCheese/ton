@@ -117,7 +117,7 @@ struct LogEventStart {
   unsigned char zerostate_root_hash[32];
   LogEventStart() = default;
   LogEventStart(const RootHash& hash, unsigned _now = 0)
-      : tag_field(tag), type_field(log_type), created_at(_now ? _now : (unsigned)std::time(nullptr)) {
+      : tag_field(tag), type_field(log_type), created_at(_now ? _now : (unsigned)td::Clocks::system()) {
     td::as<RootHash>(zerostate_root_hash) = hash;
   }
   static Result<int64> parse(Slice data, LogEventStart* res) {

@@ -371,6 +371,8 @@ void DhtMemberImpl::receive_query(adnl::AdnlNodeIdShort src, td::BufferSlice dat
           add_full_node(key, std::move(node), true);
         } else {
           VLOG(DHT_WARNING) << this << ": dropping bad node: unexpected adnl id";
+          promise.set_error(td::Status::Error("dropping bad node: unexpected adnl id"));
+          return;
         }
       } else {
         VLOG(DHT_WARNING) << this << ": dropping bad node " << N.move_as_error();

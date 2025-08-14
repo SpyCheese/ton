@@ -296,14 +296,14 @@ void LiteQuery::perform() {
 
 void LiteQuery::perform_getTime() {
   LOG(INFO) << "started a getTime() liteserver query";
-  td::int32 now = static_cast<td::int32>(std::time(nullptr));
+  td::int32 now = static_cast<td::int32>(td::Clocks::system());
   auto b = ton::create_serialize_tl_object<ton::lite_api::liteServer_currentTime>(now);
   finish_query(std::move(b));
 }
 
 void LiteQuery::perform_getVersion() {
   LOG(INFO) << "started a getVersion() liteserver query";
-  td::int32 now = static_cast<td::int32>(std::time(nullptr));
+  td::int32 now = static_cast<td::int32>(td::Clocks::system());
   auto b = ton::create_serialize_tl_object<ton::lite_api::liteServer_version>(0, ls_version, ls_capabilities, now);
   finish_query(std::move(b));
 }
@@ -344,7 +344,7 @@ void LiteQuery::continue_getMasterchainInfo(Ref<ton::validator::MasterchainState
   auto zerostate_id = mc_state_q->get_zerostate_id();
   auto zs_tl = create_tl_object<lite_api::tonNode_zeroStateIdExt>(zerostate_id.workchain, zerostate_id.root_hash,
                                                                   zerostate_id.file_hash);
-  td::int32 now = static_cast<td::int32>(std::time(nullptr));
+  td::int32 now = static_cast<td::int32>(td::Clocks::system());
   auto b = (mode == -1) ? ton::create_serialize_tl_object<ton::lite_api::liteServer_masterchainInfo>(
                               ton::create_tl_lite_block_id(blkid), mc_state_q->root_hash(), std::move(zs_tl))
                         : ton::create_serialize_tl_object<ton::lite_api::liteServer_masterchainInfoExt>(

@@ -2009,7 +2009,7 @@ std::vector<ton::ValidatorDescr> Config::do_compute_validator_set(const Catchain
 }
 
 std::vector<ton::ValidatorDescr> Config::compute_total_validator_set(int next) const {
-  auto res = unpack_validator_set(get_config_param(next < 0 ? 32 : (next ? 36 : 34)));
+  auto res = unpack_validator_set(get_config_param((next < 0 ? 33 : (next ? 37 : 35)), (next < 0 ? 32 : (next ? 36 : 34))));
   if (res.is_error()) {
     return {};
   }
@@ -2149,7 +2149,8 @@ td::Result<std::pair<ton::UnixTime, ton::UnixTime>> Config::unpack_validator_set
 }
 
 std::pair<ton::UnixTime, ton::UnixTime> Config::get_validator_set_start_stop(int next) const {
-  auto res = unpack_validator_set_start_stop(get_config_param(next < 0 ? 32 : (next ? 36 : 34)));
+  auto res = unpack_validator_set_start_stop(
+      get_config_param((next < 0 ? 33 : (next ? 37 : 35)), (next < 0 ? 32 : (next ? 36 : 34))));
   if (res.is_error()) {
     return {0, 0};
   } else {

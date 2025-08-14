@@ -38,6 +38,7 @@
 #include "td/utils/date.h"
 
 bool local_scripts{false};
+std::string blockchain_explorer_title;
 
 static std::string time_to_human(unsigned ts) {
   td::StringBuilder sb;
@@ -741,6 +742,9 @@ std::string HttpAnswer::header() {
         << "<li class=\"nav-item\"><a class=\"nav-link\" href=\"" << prefix_ << "status\">status</a></li>\n"
         << "<li class=\"nav-item\"><a class=\"nav-link\" href=\"" << prefix_ << "last\">last</a></li>\n"
         << "</ul>";
+  if (!blockchain_explorer_title.empty()) {
+    *this << "<b>" << blockchain_explorer_title << "</b>";
+  }
   *this << "<form class=\"my-1 my-lg-0 flex-grow-1\" action=\"" << prefix_ << "account\" method=\"get\">"
         << "<div class=\"input-group ml-auto\" style=\"max-width:540px;\">"
         << "<input class=\"form-control mr-2 rounded\" type=\"search\" placeholder=\"account\" aria-label=\"account\" "

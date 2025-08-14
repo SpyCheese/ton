@@ -265,6 +265,11 @@ void ValidatorGroup::accept_block_candidate(validatorsession::BlockSourceInfo so
 void ValidatorGroup::accept_block_query(BlockIdExt block_id, td::Ref<BlockData> block, std::vector<BlockIdExt> prev,
                                         td::Ref<BlockSignatureSet> sig_set, td::Ref<BlockSignatureSet> approve_sig_set,
                                         int send_broadcast_mode, td::Promise<td::Unit> promise, bool is_retry) {
+  if (opts_->get_stop_at_block() && block_id.is_masterchain() &&
+      block_id.seqno() > opts_->get_stop_at_block().value()) {
+    promise.set_error(td::Status::Error("stop-at-block is reached"));
+    return;
+  }
   auto P = td::PromiseCreator::lambda([=, SelfId = actor_id(this),
                                        promise = std::move(promise)](td::Result<td::Unit> R) mutable {
     if (R.is_error()) {

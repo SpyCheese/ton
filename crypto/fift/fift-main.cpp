@@ -96,7 +96,7 @@ int main(int argc, char* const argv[]) {
 
   int i;
   int new_verbosity_level = VERBOSITY_NAME(INFO);
-  while (!script_mode && (i = getopt(argc, argv, "hinI:L:sv:V")) != -1) {
+  while (!script_mode && (i = getopt(argc, argv, "hinI:L:sv:VT:")) != -1) {
     switch (i) {
       case 'i':
         interactive = true;
@@ -113,6 +113,10 @@ int main(int argc, char* const argv[]) {
         break;
       case 's':
         script_mode = true;
+        break;
+      case 'T':
+        td::time_shift = td::to_double(td::as_slice(td::CSlice{optarg}));
+        LOG(WARNING) << "Time shift = " << td::time_shift;
         break;
       case 'v':
         new_verbosity_level = VERBOSITY_NAME(FATAL) + td::to_integer<int>(td::Slice(optarg));

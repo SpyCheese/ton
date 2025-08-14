@@ -247,7 +247,7 @@ void Collator::start_up() {
     LOG(WARNING) << "generating a hardfork block";
   }
   // 4. load external messages
-  if (!is_hardfork_) {
+  {
     LOG(DEBUG) << "sending get_external_messages() query to Manager";
     ++pending;
     auto token = perf_log_.start_action("get_external_messages");
@@ -885,7 +885,7 @@ bool Collator::unpack_last_mc_state() {
     prev_key_block_seqno_ = 0;
   }
   LOG(DEBUG) << "previous key block is " << prev_key_block_.to_str() << " (exists=" << prev_key_block_exists_ << ")";
-  vert_seqno_ = config_->get_vert_seqno() + (is_hardfork_ ? 1 : 0);
+  vert_seqno_ = config_->get_vert_seqno();
   LOG(DEBUG) << "vertical seqno (vert_seqno) is " << vert_seqno_;
   auto limits = config_->get_block_limits(is_masterchain());
   if (limits.is_error()) {
@@ -1636,7 +1636,7 @@ bool Collator::check_this_shard_mc_info() {
                                    << " set before_merge flags");
     }
     if (left->is_fsm_split()) {
-      auto tmp_now = std::max<td::uint32>(config_->utime, (unsigned)std::time(nullptr));
+      auto tmp_now = std::max<td::uint32>(config_->utime, (unsigned)td::Clocks::system());
       if (shard_splitting_enabled && tmp_now >= left->fsm_utime() && tmp_now + 13 < left->fsm_utime_end()) {
         now_upper_limit_ = left->fsm_utime_end() - 11;  // ultimate value of now_ must be at most now_upper_limit_
         before_split_ = true;
@@ -2181,7 +2181,10 @@ bool Collator::init_utime() {
   }
 
   auto prev = std::max<td::uint32>(config_->utime, prev_now_);
-  now_ = std::max<td::uint32>(prev + 1, (unsigned)std::time(nullptr));
+  now_ = std::max<td::uint32>(prev + 1, (unsigned)td::Clocks::system());
+  if (is_hardfork_) {
+    now_ = prev + 1;
+  }
   if (now_ > now_upper_limit_) {
     return fatal_error(
         "error initializing unix time for the new block: failed to observe end of fsm_split time interval for this "
@@ -2194,7 +2197,6 @@ bool Collator::init_utime() {
     auto overdue = now_ - (prev_now_ / lifetime + 1) * lifetime;
     // masterchain catchain rotation overdue, skip topsharddescr with some probability
     skip_topmsgdescr_ = (td::Random::fast(0, 1023) < 256);  // probability 1/4
-    skip_extmsg_ = (td::Random::fast(0, 1023) < 256);       // skip ext msg probability 1/4
     if (skip_topmsgdescr_) {
       LOG(WARNING)
           << "randomly skipping import of new shard data because of overdue masterchain catchain rotation (overdue by "
@@ -2208,7 +2210,6 @@ bool Collator::init_utime() {
   } else if (is_masterchain() && now_ > prev_now_ + 60) {
     auto interval = now_ - prev_now_;
     skip_topmsgdescr_ = (td::Random::fast(0, 1023) < 128);  // probability 1/8
-    skip_extmsg_ = (td::Random::fast(0, 1023) < 128);       // skip ext msg probability 1/8
     if (skip_topmsgdescr_) {
       LOG(WARNING) << "randomly skipping import of new shard data because of overdue masterchain block (last block was "
                    << interval << " seconds ago)";
@@ -2263,6 +2264,7 @@ bool Collator::fetch_config_params() {
                                                      compute_phase_cfg_.size_limits.defer_out_queue_size_limit);
   // This one is checked in validate-query
   hard_defer_out_queue_size_limit_ = compute_phase_cfg_.size_limits.defer_out_queue_size_limit;
+  compute_phase_cfg_.ignore_chksig = is_hardfork_;
   return true;
 }
 
@@ -2559,7 +2561,7 @@ bool Collator::out_msg_queue_cleanup() {
     };
   }
 
-  if (after_merge_) {
+  if (after_merge_ || new_block_seqno == 1) {
     // We need to clean the whole queue after merge
     // Queue is not too big, see const MERGE_MAX_QUEUE_SIZE
     for (const auto& nb : neighbors_) {
@@ -5992,7 +5994,7 @@ bool Collator::create_block_info(Ref<vm::Cell>& block_info) {
          && cb.store_bool_bool(want_split_)                         // want_split:Bool
          && cb.store_bool_bool(want_merge_)                         // want_merge:Bool
          && cb.store_bool_bool(is_key_block_)                       // key_block:Bool
-         && cb.store_bool_bool(is_hardfork_)                        // vert_seqno_incr:(## 1)
+         && cb.store_bool_bool(false)                               // vert_seqno_incr:(## 1)
          && cb.store_long_bool((int)report_version_, 8)             // flags:(## 8)
          && cb.store_long_bool(new_block_seqno, 32)                 // seq_no:#
          && cb.store_long_bool(vert_seqno_, 32)                     // vert_seq_no:#
@@ -6009,9 +6011,6 @@ bool Collator::create_block_info(Ref<vm::Cell>& block_info) {
                     && cb.store_builder_ref_bool(std::move(cb2))))  // .. ^BlkMasterInfo
          && store_prev_blk_ref(cb2, after_merge_)                   // prev_ref:..
          && cb.store_builder_ref_bool(std::move(cb2))               // .. ^(PrevBlkInfo after_merge)
-         && (!is_hardfork_ ||                                       // prev_vert_ref:vert_seqno_incr?..
-             (store_master_ref(cb2)                                 //
-              && cb.store_builder_ref_bool(std::move(cb2))))        // .. ^(BlkPrevInfo 0)
          && cb.finalize_to(block_info);
 }
 
@@ -6489,7 +6488,7 @@ bool Collator::create_block_candidate() {
                                  << consensus_config.max_collated_data_size << ")");
   }
   // 4. save block candidate
-  if (skip_store_candidate_) {
+  if (skip_store_candidate_ || is_hardfork_) {
     td::actor::send_closure_later(actor_id(this), &Collator::return_block_candidate, td::Unit());
   } else {
     LOG(INFO) << "saving new BlockCandidate";

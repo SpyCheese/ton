@@ -36,7 +36,7 @@ struct Start {
   unsigned created_at;
   unsigned char zerostate_root_hash[32];
   Start(const RootHash& hash, unsigned _now = 0)
-      : tag_field(tag), type_field(log_type), created_at(_now ? _now : (unsigned)std::time(nullptr)) {
+      : tag_field(tag), type_field(log_type), created_at(_now ? _now : (unsigned)td::Clocks::system()) {
     td::as<RootHash>(zerostate_root_hash) = hash;
   }
 };

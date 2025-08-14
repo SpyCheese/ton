@@ -1005,6 +1005,9 @@ validatorStats.collatorNodeResponse self:int256 validator_id:int256 timestamp:do
     block_id:tonNode.blockIdExt original_block_id:tonNode.blockIdExt collated_data_hash:int256
     = validatorStats.CollatorNodeResponse;
 
+validatorStats.appliedBlockStats block_id:tonNode.blockIdExt block_timestamp:int applied_at:double
+    transactions:int ext_msgs:int = validatorStats.AppliedBlockStats;
+
 collatorNode.candidate source:PublicKey id:tonNode.blockIdExt data:bytes collated_data:bytes = collatorNode.Candidate;
 collatorNode.compressedCandidate flags:# source:PublicKey id:tonNode.blockIdExt decompressed_size:int data:bytes = collatorNode.Candidate;
 collatorNode.compressedCandidateV2 flags:# source:PublicKey id:tonNode.blockIdExt data:bytes = collatorNode.Candidate;

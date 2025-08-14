@@ -641,6 +641,9 @@ int main(int argc, char* argv[]) {
     return td::Status::OK();
   });
 #endif
+  p.add_option('t', "title", "title to show on every page", [&](td::Slice arg) {
+    blockchain_explorer_title = arg.str();
+  });
 
   vm::init_vm().ensure();
 

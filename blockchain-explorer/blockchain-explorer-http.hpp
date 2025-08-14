@@ -34,6 +34,7 @@
 #include "block/block.h"
 
 extern bool local_scripts;
+extern std::string blockchain_explorer_title;
 
 class HttpAnswer {
  public:

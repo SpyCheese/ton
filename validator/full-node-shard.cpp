@@ -200,8 +200,11 @@ void FullNodeShardImpl::got_next_block(td::Result<BlockHandle> R) {
   if (R.is_error()) {
     if (R.error().code() == ErrorCode::timeout || R.error().code() == ErrorCode::notready) {
       get_next_block();
-      return;
+    } else {
+      delay_action([SelfId = actor_id(this)]() { td::actor::send_closure(SelfId, &FullNodeShardImpl::get_next_block); },
+                   td::Timestamp::in(2.0));
     }
+    return;
   }
   attempt_ = 0;
   R.ensure();

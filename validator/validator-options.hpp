@@ -176,6 +176,12 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   td::Ref<ShardBlockVerifierConfig> get_shard_block_verifier_config() const override {
     return shard_block_verifier_config_;
   }
+  td::optional<BlockSeqno> get_stop_at_block() const {
+    return stop_at_block_;
+  }
+  bool get_readonly_celldb() const override {
+    return readonly_celldb_;
+  }
 
   void set_zero_block_id(BlockIdExt block_id) override {
     zero_block_id_ = block_id;
@@ -299,6 +305,12 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_shard_block_verifier_config(td::Ref<ShardBlockVerifierConfig> config) override {
     shard_block_verifier_config_ = std::move(config);
   }
+  void set_stop_at_block(BlockSeqno seqno) override {
+    stop_at_block_ = seqno;
+  }
+  void set_readonly_celldb(bool value) override {
+    readonly_celldb_ = value;
+  }
 
   ValidatorManagerOptionsImpl *make_copy() const override {
     return new ValidatorManagerOptionsImpl(*this);
@@ -358,6 +370,8 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   std::set<adnl::AdnlNodeIdShort> collator_node_whitelist_;
   bool collator_node_whitelist_enabled_ = false;
   td::Ref<ShardBlockVerifierConfig> shard_block_verifier_config_{true};
+  td::optional<BlockSeqno> stop_at_block_;
+  bool readonly_celldb_ = false;
 };
 
 }  // namespace validator

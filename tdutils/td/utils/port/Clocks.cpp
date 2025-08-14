@@ -27,6 +27,8 @@ int64 Clocks::monotonic_nano() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
 }
 
+double time_shift = 0.0;
+
 double Clocks::monotonic() {
   // TODO write system specific functions, because std::chrono::steady_clock is steady only under Windows
   auto duration = std::chrono::steady_clock::now().time_since_epoch();
@@ -35,13 +37,14 @@ double Clocks::monotonic() {
 
 double Clocks::system() {
   auto duration = std::chrono::system_clock::now().time_since_epoch();
-  return static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count()) * 1e-9;
+  return static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count()) * 1e-9 +
+         time_shift;
 }
 
 int Clocks::tz_offset() {
   // not thread-safe on POSIX, so calculate the offset only once
   static int offset = [] {
-    auto now = std::time(nullptr);
+    auto now = (long)system();
 
     auto time_ptr = std::localtime(&now);
     if (time_ptr == nullptr) {

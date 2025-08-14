@@ -258,8 +258,10 @@ class ValidatorEngine : public td::actor::Actor {
   bool permanent_celldb_ = false;
   bool skip_key_sync_ = false;
   td::optional<ton::BlockSeqno> sync_shards_upto_;
+  td::optional<ton::BlockSeqno> sync_upto_;
   ton::adnl::AdnlNodeIdShort shard_block_retainer_adnl_id_ = ton::adnl::AdnlNodeIdShort::zero();
   bool shard_block_retainer_adnl_id_fullnode_ = false;
+  td::optional<ton::BlockSeqno> stop_at_block_;
 
   std::set<ton::CatchainSeqno> unsafe_catchains_;
   std::map<ton::BlockSeqno, std::pair<ton::CatchainSeqno, td::uint32>> unsafe_catchain_rotations_;
@@ -384,11 +386,17 @@ class ValidatorEngine : public td::actor::Actor {
   void set_sync_shards_upto(ton::BlockSeqno seqno) {
     sync_shards_upto_ = seqno;
   }
+  void set_sync_upto(ton::BlockSeqno seqno) {
+    sync_upto_ = seqno;
+  }
   void set_shard_block_retainer_adnl_id(ton::adnl::AdnlNodeIdShort id) {
     shard_block_retainer_adnl_id_ = id;
   }
   void set_shard_block_retainer_adnl_id_fullnode() {
     shard_block_retainer_adnl_id_fullnode_ = true;
+  }
+  void set_stop_at_block(ton::BlockSeqno seqno) {
+    stop_at_block_ = seqno;
   }
 
   void start_up() override;

@@ -295,7 +295,9 @@ void RootDb::store_block_state_from_data_preliminary(std::vector<td::Ref<BlockDa
 }
 
 void RootDb::get_block_state(ConstBlockHandle handle, td::Promise<td::Ref<ShardState>> promise) {
-  if (handle->inited_state_boc()) {
+  if (handle->inited_state_boc() || (handle->id().seqno() == 0 && handle->id().id.workchain == 0)) {
+    RootHash state_hash =
+        handle->id().seqno() == 0 && handle->id().id.workchain == 0 ? handle->id().root_hash : handle->state();
     if (handle->deleted_state_boc()) {
       promise.set_error(td::Status::Error(ErrorCode::error, "state already gc'd"));
       return;
@@ -310,7 +312,7 @@ void RootDb::get_block_state(ConstBlockHandle handle, td::Promise<td::Ref<ShardS
             promise.set_value(S.move_as_ok());
           }
         });
-    td::actor::send_closure(cell_db_, &CellDb::load_cell, handle->state(), std::move(P));
+    td::actor::send_closure(cell_db_, &CellDb::load_cell, state_hash, std::move(P));
   } else {
     promise.set_error(td::Status::Error(ErrorCode::notready, "state not in db"));
   }

@@ -23,7 +23,7 @@ td::Result<std::unique_ptr<TransactionEmulator::EmulationResult>> TransactionEmu
       utime = unixtime_;
     }
     if (!utime) {
-      utime = (unsigned)std::time(nullptr);
+      utime = (unsigned)td::Clocks::system();
     }
 
     auto fetch_res = block::FetchConfigParams::fetch_config_params(

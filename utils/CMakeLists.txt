@@ -25,4 +25,15 @@ target_link_libraries(proxy-liteserver tdutils tdactor adnl dht tl_api ton_crypt
 add_executable(prepare-ls-slice-config prepare-ls-slice-config.cpp)
 target_link_libraries(prepare-ls-slice-config tdutils tdactor adnl dht tl_api ton_crypto git lite-client-common)
 
+add_executable(mirror-prepare-state mirror-prepare-state.cpp)
+target_link_libraries(mirror-prepare-state ton_validator validator tdutils tdactor adnl dht tl_api ton_crypto git)
+
+add_executable(mirror-replay-externals mirror-replay-externals.cpp)
+target_include_directories(mirror-replay-externals PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
+target_link_libraries(mirror-replay-externals PRIVATE tonhttp rldp dht tonlib git terminal overlay tonlibjson tl_tonlib_api_json)
+
+add_executable(serialize-persistent-state serialize-persistent-state.cpp)
+target_link_libraries(serialize-persistent-state ton_validator validator tdutils tdactor adnl dht tl_api ton_crypto git
+  ${JEMALLOC_LIBRARIES})
+
 install(TARGETS generate-random-id proxy-liteserver RUNTIME DESTINATION bin)

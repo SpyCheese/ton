@@ -201,6 +201,10 @@ void ValidatorManagerImpl::validate_block(ReceivedBlock block, td::Promise<Block
     return;
   }
   CHECK(blkid.is_masterchain());
+  if (opts_->get_stop_at_block() && blkid.is_masterchain() && blkid.seqno() > opts_->get_stop_at_block().value()) {
+    promise.set_error(td::Status::Error("stop-at-block is reached"));
+    return;
+  }
 
   auto P = td::PromiseCreator::lambda(
       [SelfId = actor_id(this), promise = std::move(promise), id = blkid](td::Result<td::Unit> R) mutable {
@@ -220,6 +224,11 @@ void ValidatorManagerImpl::new_block_broadcast(BlockBroadcast broadcast, td::Pro
   }
   if (!need_monitor(broadcast.block_id.shard_full())) {
     promise.set_error(td::Status::Error("not monitoring shard"));
+    return;
+  }
+  if (opts_->get_stop_at_block() && broadcast.block_id.is_masterchain() &&
+      broadcast.block_id.seqno() > opts_->get_stop_at_block().value()) {
+    promise.set_error(td::Status::Error("stop-at-block is reached"));
     return;
   }
   promise = [SelfId = actor_id(this), promise = std::move(promise), block_id = broadcast.block_id,
@@ -2304,6 +2313,10 @@ void ValidatorManagerImpl::new_masterchain_block() {
   if (last_masterchain_seqno_ % 1024 == 0) {
     LOG(WARNING) << "applied masterchain block " << last_masterchain_block_id_;
   }
+  if (opts_->get_stop_at_block() && last_masterchain_seqno_ == opts_->get_stop_at_block().value()) {
+    td::actor::send_closure(db_, &Db::update_init_masterchain_block, last_masterchain_block_id_,
+                            [](td::Result<td::Unit> R) { R.ensure(); });
+  }
 }
 
 void ValidatorManagerImpl::update_shard_overlays() {
@@ -3215,6 +3228,10 @@ void ValidatorManagerImpl::log_end_validator_group_stats(validatorsession::EndVa
   write_session_stats(stats);
 }
 
+void ValidatorManagerImpl::log_applied_block_stats(tl_object_ptr<ton_api::validatorStats_appliedBlockStats> stats) {
+  write_session_stats(stats);
+}
+
 void ValidatorManagerImpl::get_block_handle_for_litequery(BlockIdExt block_id, td::Promise<ConstBlockHandle> promise) {
   get_block_handle(block_id, false,
                    [SelfId = actor_id(this), block_id, promise = std::move(promise),
@@ -3760,13 +3777,23 @@ void ValidatorManagerImpl::init_validator_telemetry() {
   }
 }
 
+template<typename T>
+static std::string stats_to_json(const T &obj) {
+  return td::json_encode<std::string>(td::ToJson(*obj.tl()), false);
+}
+
+template<typename T>
+static std::string stats_to_json(const tl_object_ptr<T> &obj) {
+  return td::json_encode<std::string>(td::ToJson(*obj), false);
+}
+
 template <typename T>
 void ValidatorManagerImpl::write_session_stats(const T &obj) {
   std::string fname = opts_->get_session_logs_file();
   if (fname.empty()) {
     return;
   }
-  auto s = td::json_encode<std::string>(td::ToJson(*obj.tl()), false);
+  auto s = stats_to_json(obj);
   s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return c == '\n' || c == '\r'; }), s.end());
 
   std::ofstream file;

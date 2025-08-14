@@ -1044,6 +1044,7 @@ bool ValidateQuery::fetch_config_params() {
     compute_phase_cfg_.precompiled_contracts = config_->get_precompiled_contracts_config();
     compute_phase_cfg_.allow_external_unfreeze = compute_phase_cfg_.global_version >= 8;
     compute_phase_cfg_.disable_anycast = config_->get_global_version() >= 10;
+    compute_phase_cfg_.ignore_chksig = is_fake_;
   }
   {
     // compute action_phase_cfg
@@ -2324,8 +2325,8 @@ bool ValidateQuery::check_utime_lt() {
                                   << config_->utime << ")");
   }
   /*
-  if (now_ > (unsigned)std::time(nullptr) + 15) {
-    return reject_query(PSTRING() << "block has creation time " << now_ << " too much in the future (it is only " << (unsigned)std::time(nullptr) << " now)");
+  if (now_ > (unsigned)td::Clocks::system() + 15) {
+    return reject_query(PSTRING() << "block has creation time " << now_ << " too much in the future (it is only " << (unsigned)td::Clocks::system() << " now)");
   }
   */
   if (start_lt_ <= config_->lt) {

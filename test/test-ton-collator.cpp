@@ -58,6 +58,8 @@
 #if TD_DARWIN || TD_LINUX
 #include <unistd.h>
 #endif
+#include "td/utils/port/rlimit.h"
+
 #include <iostream>
 #include <sstream>
 
@@ -418,6 +420,7 @@ int main(int argc, char *argv[]) {
   td::set_default_failure_signal_handler().ensure();
 
   vm::init_vm().ensure();
+  LOG_STATUS(td::change_maximize_rlimit(td::RlimitType::nofile, 786432));
 
   td::actor::ActorOwn<TestNode> x;
 
@@ -491,6 +494,10 @@ int main(int argc, char *argv[]) {
       setsid();
 #endif
     }).ensure();
+  });
+  p.add_option('\0', "time-shift", "system clock shift", [&](td::Slice s) {
+    td::time_shift = td::to_double(s);
+    LOG(WARNING) << "Time shift = " << td::time_shift;
   });
 
   td::actor::Scheduler scheduler({7});

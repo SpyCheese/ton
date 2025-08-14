@@ -155,6 +155,8 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual td::Ref<CollatorsList> get_collators_list() const = 0;
   virtual bool check_collator_node_whitelist(adnl::AdnlNodeIdShort id) const = 0;
   virtual td::Ref<ShardBlockVerifierConfig> get_shard_block_verifier_config() const = 0;
+  virtual td::optional<BlockSeqno> get_stop_at_block() const = 0;
+  virtual bool get_readonly_celldb() const = 0;
 
   virtual void set_zero_block_id(BlockIdExt block_id) = 0;
   virtual void set_init_block_id(BlockIdExt block_id) = 0;
@@ -195,6 +197,8 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual void set_collator_node_whitelisted_validator(adnl::AdnlNodeIdShort id, bool add) = 0;
   virtual void set_collator_node_whitelist_enabled(bool enabled) = 0;
   virtual void set_shard_block_verifier_config(td::Ref<ShardBlockVerifierConfig> config) = 0;
+  virtual void set_stop_at_block(BlockSeqno seqno) = 0;
+  virtual void set_readonly_celldb(bool value) = 0;
 
   static td::Ref<ValidatorManagerOptions> create(
       BlockIdExt zero_block_id, BlockIdExt init_block_id,

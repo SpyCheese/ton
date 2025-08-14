@@ -3002,7 +3002,7 @@ td::Result<TonlibClient::FullConfig> TonlibClient::validate_config(tonlib_api::o
   }
 
   if (o_master_config && o_master_config.value().hardforks != new_config.hardforks) {
-    return TonlibError::InvalidConfig("hardforks differs from embedded hardforks");
+    //return TonlibError::InvalidConfig("hardforks differs from embedded hardforks");
   }
 
   int vert_seqno = static_cast<int>(new_config.hardforks.size());
@@ -3428,7 +3428,7 @@ td::Status TonlibClient::do_request(const tonlib_api::raw_sendMessage& request,
   TRY_RESULT_PREFIX(body, vm::std_boc_deserialize(request.body_), TonlibError::InvalidBagOfCells("body"));
   std::ostringstream os;
   block::gen::t_Message_Any.print_ref(os, body);
-  LOG(ERROR) << os.str();
+  //LOG(ERROR) << os.str();
   make_request(int_api::SendMessage{std::move(body)}, to_any_promise(std::move(promise)));
   return td::Status::OK();
 }

@@ -253,6 +253,12 @@ void ArchiveImporter::check_masterchain_block(BlockSeqno seqno) {
     td::actor::send_closure(SelfId, &ArchiveImporter::checked_masterchain_proof, std::move(handle), std::move(data));
   });
 
+  if (opts_->get_stop_at_block() && it->second.is_masterchain() &&
+      it->second.seqno() > opts_->get_stop_at_block().value()) {
+    P.set_error(td::Status::Error("stop-at-block is reached"));
+    return;
+  }
+
   run_check_proof_query(it->second, std::move(proof), manager_, td::Timestamp::in(2.0), std::move(P),
                         last_masterchain_state_, opts_->is_hardfork(it->second));
 }

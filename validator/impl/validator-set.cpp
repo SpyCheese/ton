@@ -135,12 +135,12 @@ td::Status ValidatorSetCompute::init(const block::Config *config) {
     return td::Status::Error("null configuration pointer passed to ValidatorSetCompute");
   }
   config_ = config;
-  auto cv_root = config_->get_config_param(34);
+  auto cv_root = config_->get_config_param(35, 34);
   if (cv_root.not_null()) {
     TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(cv_root)));
     cur_validators_ = std::move(validators);
   }
-  auto nv_root = config_->get_config_param(36);
+  auto nv_root = config_->get_config_param(37, 36);
   if (nv_root.not_null()) {
     TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(nv_root)));
     next_validators_ = std::move(validators);

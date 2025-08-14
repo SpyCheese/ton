@@ -246,8 +246,9 @@ void ValidatorManagerMasterchainReiniter::choose_masterchain_state() {
       LOG(INFO) << "ignoring: too new block";
       continue;
     }
-    if (!p || ValidatorManager::is_persistent_state(h->unix_time(), p->unix_time())) {
-      auto ttl = ValidatorManager::persistent_state_ttl(h->unix_time());
+    if (!p || ValidatorManager::is_persistent_state(h->unix_time(), p->unix_time()) || opts_->is_hardfork(h->id())) {
+      auto ttl = opts_->is_hardfork(h->id()) ? h->unix_time() + 100000000
+                                             : ValidatorManager::persistent_state_ttl(h->unix_time());
       double time_to_download = 3600 * 8;
       if (ttl > td::Clocks::system() + time_to_download) {
         handle = h;

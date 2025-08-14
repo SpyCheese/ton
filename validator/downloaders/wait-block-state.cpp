@@ -75,7 +75,7 @@ void WaitBlockState::start() {
   bool inited_proof = handle_->id().is_masterchain() ? handle_->inited_proof() : handle_->inited_proof_link();
   bool allow_download =
       last_masterchain_state_.is_null() || opts_->need_monitor(handle_->id().shard_full(), last_masterchain_state_);
-  if (handle_->received_state() && inited_proof) {
+  if (handle_->received_state()/* && inited_proof*/) {
     reading_from_db_ = true;
 
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<td::Ref<ShardState>> R) {

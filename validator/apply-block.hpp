@@ -62,7 +62,7 @@ class ApplyBlock : public td::actor::Actor {
 
   void start_up() override;
   void got_block_handle(BlockHandle handle);
-  void written_block_data();
+  void written_block_data(td::Ref<BlockData> data = {});
   void got_prev_state(td::Ref<ShardState> state);
   void got_cur_state(td::Ref<ShardState> state);
   void written_state();

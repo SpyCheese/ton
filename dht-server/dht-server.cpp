@@ -1252,6 +1252,10 @@ int main(int argc, char *argv[]) {
         return td::Status::OK();
       });
   p.add_checked_option('u', "user", "change user", [&](td::Slice user) { return td::change_user(user.str()); });
+  p.add_option('\0', "time-shift", "system clock shift", [&](td::Slice s) {
+    td::time_shift = td::to_double(s);
+    LOG(WARNING) << "Time shift = " << td::time_shift;
+  });
   p.run(argc, argv).ensure();
 
   td::set_runtime_signal_handler(1, need_stats).ensure();

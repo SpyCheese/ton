@@ -131,9 +131,10 @@ void ValidatorManagerImpl::sync_complete(td::Promise<td::Unit> promise) {
   run_collate_query(CollateParams{.shard = shard_id,
                                   .min_masterchain_block_id = last_masterchain_block_id_,
                                   .prev = prev,
+                                  .is_hardfork = true,
                                   .creator = created_by,
                                   .validator_set = val_set},
-                    actor_id(this), td::Timestamp::in(10.0), {}, std::move(P));
+                    actor_id(this), td::Timestamp::in(60.0), {}, std::move(P));
 }
 
 void ValidatorManagerImpl::validate_fake(BlockCandidate candidate, std::vector<BlockIdExt> prev, BlockIdExt last,
@@ -265,13 +266,9 @@ void ValidatorManagerImpl::get_key_block_proof_link(BlockIdExt block_id, td::Pro
 }
 
 void ValidatorManagerImpl::new_external_message(td::BufferSlice data, int priority) {
-  if (last_masterchain_state_.is_null()) {
-    return;
-  }
-  auto R = create_ext_message(std::move(data), last_masterchain_state_->get_ext_msg_limits());
-  if (R.is_ok()) {
-    ext_messages_.emplace_back(R.move_as_ok());
-  }
+  auto R = create_ext_message(std::move(data), {});
+  R.ensure();
+  ext_messages_.emplace_back(R.move_as_ok());
 }
 
 void ValidatorManagerImpl::new_ihr_message(td::BufferSlice data) {
@@ -352,6 +349,17 @@ void ValidatorManagerImpl::wait_block_state_short(BlockIdExt block_id, td::uint3
                                 std::move(promise));
       });
   get_block_handle(block_id, true, std::move(P));
+}
+
+void ValidatorManagerImpl::wait_neighbor_msg_queue_proofs(
+    ShardIdFull dst_shard, std::vector<BlockIdExt> blocks, td::Timestamp timeout,
+    td::Promise<std::map<BlockIdExt, td::Ref<OutMsgQueueProof>>> promise) {
+  if (out_msg_queue_importer_.empty()) {
+    out_msg_queue_importer_ = td::actor::create_actor<OutMsgQueueImporter>("outmsgqueueimporter", actor_id(this), opts_,
+                                                                           last_masterchain_state_);
+  }
+  td::actor::send_closure(out_msg_queue_importer_, &OutMsgQueueImporter::get_neighbor_msg_queue_proofs, dst_shard,
+                          std::move(blocks), timeout, std::move(promise));
 }
 
 void ValidatorManagerImpl::wait_block_data(BlockHandle handle, td::uint32 priority, td::Timestamp timeout,
