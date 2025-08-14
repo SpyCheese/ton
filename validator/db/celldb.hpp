@@ -64,7 +64,8 @@ class CellDbIn : public CellDbBase {
 
   std::vector<std::pair<std::string, std::string>> prepare_stats();
   void load_cell(RootHash hash, td::Promise<td::Ref<vm::DataCell>> promise);
-  void store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, td::Promise<td::Ref<vm::DataCell>> promise);
+  void store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, KeyHash list_position,
+                  td::Promise<td::Ref<vm::DataCell>> promise);
   void get_cell_db_reader(td::Promise<std::shared_ptr<vm::CellDbReader>> promise);
   void store_block_state_permanent(td::Ref<BlockData> block, td::Promise<td::Ref<vm::DataCell>> promise);
   void store_block_state_permanent_bulk(std::vector<td::Ref<BlockData>> blocks, td::Promise<td::Unit> promise);
@@ -106,8 +107,12 @@ class CellDbIn : public CellDbBase {
   KeyHash get_empty_key_hash();
 
   void gc(BlockIdExt block_id);
-  void gc_cont(BlockHandle handle);
+  void gc_check_next_state_stored(BlockIdExt block_id, td::Promise<bool> promise);
+  void gc_check_next_state_stored_cont(BlockHandle handle, td::Promise<bool> promise);
+  void gc_cont(BlockHandle handle, bool next_state_stored);
+  void gc_split_state(BlockHandle handle);
   void gc_cont2(BlockHandle handle);
+  void gc_cont3(BlockHandle handle);
   void skip_gc();
 
   void migrate_cells();

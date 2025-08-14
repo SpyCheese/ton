@@ -28,7 +28,8 @@
 #include "ton/ton-io.hpp"
 #include "common/delay.h"
 #include "block/block-auto.h"
-#include "permanent-celldb/permanent-celldb-utils.h"
+#include "common/promiseop.hpp"
+#include "celldb-utils.h"
 #include "td/actor/MultiPromise.h"
 
 #include <block-auto.h>
@@ -234,7 +235,7 @@ void CellDbIn::start_up() {
   }
 
   db_options.enable_bloom_filter = !opts_->get_celldb_disable_bloom_filter();
-  db_options.two_level_index_and_filter = db_options.enable_bloom_filter 
+  db_options.two_level_index_and_filter = db_options.enable_bloom_filter
                                 && opts_->state_ttl() >= 60 * 60 * 24 * 30; // 30 days
   if (db_options.two_level_index_and_filter && !opts_->get_celldb_in_memory()) {
     o_celldb_cache_size = std::max<td::uint64>(o_celldb_cache_size ? o_celldb_cache_size.value() : 0UL, 16UL << 30);
@@ -382,12 +383,13 @@ void CellDbIn::load_cell(RootHash hash, td::Promise<td::Ref<vm::DataCell>> promi
       td::Timestamp::now());
 }
 
-void CellDbIn::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, td::Promise<td::Ref<vm::DataCell>> promise) {
+void CellDbIn::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, KeyHash list_position,
+                          td::Promise<td::Ref<vm::DataCell>> promise) {
   if (db_busy_) {
     action_queue_.push(
-        [self = this, block_id, cell = std::move(cell), promise = std::move(promise)](td::Result<td::Unit> R) mutable {
+        [=, self = this, cell = std::move(cell), promise = std::move(promise)](td::Result<td::Unit> R) mutable {
           R.ensure();
-          self->store_cell(block_id, std::move(cell), std::move(promise));
+          self->store_cell(block_id, std::move(cell), list_position, std::move(promise));
         });
     return;
   }
@@ -406,37 +408,38 @@ void CellDbIn::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, td::Promi
   db_busy_ = true;
   boc_->prepare_commit_async(async_executor, [=, this, SelfId = actor_id(this), timer = std::move(timer),
                                               timer_prepare = td::Timer{}, promise = std::move(promise),
-                                              cell = std::move(cell)](td::Result<td::Unit> Res) mutable {
-    Res.ensure();
+                                              cell = std::move(cell)](td::Result<td::Unit> R) mutable {
+    R.ensure();
     timer_prepare.pause();
     td::actor::send_lambda_later(
         SelfId, [=, this, timer = std::move(timer), promise = std::move(promise), cell = std::move(cell)]() mutable {
           TD_PERF_COUNTER(celldb_store_cell);
-          auto empty = get_empty_key_hash();
-          auto ER = get_block(empty);
-          ER.ensure();
-          auto E = ER.move_as_ok();
-
-          auto PR = get_block(E.prev);
-          PR.ensure();
-          auto P = PR.move_as_ok();
-          CHECK(P.next == empty);
-
-          DbEntry D{block_id, E.prev, empty, cell->get_hash().bits()};
-
-          E.prev = key_hash;
-          P.next = key_hash;
-
-          if (P.is_empty()) {
-            E.next = key_hash;
-            P.prev = key_hash;
+          KeyHash prev_key, next_key;
+          DbEntry prev_entry, next_entry;
+          if (list_position.is_zero()) {
+            next_key = get_empty_key_hash();
+            next_entry = get_block(next_key).ensure().move_as_ok();
+            prev_key = next_entry.prev;
+            prev_entry = get_block(prev_key).ensure().move_as_ok();
+          } else {
+            prev_key = list_position;
+            prev_entry = get_block(prev_key).ensure().move_as_ok();
+            next_key = prev_entry.next;
+            next_entry = get_block(next_key).ensure().move_as_ok();
+          }
+          DbEntry entry{block_id, prev_key, next_key, cell->get_hash().bits()};
+          next_entry.prev = key_hash;
+          prev_entry.next = key_hash;
+          if (next_key == prev_key) {
+            next_entry.next = key_hash;
+            prev_entry.prev = key_hash;
           }
           td::Timer timer_write;
           vm::CellStorer stor{*cell_db_};
           cell_db_->begin_write_batch().ensure();
-          set_block(get_empty_key_hash(), std::move(E));
-          set_block(D.prev, std::move(P));
-          set_block(key_hash, std::move(D));
+          set_block(next_key, std::move(next_entry));
+          set_block(prev_key, std::move(prev_entry));
+          set_block(key_hash, std::move(entry));
           boc_->commit(stor).ensure();
           cell_db_->commit_write_batch().ensure();
           timer_write.pause();
@@ -454,7 +457,7 @@ void CellDbIn::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, td::Promi
             cell_db_statistics_.store_cell_prepare_time_.insert(timer_prepare.elapsed() * 1e6);
             cell_db_statistics_.store_cell_write_time_.insert(timer_write.elapsed() * 1e6);
           }
-          LOG(DEBUG) << "Stored state " << block_id.to_str();
+          LOG(DEBUG) << "Stored state " << block_id.to_str() << " in " << timer.elapsed();
           release_db();
         });
   });
@@ -730,14 +733,107 @@ void CellDbIn::alarm() {
 }
 
 void CellDbIn::gc(BlockIdExt block_id) {
-  auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<BlockHandle> R) {
-    R.ensure();
-    td::actor::send_closure(SelfId, &CellDbIn::gc_cont, R.move_as_ok());
-  });
-  td::actor::send_closure(root_db_, &RootDb::get_block_handle_external, block_id, false, std::move(P));
+  td::actor::send_closure(root_db_, &RootDb::get_block_handle_external, block_id, false,
+                          [SelfId = actor_id(this)](td::Result<BlockHandle> R) {
+                            auto handle = R.ensure().move_as_ok();
+                            td::actor::send_closure(
+                                SelfId, &CellDbIn::gc_check_next_state_stored_cont, handle, [=](td::Result<bool> R2) {
+                                  td::actor::send_closure(SelfId, &CellDbIn::gc_cont, handle, R2.ensure().move_as_ok());
+                                });
+                          });
 }
 
-void CellDbIn::gc_cont(BlockHandle handle) {
+void CellDbIn::gc_check_next_state_stored(BlockIdExt block_id, td::Promise<bool> promise) {
+  td::actor::send_closure(root_db_, &RootDb::get_block_handle_external, block_id, false,
+                          [SelfId = actor_id(this), promise = std::move(promise)](td::Result<BlockHandle> R) mutable {
+                            td::actor::send_closure(SelfId, &CellDbIn::gc_check_next_state_stored_cont,
+                                                    R.ensure().move_as_ok(), std::move(promise));
+                          });
+}
+
+void CellDbIn::gc_check_next_state_stored_cont(BlockHandle handle, td::Promise<bool> promise) {
+  if (!handle->is_applied()) {
+    if (handle->inited_prev()) {
+      LOG(DEBUG) << "gc_check_next_state_stored " << handle->id() << " : not applied";
+      auto prev = handle->prev();
+      if (prev.size() == 1) {
+        gc_check_next_state_stored(prev[0], std::move(promise));
+      } else {
+        auto [p1, p2] = td::split_promise([promise = std::move(promise)](td::Result<std::pair<bool, bool>> R) mutable {
+          auto [r1, r2] = R.ensure().move_as_ok();
+          promise.set_value(r1 && r2);
+        });
+        gc_check_next_state_stored(prev[0], std::move(p1));
+        gc_check_next_state_stored(prev[1], std::move(p2));
+      }
+    } else {
+      LOG(DEBUG) << "gc_check_next_state_stored " << handle->id() << " : not applied, no prev";
+      promise.set_value(true);
+    }
+    return;
+  }
+  if (!handle->inited_next()) {
+    LOG(DEBUG) << "gc_check_next_state_stored " << handle->id() << " : applied, no next";
+    promise.set_value(false);
+    return;
+  }
+  LOG(DEBUG) << "gc_check_next_state_stored " << handle->id() << " : applied, check next blocks";
+  auto [p1, p2] = td::split_promise([promise = std::move(promise)](td::Result<std::pair<bool, bool>> R) mutable {
+    auto [r1, r2] = R.ensure().move_as_ok();
+    promise.set_value(r1 && r2);
+  });
+  auto next = handle->next();
+  for (size_t i = 0; i < next.size(); ++i) {
+    td::actor::send_closure(root_db_, &RootDb::get_block_handle_external, next[i], false,
+                            [promise = std::move(i == 0 ? p1 : p2)](td::Result<BlockHandle> R) mutable {
+                              BlockHandle next_handle = R.ensure().move_as_ok();
+                              LOG(DEBUG) << "gc_check_next_state_stored : next block " << next_handle->id().to_str()
+                                         << " : " << next_handle->inited_state_boc();
+                              promise.set_result(next_handle->inited_state_boc());
+                            });
+  }
+  if (next.size() == 1) {
+    p2.set_value(true);
+  }
+}
+
+void CellDbIn::gc_cont(BlockHandle handle, bool next_state_stored) {
+  if (next_state_stored) {
+    LOG(DEBUG) << "GC of " << handle->id().to_str() << " : proceeding normally";
+    gc_cont2(handle);
+    return;
+  }
+  LOG(WARNING) << "GC of " << handle->id().to_str() << " : next state is NOT stored, splitting state";
+  gc_split_state(handle);
+}
+
+void CellDbIn::gc_split_state(BlockHandle handle) {
+  if (db_busy_) {
+    action_queue_.push([self = this, handle = std::move(handle)](td::Result<td::Unit> R) mutable {
+      R.ensure();
+      self->gc_split_state(handle);
+    });
+    return;
+  }
+
+  auto key_hash = get_key_hash(handle->id());
+  auto F = get_block(key_hash).ensure().move_as_ok();
+  auto state_root = boc_->load_cell(F.root_hash.as_slice()).ensure().move_as_ok();
+  std::vector<std::pair<BlockIdExt, td::Ref<vm::Cell>>> parts = split_state_for_celldb_gc(handle->id(), state_root);
+  LOG(WARNING) << "GC split : " << parts.size() << " parts";
+  td::MultiPromise mp;
+  auto ig = mp.init_guard();
+  for (auto& [block_id, cell] : parts) {
+    store_cell(block_id, cell, key_hash, ig.get_promise().wrap([](td::Ref<vm::DataCell>&&) { return td::Unit(); }));
+  }
+  ig.add_promise([=, SelfId = actor_id(this)](td::Result<td::Unit> R) {
+    R.ensure();
+    LOG(WARNING) << "GC split : done";
+    td::actor::send_closure(SelfId, &CellDbIn::gc_cont2, handle);
+  });
+}
+
+void CellDbIn::gc_cont2(BlockHandle handle) {
   if (!handle->inited_state_boc()) {
     LOG(WARNING) << "inited_state_boc=false, but state in db. blockid=" << handle->id();
   }
@@ -745,17 +841,17 @@ void CellDbIn::gc_cont(BlockHandle handle) {
 
   auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), handle](td::Result<td::Unit> R) {
     R.ensure();
-    td::actor::send_closure(SelfId, &CellDbIn::gc_cont2, handle);
+    td::actor::send_closure(SelfId, &CellDbIn::gc_cont3, handle);
   });
 
   td::actor::send_closure(root_db_, &RootDb::store_block_handle, handle, std::move(P));
 }
 
-void CellDbIn::gc_cont2(BlockHandle handle) {
+void CellDbIn::gc_cont3(BlockHandle handle) {
   if (db_busy_) {
     action_queue_.push([self = this, handle = std::move(handle)](td::Result<td::Unit> R) mutable {
       R.ensure();
-      self->gc_cont2(handle);
+      self->gc_cont3(handle);
     });
     return;
   }
@@ -843,7 +939,11 @@ void CellDbIn::gc_cont2(BlockHandle handle) {
           if (!opts_->get_disable_rocksdb_stats()) {
             cell_db_statistics_.gc_cell_time_.insert(timer.elapsed() * 1e6);
           }
-          LOG(DEBUG) << "Deleted state " << handle->id().to_str();
+          if (handle->id().shard_full().pfx_len() > 5) {
+            LOG(WARNING) << "Deleted state " << handle->id().to_str() << " in " << timer_all.elapsed() << "s";
+          } else {
+            LOG(DEBUG) << "Deleted state " << handle->id().to_str() << " in " << timer_all.elapsed() << "s";
+          }
           timer_finish.reset();
           timer_all.reset();
           release_db();
@@ -1011,7 +1111,8 @@ void CellDb::load_cell(RootHash hash, td::Promise<td::Ref<vm::DataCell>> promise
 }
 
 void CellDb::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, td::Promise<td::Ref<vm::DataCell>> promise) {
-  td::actor::send_closure(cell_db_, &CellDbIn::store_cell, block_id, std::move(cell), std::move(promise));
+  td::actor::send_closure(cell_db_, &CellDbIn::store_cell, block_id, std::move(cell), CellDbIn::KeyHash::zero(),
+                          std::move(promise));
 }
 
 void CellDb::store_block_state_permanent(td::Ref<BlockData> block, td::Promise<td::Ref<vm::DataCell>> promise) {
