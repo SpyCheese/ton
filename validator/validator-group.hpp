@@ -23,7 +23,6 @@
 
 #include "validator-session/validator-session.h"
 
-#include "rldp/rldp.h"
 #include "rldp2/rldp.h"
 
 #include <list>
@@ -83,7 +82,7 @@ class ValidatorGroup : public td::actor::Actor {
   ValidatorGroup(ShardIdFull shard, PublicKeyHash local_id, ValidatorSessionId session_id,
                  td::Ref<ValidatorSet> validator_set, BlockSeqno last_key_block_seqno,
                  validatorsession::ValidatorSessionOptions config, td::actor::ActorId<keyring::Keyring> keyring,
-                 td::actor::ActorId<adnl::Adnl> adnl, td::actor::ActorId<rldp::Rldp> rldp,
+                 td::actor::ActorId<adnl::Adnl> adnl,
                  td::actor::ActorId<rldp2::Rldp> rldp2, td::actor::ActorId<overlay::Overlays> overlays,
                  std::string db_root, td::actor::ActorId<ValidatorManager> validator_manager,
                  td::actor::ActorId<CollationManager> collation_manager, bool create_session,
@@ -96,7 +95,6 @@ class ValidatorGroup : public td::actor::Actor {
       , config_(std::move(config))
       , keyring_(keyring)
       , adnl_(adnl)
-      , rldp_(rldp)
       , rldp2_(rldp2)
       , overlays_(overlays)
       , db_root_(std::move(db_root))
@@ -138,7 +136,6 @@ class ValidatorGroup : public td::actor::Actor {
 
   td::actor::ActorId<keyring::Keyring> keyring_;
   td::actor::ActorId<adnl::Adnl> adnl_;
-  td::actor::ActorId<rldp::Rldp> rldp_;
   td::actor::ActorId<rldp2::Rldp> rldp2_;
   td::actor::ActorId<overlay::Overlays> overlays_;
   std::string db_root_;

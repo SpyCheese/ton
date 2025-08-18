@@ -17,7 +17,6 @@
 #pragma once
 
 #include "interfaces/validator-manager.h"
-#include "rldp/rldp.h"
 #include "rldp2/rldp.h"
 #include <map>
 #include <optional>

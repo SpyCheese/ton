@@ -2152,9 +2152,7 @@ void ValidatorEngine::started_dht() {
 }
 
 void ValidatorEngine::start_rldp() {
-  rldp_ = ton::rldp::Rldp::create(adnl_.get());
   rldp2_ = ton::rldp2::Rldp::create(adnl_.get());
-  td::actor::send_closure(rldp_, &ton::rldp::Rldp::set_default_mtu, 2048);
   td::actor::send_closure(rldp2_, &ton::rldp2::Rldp::set_default_mtu, 2048);
   started_rldp();
 }
@@ -2182,7 +2180,7 @@ void ValidatorEngine::start_validator() {
   load_collator_options();
 
   validator_manager_ = ton::validator::ValidatorManagerFactory::create(
-      validator_options_, db_root_, keyring_.get(), adnl_.get(), rldp_.get(), rldp2_.get(), overlay_manager_.get());
+      validator_options_, db_root_, keyring_.get(), adnl_.get(), rldp2_.get(), overlay_manager_.get());
 
   for (auto &v : config_.validators) {
     td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::add_permanent_key, v.first,
@@ -2242,8 +2240,8 @@ void ValidatorEngine::start_full_node() {
         .public_broadcast_speed_multiplier_ = broadcast_speed_multiplier_public_,
         .private_broadcast_speed_multiplier_ = broadcast_speed_multiplier_private_};
     full_node_ = ton::validator::fullnode::FullNode::create(
-        short_id, full_node_id_, validator_options_->zero_block_id().file_hash,
-        full_node_options, keyring_.get(), adnl_.get(), rldp_.get(), rldp2_.get(),
+        short_id, full_node_id_, validator_options_->zero_block_id().file_hash, full_node_options, keyring_.get(),
+        adnl_.get(), rldp2_.get(),
         default_dht_node_.is_zero() ? td::actor::ActorId<ton::dht::Dht>{} : dht_nodes_[default_dht_node_].get(),
         overlay_manager_.get(), validator_manager_.get(), full_node_client_.get(), db_root_, std::move(P));
     for (auto &v : config_.validators) {

@@ -21,7 +21,7 @@
 #include "overlay/overlays.h"
 #include "ton/ton-types.h"
 #include "validator/validator.h"
-#include "rldp/rldp.h"
+#include "rldp2/rldp.h"
 #include "adnl/adnl-ext-client.h"
 
 namespace ton {
@@ -34,12 +34,12 @@ class DownloadBlock : public td::actor::Actor {
  public:
   DownloadBlock(BlockIdExt block_id, adnl::AdnlNodeIdShort local_id, overlay::OverlayIdShort overlay_id,
                 adnl::AdnlNodeIdShort download_from, td::uint32 priority, td::Timestamp timeout,
-                td::actor::ActorId<ValidatorManagerInterface> validator_manager, td::actor::ActorId<rldp::Rldp> rldp,
+                td::actor::ActorId<ValidatorManagerInterface> validator_manager, td::actor::ActorId<rldp2::Rldp> rldp,
                 td::actor::ActorId<overlay::Overlays> overlays, td::actor::ActorId<adnl::Adnl> adnl,
                 td::actor::ActorId<adnl::AdnlExtClient> client, td::Promise<ReceivedBlock> promise);
   DownloadBlock(BlockIdExt block_id, adnl::AdnlNodeIdShort local_id, overlay::OverlayIdShort overlay_id,
                 BlockHandle prev, adnl::AdnlNodeIdShort download_from, td::uint32 priority, td::Timestamp timeout,
-                td::actor::ActorId<ValidatorManagerInterface> validator_manager, td::actor::ActorId<rldp::Rldp> rldp,
+                td::actor::ActorId<ValidatorManagerInterface> validator_manager, td::actor::ActorId<rldp2::Rldp> rldp,
                 td::actor::ActorId<overlay::Overlays> overlays, td::actor::ActorId<adnl::Adnl> adnl,
                 td::actor::ActorId<adnl::AdnlExtClient> client, td::Promise<ReceivedBlock> promise);
 
@@ -73,7 +73,7 @@ class DownloadBlock : public td::actor::Actor {
 
   td::Timestamp timeout_;
   td::actor::ActorId<ValidatorManagerInterface> validator_manager_;
-  td::actor::ActorId<rldp::Rldp> rldp_;
+  td::actor::ActorId<rldp2::Rldp> rldp_;
   td::actor::ActorId<overlay::Overlays> overlays_;
   td::actor::ActorId<adnl::Adnl> adnl_;
   td::actor::ActorId<adnl::AdnlExtClient> client_;

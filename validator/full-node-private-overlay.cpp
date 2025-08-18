@@ -283,7 +283,6 @@ void FullNodePrivateBlockOverlay::init() {
                           nodes_, std::make_unique<Callback>(actor_id(this)), rules, R"({ "type": "private-blocks" })",
                           overlay_options);
 
-  td::actor::send_closure(rldp_, &rldp::Rldp::add_id, local_id_);
   td::actor::send_closure(rldp2_, &rldp2::Rldp::add_id, local_id_);
   inited_ = true;
 }
@@ -505,7 +504,6 @@ void FullNodeCustomOverlay::init() {
       PSTRING() << R"({ "type": "custom-overlay", "name": ")" << td::format::Escaped{name_} << R"(" })",
       overlay_options);
 
-  td::actor::send_closure(rldp_, &rldp::Rldp::add_id, local_id_);
   td::actor::send_closure(rldp2_, &rldp2::Rldp::add_id, local_id_);
   inited_ = true;
 }
