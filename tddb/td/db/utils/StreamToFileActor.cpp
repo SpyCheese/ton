@@ -73,7 +73,7 @@ Result<bool> StreamToFileActor::do_loop() {
   // Also it could be useful to check error and stop immediately.
   TRY_RESULT(is_closed, is_closed());
 
-  // Flush all data that is awailable on the at the beginning of loop
+  // Flush all data that is available on the at the beginning of loop
   TRY_STATUS(do_flush_once());
 
   if ((sync_at_ && sync_at_.is_in_past()) || is_closed) {
@@ -81,7 +81,7 @@ Result<bool> StreamToFileActor::do_loop() {
     sync_at_ = {};
   }
 
-  bool need_update = sync_state_.set_synced_size(synced_size_) | sync_state_.set_flushed_size(flushed_size_);
+  bool need_update = int(sync_state_.set_synced_size(synced_size_)) | int(sync_state_.set_flushed_size(flushed_size_));
   if (need_update && callback_) {
     callback_->on_sync_state_changed();
   }

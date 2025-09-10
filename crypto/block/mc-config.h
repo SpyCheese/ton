@@ -156,6 +156,10 @@ class McShardHashI : public td::CntObject {
   virtual bool before_merge() const = 0;
 };
 
+struct StorageUsed {
+  td::uint64 cells = 0, bits = 0;
+};
+
 struct McShardHash : public McShardHashI {
   ton::BlockIdExt blk_;
   ton::LogicalTime start_lt_, end_lt_;
@@ -197,6 +201,7 @@ struct McShardHash : public McShardHashI {
       : blk_(blk), start_lt_(start_lt), end_lt_(end_lt) {
   }
   McShardHash(const McShardHash&) = default;
+  McShardHash& operator=(const McShardHash&) = default;
   bool is_valid() const {
     return blk_.is_valid();
   }
@@ -335,7 +340,7 @@ struct StoragePrices {
       , mc_cell_price(_mc_cprice) {
   }
   static td::RefInt256 compute_storage_fees(ton::UnixTime now, const std::vector<block::StoragePrices>& pricing,
-                                            const vm::CellStorageStat& storage_stat, ton::UnixTime last_paid,
+                                            const StorageUsed& storage_used, ton::UnixTime last_paid,
                                             bool is_special, bool is_masterchain);
 };
 
@@ -395,6 +400,9 @@ struct SizeLimitsConfig {
   td::uint32 max_acc_state_cells = 1 << 16;
   td::uint32 max_acc_state_bits = (1 << 16) * 1023;
   td::uint32 max_acc_public_libraries = 256;
+  td::uint32 defer_out_queue_size_limit = 256;
+  td::uint32 max_msg_extra_currencies = 2;
+  td::uint32 max_acc_fixed_prefix_length = 8;
 };
 
 struct CatchainValidatorsConfig {
@@ -413,7 +421,7 @@ struct CatchainValidatorsConfig {
 struct WorkchainInfo : public td::CntObject {
   ton::WorkchainId workchain{ton::workchainInvalid};
   ton::UnixTime enabled_since;
-  td::uint32 actual_min_split;
+  td::uint32 monitor_min_split;
   td::uint32 min_split, max_split;
   bool basic;
   bool active;
@@ -429,6 +437,8 @@ struct WorkchainInfo : public td::CntObject {
   unsigned split_merge_interval = 100;    // split/merge is enabled during 60 second interval
   unsigned min_split_merge_interval = 30; // split/merge interval must be at least 30 seconds
   unsigned max_split_merge_delay = 1000;  // end of split/merge interval must be at most 1000 seconds in the future
+
+  td::uint32 persistent_state_split_depth = 0;
 
   bool is_valid() const {
     return workchain != ton::workchainInvalid;
@@ -454,10 +464,11 @@ class ShardConfig {
   ShardConfig() = default;
   ShardConfig(const ShardConfig& other);
   ShardConfig(ShardConfig&& other) = default;
-  ShardConfig(Ref<vm::Cell> shard_hashes, Ref<McShardHash> mc_shard_hash = {})
+  explicit ShardConfig(Ref<vm::Cell> shard_hashes, Ref<McShardHash> mc_shard_hash = {})
       : shard_hashes_(std::move(shard_hashes)), mc_shard_hash_(std::move(mc_shard_hash)) {
     init();
   }
+  ShardConfig& operator=(ShardConfig&& other) = default;
   bool is_valid() const {
     return valid_;
   }
@@ -535,6 +546,11 @@ struct PrecompiledContractsConfig {
   td::optional<Contract> get_contract(td::Bits256 code_hash) const;
 };
 
+struct CollatorNodeDescr {
+  ton::ShardIdFull shard;
+  ton::NodeIdShort adnl_id;
+};
+
 class Config {
   enum {
     default_mc_catchain_lifetime = 200,
@@ -544,7 +560,10 @@ class Config {
   };
 
  public:
-  enum { needValidatorSet = 16, needSpecialSmc = 32, needWorkchainInfo = 256, needCapabilities = 512 };
+  static constexpr int needValidatorSet = 16;
+  static constexpr int needSpecialSmc = 32;
+  static constexpr int needWorkchainInfo = 256;
+  static constexpr int needCapabilities = 512;
   int mode{0};
   ton::BlockIdExt block_id;
 
@@ -552,7 +571,7 @@ class Config {
   td::BitArray<256> config_addr;
   Ref<vm::Cell> config_root;
   std::unique_ptr<vm::Dictionary> config_dict;
-  std::unique_ptr<ValidatorSet> cur_validators_;
+  std::shared_ptr<ValidatorSet> cur_validators_;
   std::unique_ptr<vm::Dictionary> workchains_dict_;
   WorkchainSet workchains_;
   int version_{-1};
@@ -616,7 +635,7 @@ class Config {
   bool set_block_id_ext(const ton::BlockIdExt& block_id_ext);
   td::Result<std::vector<ton::StdSmcAddress>> get_special_smartcontracts(bool without_config = false) const;
   bool is_special_smartcontract(const ton::StdSmcAddress& addr) const;
-  static td::Result<std::unique_ptr<ValidatorSet>> unpack_validator_set(Ref<vm::Cell> valset_root);
+  static td::Result<std::shared_ptr<ValidatorSet>> unpack_validator_set(Ref<vm::Cell> valset_root, bool use_cache = false);
   td::Result<std::vector<StoragePrices>> get_storage_prices() const;
   static td::Result<StoragePrices> do_get_one_storage_prices(vm::CellSlice cs);
   td::Result<GasLimitsPrices> get_gas_limits_prices(bool is_masterchain = false) const;
@@ -636,8 +655,8 @@ class Config {
   const WorkchainSet& get_workchain_list() const {
     return workchains_;
   }
-  const ValidatorSet* get_cur_validator_set() const {
-    return cur_validators_.get();
+  std::shared_ptr<ValidatorSet> const& get_cur_validator_set() const& {
+    return cur_validators_;
   }
   std::pair<ton::UnixTime, ton::UnixTime> get_validator_set_start_stop(int next = 0) const;
   ton::ValidatorSessionConfig get_consensus_config() const;
@@ -654,9 +673,8 @@ class Config {
   BurningConfig get_burning_config() const;
   td::Ref<vm::Tuple> get_unpacked_config_tuple(ton::UnixTime now) const;
   PrecompiledContractsConfig get_precompiled_contracts_config() const;
-  static std::vector<ton::ValidatorDescr> do_compute_validator_set(const block::CatchainValidatorsConfig& ccv_conf,
-                                                                   ton::ShardIdFull shard,
-                                                                   const block::ValidatorSet& vset, ton::UnixTime time,
+  static std::vector<ton::ValidatorDescr> do_compute_validator_set(const CatchainValidatorsConfig& ccv_conf,
+                                                                   ton::ShardIdFull shard, const ValidatorSet& vset,
                                                                    ton::CatchainSeqno cc_seqno);
 
   static td::Result<std::unique_ptr<Config>> unpack_config(Ref<vm::Cell> config_root,
@@ -681,14 +699,12 @@ class Config {
 
 class ConfigInfo : public Config, public ShardConfig {
  public:
-  enum {
-    needStateRoot = 1,
-    needLibraries = 2,
-    needStateExtraRoot = 4,
-    needShardHashes = 8,
-    needAccountsRoot = 64,
-    needPrevBlocks = 128
-  };
+  static constexpr int needStateRoot = 1;
+  static constexpr int needLibraries = 2;
+  static constexpr int needStateExtraRoot = 4;
+  static constexpr int needShardHashes = 8;
+  static constexpr int needAccountsRoot = 64;
+  static constexpr int needPrevBlocks = 128;
   ton::BlockSeqno vert_seqno{~0U};
   int global_id_{0};
   ton::UnixTime utime{0};

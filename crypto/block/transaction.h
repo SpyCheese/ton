@@ -17,6 +17,7 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include "account-storage-stat.h"
 #include "common/refcnt.hpp"
 #include "common/refint.h"
 #include "vm/cells.h"
@@ -30,6 +31,7 @@
 #include "block/block.h"
 #include "block/mc-config.h"
 #include "precompiled-smc/PrecompiledSmartContract.h"
+#include "block/block-auto.h"
 
 namespace block {
 using td::Ref;
@@ -66,8 +68,11 @@ struct NewOutMsg {
   ton::LogicalTime lt;
   Ref<vm::Cell> msg;
   Ref<vm::Cell> trans;
-  NewOutMsg(ton::LogicalTime _lt, Ref<vm::Cell> _msg, Ref<vm::Cell> _trans)
-      : lt(_lt), msg(std::move(_msg)), trans(std::move(_trans)) {
+  unsigned msg_idx;
+  td::optional<MsgMetadata> metadata;
+  td::Ref<vm::Cell> msg_env_from_dispatch_queue;  // Not null if from dispatch queue; in this case lt is emitted_lt
+  NewOutMsg(ton::LogicalTime _lt, Ref<vm::Cell> _msg, Ref<vm::Cell> _trans, unsigned _msg_idx)
+      : lt(_lt), msg(std::move(_msg)), trans(std::move(_trans)), msg_idx(_msg_idx) {
   }
   bool operator<(const NewOutMsg& other) const& {
     return lt < other.lt || (lt == other.lt && msg->get_hash() < other.msg->get_hash());
@@ -82,6 +87,7 @@ struct StoragePhaseConfig {
   td::RefInt256 freeze_due_limit;
   td::RefInt256 delete_due_limit;
   bool enable_due_payment{false};
+  int global_version = 0;
   StoragePhaseConfig() = default;
   StoragePhaseConfig(const std::vector<block::StoragePrices>* _pricing, td::RefInt256 freeze_limit = {},
                      td::RefInt256 delete_limit = {})
@@ -125,6 +131,8 @@ struct ComputePhaseConfig {
   bool stop_on_accept_message = false;
   PrecompiledContractsConfig precompiled_contracts;
   bool dont_run_precompiled_ = false;
+  bool allow_external_unfreeze{false};
+  bool disable_anycast{false};
 
   ComputePhaseConfig() : gas_price(0), gas_limit(0), special_gas_limit(0), gas_credit(0) {
     compute_threshold();
@@ -162,10 +170,22 @@ struct ActionPhaseConfig {
   const WorkchainSet* workchains{nullptr};
   bool action_fine_enabled{false};
   bool bounce_on_fail_enabled{false};
+  bool message_skip_enabled{false};
+  bool disable_custom_fess{false};
+  bool reserve_extra_enabled{false};
+  bool extra_currency_v2{false};
+  bool disable_ihr_flag{false};
   td::optional<td::Bits256> mc_blackhole_addr;
+  bool disable_anycast{false};
   const MsgPrices& fetch_msg_prices(bool is_masterchain) const {
     return is_masterchain ? fwd_mc : fwd_std;
   }
+};
+
+struct SerializeConfig {
+  bool extra_currency_v2{false};
+  bool disable_anycast{false};
+  bool store_storage_dict_hash{false};
 };
 
 struct CreditPhase {
@@ -193,6 +213,7 @@ struct ComputePhase {
   Ref<vm::Cell> actions;
   std::string vm_log;
   td::optional<td::uint64> precompiled_gas_usage;
+  td::HashSet<vm::CellHash> vm_loaded_cells;
 };
 
 struct ActionPhase {
@@ -239,12 +260,13 @@ struct Account {
   bool is_special{false};
   bool tick{false};
   bool tock{false};
-  bool split_depth_set_{false};
-  unsigned char split_depth_{0};
+  int fixed_prefix_length{0};
   int verbosity{3 * 0};
   ton::UnixTime now_{0};
   ton::WorkchainId workchain{ton::workchainInvalid};
-  td::BitArray<32> addr_rewrite;     // rewrite (anycast) data, split_depth bits
+  td::BitArray<32> addr_rewrite;     // rewrite (anycast) data, addr_rewrite_length bits
+  bool addr_rewrite_length_set{false};
+  unsigned char addr_rewrite_length{0};
   ton::StdSmcAddress addr;           // rewritten address (by replacing a prefix of `addr_orig` with `addr_rewrite`); it is the key in ShardAccounts
   ton::StdSmcAddress addr_orig;      // address indicated in smart-contract data (must coincide with hash of StateInit)
   Ref<vm::CellSlice> my_addr;        // address as stored in the smart contract (MsgAddressInt); corresponds to `addr_orig` + anycast info
@@ -253,8 +275,13 @@ struct Account {
   ton::LogicalTime last_trans_lt_;
   ton::Bits256 last_trans_hash_;
   ton::LogicalTime block_lt;
+
   ton::UnixTime last_paid;
-  vm::CellStorageStat storage_stat;
+  StorageUsed storage_used;
+  td::optional<td::Bits256> storage_dict_hash;
+  td::optional<td::Bits256> orig_storage_dict_hash;
+  td::optional<AccountStorageStat> account_storage_stat;
+
   block::CurrencyCollection balance;
   td::RefInt256 due_payment;
   Ref<vm::Cell> orig_total_state;  // ^Account
@@ -262,13 +289,11 @@ struct Account {
   Ref<vm::CellSlice> storage;      // AccountStorage
   Ref<vm::CellSlice> inner_state;  // StateInit
   ton::Bits256 state_hash;         // hash of StateInit for frozen accounts
-  Ref<vm::Cell> code, data, library, orig_library;
+  Ref<vm::Cell> code, data, library;
+  Ref<vm::Cell> orig_code, orig_data, orig_library;
   std::vector<LtCellRef> transactions;
   Account() = default;
   Account(ton::WorkchainId wc, td::ConstBitPtr _addr) : workchain(wc), addr(_addr) {
-  }
-  Account(ton::WorkchainId wc, td::ConstBitPtr _addr, int depth)
-      : split_depth_set_(true), split_depth_((unsigned char)depth), workchain(wc), addr(_addr) {
   }
   block::CurrencyCollection get_balance() const {
     return balance;
@@ -276,8 +301,10 @@ struct Account {
   bool set_address(ton::WorkchainId wc, td::ConstBitPtr new_addr);
   bool unpack(Ref<vm::CellSlice> account, ton::UnixTime now, bool special);
   bool init_new(ton::UnixTime now);
+  td::Result<Ref<vm::Cell>> compute_account_storage_dict() const;
+  td::Status init_account_storage_stat(Ref<vm::Cell> dict_root);
   bool deactivate();
-  bool recompute_tmp_addr(Ref<vm::CellSlice>& tmp_addr, int split_depth, td::ConstBitPtr orig_addr_rewrite) const;
+  bool recompute_tmp_addr(Ref<vm::CellSlice>& tmp_addr, int fixed_prefix_length, td::ConstBitPtr orig_addr_rewrite) const;
   td::RefInt256 compute_storage_fees(ton::UnixTime now, const std::vector<block::StoragePrices>& pricing) const;
   bool is_masterchain() const {
     return workchain == ton::masterchainId;
@@ -293,10 +320,10 @@ struct Account {
 
  protected:
   friend struct transaction::Transaction;
-  bool set_split_depth(int split_depth);
-  bool check_split_depth(int split_depth) const;
-  bool forget_split_depth();
-  bool init_rewrite_addr(int split_depth, td::ConstBitPtr orig_addr_rewrite);
+  bool set_addr_rewrite_length(int new_length);
+  bool check_addr_rewrite_length(int length) const;
+  bool forget_addr_rewrite_length();
+  bool init_rewrite_addr(int rewrite_length, td::ConstBitPtr orig_addr_rewrite);
 
  private:
   bool unpack_address(vm::CellSlice& addr_cs);
@@ -328,12 +355,15 @@ struct Transaction {
   bool was_created{false};
   bool bounce_enabled{false};
   bool in_msg_extern{false};
+  gen::CommonMsgInfo::Record_int_msg_info in_msg_info;
   bool use_msg_state{false};
   bool is_first{false};
   bool orig_addr_rewrite_set{false};
   bool new_tick;
   bool new_tock;
-  signed char new_split_depth{-1};
+  int new_fixed_prefix_length{-1};
+  int new_addr_rewrite_length{-1};
+  bool force_remove_anycast_address = false;
   ton::UnixTime now;
   int acc_status;
   int verbosity{3 * 0};
@@ -364,12 +394,15 @@ struct Transaction {
   std::unique_ptr<ComputePhase> compute_phase;
   std::unique_ptr<ActionPhase> action_phase;
   std::unique_ptr<BouncePhase> bounce_phase;
-  vm::CellStorageStat new_storage_stat;
+  StorageUsed new_storage_used;
+  td::optional<AccountStorageStat> new_account_storage_stat;
+  td::optional<td::Bits256> new_storage_dict_hash;
   bool gas_limit_overridden{false};
+  std::vector<Ref<vm::Cell>> storage_stat_updates;
   Transaction(const Account& _account, int ttype, ton::LogicalTime req_start_lt, ton::UnixTime _now,
               Ref<vm::Cell> _inmsg = {});
   bool unpack_input_msg(bool ihr_delivered, const ActionPhaseConfig* cfg);
-  bool check_in_msg_state_hash();
+  bool check_in_msg_state_hash(const ComputePhaseConfig& cfg);
   bool prepare_storage_phase(const StoragePhaseConfig& cfg, bool force_collect = true, bool adjust_msg_value = false);
   bool prepare_credit_phase();
   td::uint64 gas_bought_for(const ComputePhaseConfig& cfg, td::RefInt256 nanograms);
@@ -379,10 +412,10 @@ struct Transaction {
   bool run_precompiled_contract(const ComputePhaseConfig& cfg, precompiled::PrecompiledSmartContract& precompiled);
   bool prepare_compute_phase(const ComputePhaseConfig& cfg);
   bool prepare_action_phase(const ActionPhaseConfig& cfg);
-  td::Status check_state_limits(const SizeLimitsConfig& size_limits, bool update_storage_stat = true);
+  td::Status check_state_limits(const SizeLimitsConfig& size_limits, bool is_account_stat = true);
   bool prepare_bounce_phase(const ActionPhaseConfig& cfg);
-  bool compute_state();
-  bool serialize();
+  bool compute_state(const SerializeConfig& cfg);
+  bool serialize(const SerializeConfig& cfg);
   td::uint64 gas_used() const {
     return compute_phase ? compute_phase->gas_used : 0;
   }
@@ -405,13 +438,18 @@ struct Transaction {
   int try_action_reserve_currency(vm::CellSlice& cs, ActionPhase& ap, const ActionPhaseConfig& cfg);
   bool check_replace_src_addr(Ref<vm::CellSlice>& src_addr) const;
   bool check_rewrite_dest_addr(Ref<vm::CellSlice>& dest_addr, const ActionPhaseConfig& cfg,
-                               bool* is_mc = nullptr) const;
+                               bool* is_mc = nullptr, bool allow_anycast = true) const;
   bool serialize_storage_phase(vm::CellBuilder& cb);
   bool serialize_credit_phase(vm::CellBuilder& cb);
   bool serialize_compute_phase(vm::CellBuilder& cb);
   bool serialize_action_phase(vm::CellBuilder& cb);
   bool serialize_bounce_phase(vm::CellBuilder& cb);
   bool unpack_msg_state(const ComputePhaseConfig& cfg, bool lib_only = false, bool forbid_public_libs = false);
+
+ public:
+  static Ref<vm::Tuple> prepare_in_msg_params_tuple(const gen::CommonMsgInfo::Record_int_msg_info* info,
+                                                    const Ref<vm::Cell>& state_init,
+                                                    const CurrencyCollection& msg_balance_remaining);
 };
 }  // namespace transaction
 
@@ -420,14 +458,14 @@ struct FetchConfigParams {
                                         std::vector<block::StoragePrices>* storage_prices,
                                         StoragePhaseConfig* storage_phase_cfg, td::BitArray<256>* rand_seed,
                                         ComputePhaseConfig* compute_phase_cfg, ActionPhaseConfig* action_phase_cfg,
-                                        td::RefInt256* masterchain_create_fee, td::RefInt256* basechain_create_fee,
-                                        ton::WorkchainId wc, ton::UnixTime now);
+                                        SerializeConfig* serialize_cfg, td::RefInt256* masterchain_create_fee,
+                                        td::RefInt256* basechain_create_fee, ton::WorkchainId wc, ton::UnixTime now);
   static td::Status fetch_config_params(const block::Config& config, Ref<vm::Tuple> prev_blocks_info,
                                         Ref<vm::Cell>* old_mparams, std::vector<block::StoragePrices>* storage_prices,
                                         StoragePhaseConfig* storage_phase_cfg, td::BitArray<256>* rand_seed,
                                         ComputePhaseConfig* compute_phase_cfg, ActionPhaseConfig* action_phase_cfg,
-                                        td::RefInt256* masterchain_create_fee, td::RefInt256* basechain_create_fee,
-                                        ton::WorkchainId wc, ton::UnixTime now);
+                                        SerializeConfig* serialize_cfg, td::RefInt256* masterchain_create_fee,
+                                        td::RefInt256* basechain_create_fee, ton::WorkchainId wc, ton::UnixTime now);
 };
 
 }  // namespace block

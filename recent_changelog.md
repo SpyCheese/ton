@@ -1,6 +1,3 @@
-## 2024.03 Update
+## 2025.07 Accelerator Update
 
-1. Preparatory (not enabled yet) code for pre-compiled smart-contract.
-2. Minor fixes for fee-related opcodes.
-
-
+Separation of validation and collation processes that allows to host them on independent machines and achieve full horizontal scaling. [More details in documentation](https://docs.ton.org/v3/documentation/infra/nodes/validation/collators)

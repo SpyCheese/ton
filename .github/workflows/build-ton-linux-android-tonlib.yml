@@ -17,10 +17,20 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential git cmake ninja-build automake libtool texinfo autoconf libgflags-dev \
         zlib1g-dev libssl-dev libreadline-dev libmicrohttpd-dev pkg-config libgsl-dev python3 python3-dev \
-        libtool autoconf libsodium-dev libsecp256k1-dev
+        libtool autoconf libsodium-dev libsecp256k1-dev liblz4-dev
+        
+
+    - name: Cache Android NDK
+      id: cache-android-ndk
+      uses: actions/cache@v4
+      with:
+        path: android-ndk-r25b
+        key: ${{ runner.os }}-${{ runner.arch }}-ubuntu-22.04-cache-android-ndk-${{ hashFiles('**/assembly/android/build-android-tonlib.sh') }}
 
     - name: Build TON
       run: |
+        git submodule sync --recursive
+        git submodule update
         cp assembly/android/build-android-tonlib.sh .
         chmod +x build-android-tonlib.sh
         ./build-android-tonlib.sh -a
@@ -28,5 +38,5 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@master
       with:
-        name: tonlib-android
+        name: ton-android-tonlib
         path: artifacts

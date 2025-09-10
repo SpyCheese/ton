@@ -9,6 +9,7 @@
 #include "tvm-emulator.hpp"
 #include "crypto/vm/stack.hpp"
 #include "crypto/vm/memo.h"
+#include "git.h"
 
 td::Result<td::Ref<vm::Cell>> boc_b64_to_cell(const char *boc) {
   TRY_RESULT_PREFIX(boc_decoded, td::base64_decode(td::Slice(boc)), "Can't decode base64 boc: ");
@@ -65,7 +66,18 @@ const char *external_not_accepted_response(std::string&& vm_log, int vm_exit_cod
 
 td::Result<block::Config> decode_config(const char* config_boc) {
   TRY_RESULT_PREFIX(config_params_cell, boc_b64_to_cell(config_boc), "Can't deserialize config params boc: ");
-  auto global_config = block::Config(config_params_cell, td::Bits256::zero(), block::Config::needWorkchainInfo | block::Config::needSpecialSmc | block::Config::needCapabilities);
+  auto config_dict = std::make_unique<vm::Dictionary>(config_params_cell, 32);
+  auto config_addr_cell = config_dict->lookup_ref(td::BitArray<32>::zero());
+  if (config_addr_cell.is_null()) {
+    return td::Status::Error("Can't find config address (param 0) is missing in config params");
+  }
+  auto config_addr_cs = vm::load_cell_slice(std::move(config_addr_cell));
+  if (config_addr_cs.size() != 0x100) {
+    return td::Status::Error(PSLICE() << "configuration parameter 0 with config address has wrong size");
+  }
+  ton::StdSmcAddress config_addr;
+  config_addr_cs.fetch_bits_to(config_addr);
+  auto global_config = block::Config(config_params_cell, std::move(config_addr), block::Config::needWorkchainInfo | block::Config::needSpecialSmc | block::Config::needCapabilities);
   TRY_STATUS_PREFIX(global_config.unpack(), "Can't unpack config params: ");
   return global_config;
 }
@@ -76,8 +88,17 @@ void *transaction_emulator_create(const char *config_params_boc, int vm_log_verb
     LOG(ERROR) << global_config_res.move_as_error().message();
     return nullptr;
   }
+  auto global_config = std::make_shared<block::Config>(global_config_res.move_as_ok());
+  return new emulator::TransactionEmulator(std::move(global_config), vm_log_verbosity);
+}
 
-  return new emulator::TransactionEmulator(global_config_res.move_as_ok(), vm_log_verbosity);
+void *emulator_config_create(const char *config_params_boc) {
+  auto config = decode_config(config_params_boc);
+  if (config.is_error()) {
+    LOG(ERROR) << "Error decoding config: " << config.move_as_error();
+    return nullptr;
+  }
+  return new block::Config(config.move_as_ok());
 }
 
 const char *transaction_emulator_emulate_transaction(void *transaction_emulator, const char *shard_account_boc, const char *message_boc) {
@@ -166,7 +187,7 @@ const char *transaction_emulator_emulate_transaction(void *transaction_emulator,
                                           external_not_accepted->elapsed_time);
   }
 
-  auto emulation_success = dynamic_cast<emulator::TransactionEmulator::EmulationSuccess&>(*emulation_result);
+  auto emulation_success = std::move(dynamic_cast<emulator::TransactionEmulator::EmulationSuccess&>(*emulation_result));
   auto trans_boc_b64 = cell_to_boc_b64(std::move(emulation_success.transaction));
   if (trans_boc_b64.is_error()) {
     ERROR_RESPONSE(PSTRING() << "Can't serialize Transaction to boc " << trans_boc_b64.move_as_error());
@@ -239,7 +260,8 @@ const char *transaction_emulator_emulate_tick_tock_transaction(void *transaction
   }
   auto emulation_result = result.move_as_ok();
 
-  auto emulation_success = dynamic_cast<emulator::TransactionEmulator::EmulationSuccess&>(*emulation_result);
+  auto emulation_success =
+      std::move(dynamic_cast<emulator::TransactionEmulator::EmulationSuccess &>(*emulation_result));
   auto trans_boc_b64 = cell_to_boc_b64(std::move(emulation_success.transaction));
   if (trans_boc_b64.is_error()) {
     ERROR_RESPONSE(PSTRING() << "Can't serialize Transaction to boc " << trans_boc_b64.move_as_error());
@@ -319,7 +341,21 @@ bool transaction_emulator_set_config(void *transaction_emulator, const char* con
     return false;
   }
 
-  emulator->set_config(global_config_res.move_as_ok());
+  emulator->set_config(std::make_shared<block::Config>(global_config_res.move_as_ok()));
+
+  return true;
+}
+
+void config_deleter(block::Config* ptr) {
+    // We do not delete the config object, since ownership management is delegated to the caller
+}
+
+bool transaction_emulator_set_config_object(void *transaction_emulator, void* config) {
+  auto emulator = static_cast<emulator::TransactionEmulator *>(transaction_emulator);
+  
+  std::shared_ptr<block::Config> config_ptr(static_cast<block::Config *>(config), config_deleter);
+  
+  emulator->set_config(config_ptr);
 
   return true;
 }
@@ -461,6 +497,66 @@ bool tvm_emulator_set_c7(void *tvm_emulator, const char *address, uint32_t unixt
   return true;
 }
 
+bool tvm_emulator_set_extra_currencies(void *tvm_emulator, const char *extra_currencies) {
+  auto emulator = static_cast<emulator::TvmEmulator *>(tvm_emulator);
+  vm::Dictionary dict{32};
+  td::Slice extra_currencies_str{extra_currencies};
+  while (true) {
+    auto next_space_pos = extra_currencies_str.find(' ');
+    auto currency_id_amount = next_space_pos == td::Slice::npos ? 
+      extra_currencies_str.substr(0) : extra_currencies_str.substr(0, next_space_pos);
+
+    if (!currency_id_amount.empty()) {
+      auto delim_pos = currency_id_amount.find('=');
+      if (delim_pos == td::Slice::npos) {
+        LOG(ERROR) << "Invalid extra currency format, missing '='";
+        return false;
+      }
+
+      auto currency_id_str = currency_id_amount.substr(0, delim_pos);
+      auto amount_str = currency_id_amount.substr(delim_pos + 1);
+
+      auto currency_id = td::to_integer_safe<uint32_t>(currency_id_str);
+      if (currency_id.is_error()) {
+        LOG(ERROR) << "Invalid extra currency id: " << currency_id_str;
+        return false;
+      }
+      auto amount = td::dec_string_to_int256(amount_str);
+      if (amount.is_null()) {
+        LOG(ERROR) << "Invalid extra currency amount: " << amount_str;
+        return false;
+      }
+      if (amount == 0) {
+        continue;
+      }
+      if (amount < 0) {
+        LOG(ERROR) << "Negative extra currency amount: " << amount_str;
+        return false;
+      }
+
+      vm::CellBuilder cb;
+      block::tlb::t_VarUInteger_32.store_integer_value(cb, *amount);
+      if (!dict.set_builder(td::BitArray<32>(currency_id.ok()), cb, vm::DictionaryBase::SetMode::Add)) {
+        LOG(ERROR) << "Duplicate extra currency id";
+        return false;
+      }
+    }
+    if (next_space_pos == td::Slice::npos) {
+      break;
+    }
+    extra_currencies_str.remove_prefix(next_space_pos + 1);
+  }
+  emulator->set_extra_currencies(std::move(dict).extract_root_cell());
+  return true;
+}
+
+bool tvm_emulator_set_config_object(void* tvm_emulator, void* config) {
+  auto emulator = static_cast<emulator::TvmEmulator *>(tvm_emulator);
+  auto global_config = std::shared_ptr<block::Config>(static_cast<block::Config *>(config), config_deleter);
+  emulator->set_config(global_config);
+  return true;
+}
+
 bool tvm_emulator_set_prev_blocks_info(void *tvm_emulator, const char* info_boc) {
   auto emulator = static_cast<emulator::TvmEmulator *>(tvm_emulator);
 
@@ -543,6 +639,89 @@ const char *tvm_emulator_run_get_method(void *tvm_emulator, int method_id, const
   return strdup(jb.string_builder().as_cslice().c_str());
 }
 
+struct TvmEulatorEmulateRunMethodResponse
+{
+  const char *response;
+  const char *log;
+};
+
+TvmEulatorEmulateRunMethodResponse emulate_run_method(uint32_t len, const char *params_boc, int64_t gas_limit) {
+  auto params_cell = vm::std_boc_deserialize(td::Slice(params_boc, len));
+  if (params_cell.is_error()) {
+    return { nullptr, nullptr };
+  }
+  auto params_cs = vm::load_cell_slice(params_cell.move_as_ok());
+  auto code = params_cs.fetch_ref();
+  auto data = params_cs.fetch_ref();
+
+  auto stack_cs = vm::load_cell_slice(params_cs.fetch_ref());
+  auto params = vm::load_cell_slice(params_cs.fetch_ref());
+  auto c7_cs = vm::load_cell_slice(params.fetch_ref());
+  auto libs = vm::Dictionary(params.fetch_ref(), 256);
+
+  auto method_id = params_cs.fetch_long(32);
+
+  td::Ref<vm::Stack> stack;
+  if (!vm::Stack::deserialize_to(stack_cs, stack)) {
+    return { nullptr, nullptr };
+  }
+
+  td::Ref<vm::Stack> c7;
+  if (!vm::Stack::deserialize_to(c7_cs, c7)) {
+    return { nullptr, nullptr };
+  }
+
+  auto emulator = new emulator::TvmEmulator(code, data);
+  emulator->set_vm_verbosity_level(0);
+  emulator->set_gas_limit(gas_limit);
+  emulator->set_c7_raw(c7->fetch(0).as_tuple());
+  if (!libs.is_empty()) {
+    emulator->set_libraries(std::move(libs));
+  }
+  auto result = emulator->run_get_method(int(method_id), stack);
+  delete emulator;
+
+  vm::CellBuilder stack_cb;
+  if (!result.stack->serialize(stack_cb)) {
+    return { nullptr, nullptr };
+  }
+
+  vm::CellBuilder cb;
+  cb.store_long(result.code, 32);
+  cb.store_long(result.gas_used, 64);
+  cb.store_ref(stack_cb.finalize());
+
+  auto ser = vm::std_boc_serialize(cb.finalize());
+  if (!ser.is_ok()) {
+    return { nullptr, nullptr };
+  }
+  auto sok = ser.move_as_ok();
+
+  auto sz = uint32_t(sok.size());
+  char* rn = (char*)malloc(sz + 4);
+  memcpy(rn, &sz, 4);
+  memcpy(rn+4, sok.data(), sz);
+
+  return { rn, strdup(result.vm_log.data()) };
+}
+
+const char *tvm_emulator_emulate_run_method(uint32_t len, const char *params_boc, int64_t gas_limit) {
+  auto result = emulate_run_method(len, params_boc, gas_limit);
+  return result.response;
+}
+
+void *tvm_emulator_emulate_run_method_detailed(uint32_t len, const char *params_boc, int64_t gas_limit) {
+  auto result = emulate_run_method(len, params_boc, gas_limit);
+  return new TvmEulatorEmulateRunMethodResponse(result);
+}
+
+void run_method_detailed_result_destroy(void *detailed_result) {
+  auto result = static_cast<TvmEulatorEmulateRunMethodResponse *>(detailed_result);
+  free(const_cast<char*>(result->response));
+  free(const_cast<char*>(result->log));
+  delete result;
+}
+
 const char *tvm_emulator_send_external_message(void *tvm_emulator, const char *message_body_boc) {
   auto message_body_cell = boc_b64_to_cell(message_body_boc);
   if (message_body_cell.is_error()) {
@@ -611,4 +790,23 @@ const char *tvm_emulator_send_internal_message(void *tvm_emulator, const char *m
 
 void tvm_emulator_destroy(void *tvm_emulator) {
   delete static_cast<emulator::TvmEmulator *>(tvm_emulator);
+}
+
+void emulator_config_destroy(void *config) {
+  delete static_cast<block::Config *>(config);
+}
+
+void string_destroy(const char *str) {
+  if (str != nullptr) {
+    free(const_cast<char *>(str));
+  }
+}
+
+const char* emulator_version() {
+  auto version_json = td::JsonBuilder();
+  auto obj = version_json.enter_object();
+  obj("emulatorLibCommitHash", GitMetadata::CommitSHA1());
+  obj("emulatorLibCommitDate", GitMetadata::CommitDate());
+  obj.leave();
+  return strdup(version_json.string_builder().as_cslice().c_str());
 }

@@ -190,6 +190,7 @@ class CellSlice : public td::CntObject {
   }
   bool fetch_maybe_ref(Ref<Cell>& ref);
   bool prefetch_maybe_ref(Ref<Cell>& ref) const;
+  std::vector<Ref<Cell>> prefetch_all_refs() const;
   td::BitSlice fetch_bits(unsigned bits);
   td::BitSlice prefetch_bits(unsigned bits) const;
   td::Ref<CellSlice> fetch_subslice(unsigned bits, unsigned refs = 0);
@@ -257,6 +258,7 @@ class CellSlice : public td::CntObject {
   void dump(std::ostream& os, int level = 0, bool endl = true) const;
   void dump_hex(std::ostream& os, int mode = 0, bool endl = false) const;
   bool print_rec(std::ostream& os, int indent = 0) const;
+  bool print_rec(td::StringBuilder& sb, int indent = 0) const;
   bool print_rec(std::ostream& os, int* limit, int indent = 0) const;
   bool print_rec(int limit, std::ostream& os, int indent = 0) const;
   void error() const {

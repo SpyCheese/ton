@@ -300,11 +300,12 @@ class TestNode : public td::actor::Actor {
                                                                              shard_top_block_id_, db_root_);
     for (auto &msg : ext_msgs_) {
       td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManager::new_external_message,
-                              std::move(msg));
+                              std::move(msg), 0);
     }
     for (auto &topmsg : top_shard_descrs_) {
-      td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManager::new_shard_block, ton::BlockIdExt{},
-                              0, std::move(topmsg));
+      td::actor::send_closure(validator_manager_,
+                              &ton::validator::ValidatorManager::new_shard_block_description_broadcast,
+                              ton::BlockIdExt{}, 0, std::move(topmsg));
     }
     class Callback : public ton::validator::ValidatorManagerInterface::Callback {
      private:
@@ -323,9 +324,8 @@ class TestNode : public td::actor::Actor {
         td::actor::send_closure(id_, &ton::validator::ValidatorManager::sync_complete,
                                 td::PromiseCreator::lambda([](td::Unit) {}));
       }
-      void add_shard(ton::ShardIdFull) override {
-      }
-      void del_shard(ton::ShardIdFull) override {
+      void on_new_masterchain_block(td::Ref<ton::validator::MasterchainState> state,
+                                    std::set<ton::ShardIdFull> shards_to_monitor) override {
       }
       void send_ihr_message(ton::AccountIdPrefixFull dst, td::BufferSlice data) override {
       }
@@ -347,7 +347,10 @@ class TestNode : public td::actor::Actor {
           }
         }
       }
-      void send_broadcast(ton::BlockBroadcast broadcast) override {
+      void send_block_candidate(ton::BlockIdExt block_id, ton::CatchainSeqno cc_seqno, td::uint32 validator_set_hash,
+                                td::BufferSlice data, int mode) override {
+      }
+      void send_broadcast(ton::BlockBroadcast broadcast, int mode) override {
       }
       void download_block(ton::BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
                           td::Promise<ton::ReceivedBlock> promise) override {
@@ -356,8 +359,8 @@ class TestNode : public td::actor::Actor {
                                td::Promise<td::BufferSlice> promise) override {
       }
       void download_persistent_state(ton::BlockIdExt block_id, ton::BlockIdExt masterchain_block_id,
-                                     td::uint32 priority, td::Timestamp timeout,
-                                     td::Promise<td::BufferSlice> promise) override {
+                                     ton::validator::PersistentStateType type, td::uint32 priority,
+                                     td::Timestamp timeout, td::Promise<td::BufferSlice> promise) override {
       }
       void download_block_proof(ton::BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
                                 td::Promise<td::BufferSlice> promise) override {
@@ -368,12 +371,18 @@ class TestNode : public td::actor::Actor {
       void get_next_key_blocks(ton::BlockIdExt block_id, td::Timestamp timeout,
                                td::Promise<std::vector<ton::BlockIdExt>> promise) override {
       }
-      void download_archive(ton::BlockSeqno masterchain_seqno, std::string tmp_dir, td::Timestamp timeout,
-
-                            td::Promise<std::string> promise) override {
+      void download_archive(ton::BlockSeqno masterchain_seqno, ton::ShardIdFull shard_prefix, std::string tmp_dir,
+                            td::Timestamp timeout, td::Promise<std::string> promise) override {
+      }
+      void download_out_msg_queue_proof(
+          ton::ShardIdFull dst_shard, std::vector<ton::BlockIdExt> blocks, block::ImportedMsgQueueLimits limits,
+          td::Timestamp timeout, td::Promise<std::vector<td::Ref<ton::validator::OutMsgQueueProof>>> promise) override {
       }
 
       void new_key_block(ton::validator::BlockHandle handle) override {
+      }
+      void send_validator_telemetry(ton::PublicKeyHash key,
+                                    ton::tl_object_ptr<ton::ton_api::validator_telemetry> telemetry) override {
       }
     };
 

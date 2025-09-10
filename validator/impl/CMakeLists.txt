@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
-
 if (NOT OPENSSL_FOUND)
   find_package(OpenSSL REQUIRED)
 endif()
@@ -7,6 +5,7 @@ endif()
 set(TON_VALIDATOR_SOURCE
   accept-block.cpp
   block.cpp
+  candidates-buffer.cpp
   check-proof.cpp
   collator.cpp
   config.cpp
@@ -15,6 +14,7 @@ set(TON_VALIDATOR_SOURCE
   ihr-message.cpp
   liteserver.cpp
   message-queue.cpp
+  out-msg-queue-proof.cpp
   proof.cpp
   shard.cpp
   signature-set.cpp
@@ -24,8 +24,8 @@ set(TON_VALIDATOR_SOURCE
 
   accept-block.hpp
   block.hpp
+  candidates-buffer.hpp
   check-proof.hpp
-  collate-query-impl.h
   collator-impl.h
   collator.h
   config.hpp
@@ -34,13 +34,13 @@ set(TON_VALIDATOR_SOURCE
   liteserver.hpp
   liteserver-cache.hpp
   message-queue.hpp
+  out-msg-queue-proof.hpp
   proof.hpp
   shard.hpp
   signature-set.hpp
   top-shard-descr.hpp
   validate-query.hpp
-  validator-set.hpp
-)
+  validator-set.hpp)
 
 add_library(ton_validator STATIC ${TON_VALIDATOR_SOURCE})
 

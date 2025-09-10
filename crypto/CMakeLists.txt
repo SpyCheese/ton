@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
-
 if (NOT OPENSSL_FOUND)
   find_package(OpenSSL REQUIRED)
 endif()
@@ -12,10 +10,6 @@ set(TON_CRYPTO_CORE_SOURCE
   common/bigexp.cpp
   common/bitstring.cpp
   common/util.cpp
-  ellcurve/Ed25519.cpp
-  ellcurve/Fp25519.cpp
-  ellcurve/Montgomery.cpp
-  ellcurve/TwEdwards.cpp
   openssl/bignum.cpp
   openssl/residue.cpp
   openssl/rand.cpp
@@ -33,11 +27,6 @@ set(TON_CRYPTO_CORE_SOURCE
   common/util.h
   common/linalloc.hpp
   common/promiseop.hpp
-
-  ellcurve/Ed25519.h
-  ellcurve/Fp25519.h
-  ellcurve/Montgomery.h
-  ellcurve/TwEdwards.h
 
   openssl/bignum.h
   openssl/digest.hpp
@@ -72,7 +61,6 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cells/CellString.h
   vm/cells/CellTraits.h
   vm/cells/CellUsageTree.h
-  vm/cells/CellWithStorage.h
   vm/cells/DataCell.h
   vm/cells/ExtCell.h
   vm/cells/LevelMask.h
@@ -146,6 +134,7 @@ set(TON_CRYPTO_SOURCE
 
 set(TON_DB_SOURCE
   vm/db/DynamicBagOfCellsDb.cpp
+  vm/db/DynamicBagOfCellsDbV2.cpp
   vm/db/CellStorage.cpp
   vm/db/TonDb.cpp
 
@@ -153,6 +142,7 @@ set(TON_DB_SOURCE
   vm/db/CellHashTable.h
   vm/db/CellStorage.h
   vm/db/TonDb.h
+  vm/db/InMemoryBagOfCellsDb.cpp
 )
 
 set(FIFT_SOURCE
@@ -215,6 +205,8 @@ set(BLOCK_SOURCE
   block/mc-config.cpp
   block/output-queue-merger.cpp
   block/transaction.cpp
+  block/account-storage-stat.h
+  block/account-storage-stat.cpp
   block/precompiled-smc/PrecompiledSmartContract.cpp
   ${TLB_BLOCK_AUTO}
 
@@ -302,9 +294,8 @@ endif()
 target_include_directories(ton_crypto_core SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
 
 add_library(ton_crypto STATIC ${TON_CRYPTO_SOURCE})
-target_include_directories(ton_crypto PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(ton_crypto PUBLIC ${OPENSSL_CRYPTO_LIBRARY} tdutils tddb_utils ton_crypto_core ton_block)
+target_include_directories(ton_crypto PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
+target_link_libraries(ton_crypto PUBLIC ${OPENSSL_CRYPTO_LIBRARY} ton_crypto_core ton_block)
 if (USE_EMSCRIPTEN)
   target_link_options(ton_crypto PRIVATE -fexceptions)
   target_compile_options(ton_crypto PRIVATE -fexceptions)
@@ -320,20 +311,20 @@ endif()
 target_include_directories(ton_crypto SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
 
 add_dependencies(ton_crypto blst)
+add_dependencies(ton_crypto_core secp256k1)
+
 target_include_directories(ton_crypto PRIVATE ${BLST_INCLUDE_DIR})
 target_link_libraries(ton_crypto PRIVATE ${BLST_LIB})
 
-if (NOT USE_EMSCRIPTEN)
-  find_package(Secp256k1 REQUIRED)
-endif()
+target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIR}>)
 
 if (MSVC)
   find_package(Sodium REQUIRED)
   target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
-  target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIR}>)
+  target_link_libraries(ton_crypto_core PUBLIC ${SECP256K1_LIBRARY})
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARY})
-elseif (ANDROID OR EMSCRIPTEN)
-  target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIR}>)
+elseif (EMSCRIPTEN)
+  target_link_libraries(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}>)
   target_link_libraries(ton_crypto PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}>)
 else()
   if (NOT SODIUM_FOUND)
@@ -342,7 +333,7 @@ else()
     message(STATUS "Using Sodium ${SODIUM_LIBRARY_RELEASE}")
   endif()
   target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
-  target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIR}>)
+  target_link_libraries(ton_crypto_core PUBLIC ${SECP256K1_LIBRARY})
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARY})
 endif()
 
@@ -354,13 +345,10 @@ target_include_directories(ton_db PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURC
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
 target_link_libraries(ton_db PUBLIC tdutils tddb ton_crypto)
 
-add_executable(test-ed25519-crypto test/test-ed25519-crypto.cpp)
-target_include_directories(test-ed25519-crypto PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
-target_link_libraries(test-ed25519-crypto PUBLIC ton_crypto)
-
 add_library(fift-lib STATIC ${FIFT_SOURCE})
 target_include_directories(fift-lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
-target_link_libraries(fift-lib PUBLIC ton_crypto ton_db tdutils ton_block)
+target_link_libraries(fift-lib PUBLIC ton_crypto)
+
 if (USE_EMSCRIPTEN)
   target_link_options(fift-lib PRIVATE -fexceptions)
   target_compile_options(fift-lib PRIVATE -fexceptions)
@@ -380,7 +368,7 @@ target_link_libraries(src_parser PUBLIC ton_crypto_core)
 add_library(ton_block STATIC ${BLOCK_SOURCE})
 target_include_directories(ton_block PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/block> $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(ton_block PUBLIC ton_crypto tdutils tdactor tl_api)
+target_link_libraries(ton_block PUBLIC ton_crypto_core tdactor tl_api)
 if (USE_EMSCRIPTEN)
   target_link_options(ton_block PRIVATE -fexceptions)
   target_compile_options(ton_block PRIVATE -fexceptions)
@@ -388,7 +376,7 @@ endif()
 
 add_executable(func func/func-main.cpp ${FUNC_LIB_SOURCE})
 target_include_directories(func PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
-target_link_libraries(func PUBLIC ton_crypto src_parser git ton_block)
+target_link_libraries(func PUBLIC ton_crypto src_parser git)
 if (WINGETOPT_FOUND)
   target_link_libraries_system(func wingetopt)
 endif()
@@ -417,21 +405,21 @@ endif()
 
 add_executable(tlbc tl/tlbc.cpp)
 target_include_directories(tlbc PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
-target_link_libraries(tlbc PUBLIC ton_crypto_core src_parser)
+target_link_libraries(tlbc PUBLIC src_parser)
 if (WINGETOPT_FOUND)
   target_link_libraries_system(tlbc wingetopt)
 endif()
 
-add_library(pow-miner-lib util/Miner.cpp util/Miner.h)
-target_include_directories(pow-miner-lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
-target_link_libraries(pow-miner-lib PUBLIC ton_crypto ton_block)
-
-add_executable(pow-miner util/pow-miner.cpp)
-target_link_libraries(pow-miner PRIVATE ton_crypto ton_block pow-miner-lib git)
-
 if (WINGETOPT_FOUND)
   target_link_libraries_system(fift wingetopt)
-  target_link_libraries_system(pow-miner wingetopt)
+endif()
+
+add_executable(mintless-proof-generator util/mintless-proof-generator.cpp)
+target_link_libraries(mintless-proof-generator PRIVATE ton_crypto git ${JEMALLOC_LIBRARIES})
+
+if (JEMALLOC_FOUND)
+  target_include_directories(mintless-proof-generator PRIVATE ${JEMALLOC_INCLUDE_DIR})
+  target_compile_definitions(mintless-proof-generator PRIVATE -DTON_USE_JEMALLOC=1)
 endif()
 
 set(TURN_OFF_LSAN cd .)
@@ -481,10 +469,17 @@ if (NOT CMAKE_CROSSCOMPILING OR USE_EMSCRIPTEN)
       OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_DEST_FIF}
     )
     set(ARG_DEST_CPP "${ARG_DEST}.cpp")
+
+    if (WIN32)
+      set(ARG_LIB_DIR "fift/lib@smartcont")
+    else()
+      set(ARG_LIB_DIR "fift/lib:smartcont")
+    endif()
+
     add_custom_command(
       COMMENT "Generate ${ARG_DEST_CPP}"
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      COMMAND fift -Ifift/lib:smartcont -s asm-to-cpp.fif ${ARG_DEST_FIF} ${ARG_DEST_CPP} ${ARG_NAME}
+      COMMAND fift -I${ARG_LIB_DIR} -s asm-to-cpp.fif ${ARG_DEST_FIF} ${ARG_DEST_CPP} ${ARG_NAME}
       MAIN_DEPENDENCY ${ARG_SOURCE}
       DEPENDS fift ${ARG_DEST_FIF} smartcont/asm-to-cpp.fif fift/lib/Asm.fif
       OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_DEST_CPP}
@@ -525,12 +520,12 @@ add_executable(create-state block/create-state.cpp)
 target_include_directories(create-state PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
 if (INTERNAL_COMPILE)
-  target_link_libraries(create-state PUBLIC ton_crypto fift-lib ton_block tonlib git)
+  target_link_libraries(create-state PUBLIC ton_crypto fift-lib tonlib git)
 else()
-  if (TONLIB_COMPILE) 
-    target_link_libraries(create-state PUBLIC ton_crypto fift-lib ton_block tonlib git)
+  if (TONLIB_COMPILE)
+    target_link_libraries(create-state PUBLIC ton_crypto fift-lib tonlib git)
   else()
-    target_link_libraries(create-state PUBLIC ton_crypto fift-lib ton_block git)
+    target_link_libraries(create-state PUBLIC ton_crypto fift-lib git)
   endif()
 endif()
 if (WINGETOPT_FOUND)
@@ -540,7 +535,7 @@ endif()
 add_executable(dump-block block/dump-block.cpp)
 target_include_directories(dump-block PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(dump-block PUBLIC ton_crypto fift-lib ton_block git)
+target_link_libraries(dump-block PUBLIC ton_crypto fift-lib git)
 if (WINGETOPT_FOUND)
   target_link_libraries_system(dump-block wingetopt)
 endif()
@@ -548,7 +543,7 @@ endif()
 add_executable(adjust-block block/adjust-block.cpp)
 target_include_directories(adjust-block PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(adjust-block PUBLIC ton_crypto fift-lib ton_block git)
+target_link_libraries(adjust-block PUBLIC ton_crypto fift-lib git)
 if (WINGETOPT_FOUND)
   target_link_libraries_system(dump-block wingetopt)
   target_link_libraries_system(adjust-block wingetopt)
@@ -557,7 +552,7 @@ endif()
 add_executable(test-weight-distr block/test-weight-distr.cpp)
 target_include_directories(test-weight-distr PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(test-weight-distr PUBLIC ton_crypto fift-lib ton_block git)
+target_link_libraries(test-weight-distr PUBLIC ton_crypto fift-lib git)
 if (WINGETOPT_FOUND)
   target_link_libraries_system(test-weight-distr wingetopt)
 endif()

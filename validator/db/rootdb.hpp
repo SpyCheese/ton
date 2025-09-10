@@ -58,10 +58,17 @@ class RootDb : public Db {
   void store_block_candidate(BlockCandidate candidate, td::Promise<td::Unit> promise) override;
   void get_block_candidate(PublicKey source, BlockIdExt id, FileHash collated_data_file_hash,
                            td::Promise<BlockCandidate> promise) override;
+  void get_block_candidate_by_block_id(BlockIdExt id, td::Promise<BlockCandidate> promise) override;
 
   void store_block_state(BlockHandle handle, td::Ref<ShardState> state,
                          td::Promise<td::Ref<ShardState>> promise) override;
+  void store_block_state_from_data(BlockHandle handle, td::Ref<BlockData> block,
+                                   td::Promise<td::Ref<ShardState>> promise) override;
+  void store_block_state_from_data_preliminary(std::vector<td::Ref<BlockData>> blocks,
+                                         td::Promise<td::Unit> promise) override;
   void get_block_state(ConstBlockHandle handle, td::Promise<td::Ref<ShardState>> promise) override;
+  void store_block_state_part(BlockId effective_block, td::Ref<vm::Cell> cell,
+                              td::Promise<td::Ref<vm::DataCell>> promise) override;
   void get_cell_db_reader(td::Promise<std::shared_ptr<vm::CellDbReader>> promise) override;
 
   void store_block_handle(BlockHandle handle, td::Promise<td::Unit> promise) override;
@@ -70,20 +77,23 @@ class RootDb : public Db {
     td::actor::send_closure(validator_manager_, &ValidatorManager::get_block_handle, id, force, std::move(promise));
   }
 
-  void store_persistent_state_file(BlockIdExt block_id, BlockIdExt masterchain_block_id, td::BufferSlice state,
-                                   td::Promise<td::Unit> promise) override;
-  void store_persistent_state_file_gen(BlockIdExt block_id, BlockIdExt masterchain_block_id,
+  void store_persistent_state_file(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                                   td::BufferSlice state, td::Promise<td::Unit> promise) override;
+  void store_persistent_state_file_gen(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
                                        std::function<td::Status(td::FileFd&)> write_data,
                                        td::Promise<td::Unit> promise) override;
-  void get_persistent_state_file(BlockIdExt block_id, BlockIdExt masterchain_block_id,
+  void get_persistent_state_file(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
                                  td::Promise<td::BufferSlice> promise) override;
-  void get_persistent_state_file_slice(BlockIdExt block_id, BlockIdExt masterchain_block_id, td::int64 offset,
-                                       td::int64 max_length, td::Promise<td::BufferSlice> promise) override;
-  void check_persistent_state_file_exists(BlockIdExt block_id, BlockIdExt masterchain_block_id,
-                                          td::Promise<bool> promise) override;
+  void get_persistent_state_file_slice(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                                       td::int64 offset, td::int64 max_length,
+                                       td::Promise<td::BufferSlice> promise) override;
+  void get_persistent_state_file_size(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                                      td::Promise<td::uint64> promise) override;
   void store_zero_state_file(BlockIdExt block_id, td::BufferSlice state, td::Promise<td::Unit> promise) override;
   void get_zero_state_file(BlockIdExt block_id, td::Promise<td::BufferSlice> promise) override;
   void check_zero_state_file_exists(BlockIdExt block_id, td::Promise<bool> promise) override;
+  void get_previous_persistent_state_files(
+      BlockSeqno cur_mc_seqno, td::Promise<std::vector<std::pair<std::string, ShardIdFull>>> promise) override;
 
   void try_get_static_file(FileHash file_hash, td::Promise<td::BufferSlice> promise) override;
 
@@ -115,8 +125,6 @@ class RootDb : public Db {
   void archive(BlockHandle handle, td::Promise<td::Unit> promise) override;
 
   void allow_state_gc(BlockIdExt block_id, td::Promise<bool> promise);
-  void allow_block_gc(BlockIdExt block_id, td::Promise<bool> promise);
-  //void allow_gc(FileDb::RefId ref_id, bool is_archive, td::Promise<bool> promise);
 
   void prepare_stats(td::Promise<std::vector<std::pair<std::string, std::string>>> promise) override;
 
@@ -129,12 +137,16 @@ class RootDb : public Db {
   void check_key_block_proof_exists(BlockIdExt block_id, td::Promise<bool> promise) override;
   void check_key_block_proof_link_exists(BlockIdExt block_id, td::Promise<bool> promise) override;
 
-  void get_archive_id(BlockSeqno masterchain_seqno, td::Promise<td::uint64> promise) override;
+  void get_archive_id(BlockSeqno masterchain_seqno, ShardIdFull shard_prefix, td::Promise<td::uint64> promise) override;
   void get_archive_slice(td::uint64 archive_id, td::uint64 offset, td::uint32 limit,
                          td::Promise<td::BufferSlice> promise) override;
   void set_async_mode(bool mode, td::Promise<td::Unit> promise) override;
 
-  void run_gc(UnixTime mc_ts, UnixTime gc_ts, UnixTime archive_ttl) override;
+  void run_gc(UnixTime mc_ts, UnixTime gc_ts, double archive_ttl) override;
+  void add_persistent_state_description(td::Ref<PersistentStateDescription> desc, td::Promise<td::Unit> promise) override;
+  void get_persistent_state_descriptions(td::Promise<std::vector<td::Ref<PersistentStateDescription>>> promise) override;
+
+  void iterate_temp_block_handles(std::function<void(const BlockHandleInterface &)> f) override;
 
  private:
   td::actor::ActorId<ValidatorManager> validator_manager_;

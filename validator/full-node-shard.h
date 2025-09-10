@@ -36,23 +36,28 @@ class FullNodeShard : public td::actor::Actor {
   virtual ShardIdFull get_shard_full() const = 0;
 
   virtual void update_adnl_id(adnl::AdnlNodeIdShort adnl_id, td::Promise<td::Unit> promise) = 0;
+  virtual void set_active(bool active) = 0;
   virtual void set_config(FullNodeConfig config) = 0;
 
   virtual void send_ihr_message(td::BufferSlice data) = 0;
   virtual void send_external_message(td::BufferSlice data) = 0;
   virtual void send_shard_block_info(BlockIdExt block_id, CatchainSeqno cc_seqno, td::BufferSlice data) = 0;
+  virtual void send_block_candidate(BlockIdExt block_id, CatchainSeqno cc_seqno, td::uint32 validator_set_hash,
+                                    td::BufferSlice data) = 0;
   virtual void send_broadcast(BlockBroadcast broadcast) = 0;
 
-  virtual void sign_overlay_certificate(PublicKeyHash signed_key, td::uint32 expiry_at, td::uint32 max_size, td::Promise<td::BufferSlice> promise) = 0;
-  virtual void import_overlay_certificate(PublicKeyHash signed_key, std::shared_ptr<ton::overlay::Certificate> cert, td::Promise<td::Unit> promise) = 0;
-
+  virtual void sign_overlay_certificate(PublicKeyHash signed_key, td::uint32 expiry_at, td::uint32 max_size,
+                                        td::Promise<td::BufferSlice> promise) = 0;
+  virtual void import_overlay_certificate(PublicKeyHash signed_key, std::shared_ptr<ton::overlay::Certificate> cert,
+                                          td::Promise<td::Unit> promise) = 0;
 
   virtual void download_block(BlockIdExt id, td::uint32 priority, td::Timestamp timeout,
                               td::Promise<ReceivedBlock> promise) = 0;
   virtual void download_zero_state(BlockIdExt id, td::uint32 priority, td::Timestamp timeout,
                                    td::Promise<td::BufferSlice> promise) = 0;
-  virtual void download_persistent_state(BlockIdExt id, BlockIdExt masterchain_block_id, td::uint32 priority,
-                                         td::Timestamp timeout, td::Promise<td::BufferSlice> promise) = 0;
+  virtual void download_persistent_state(BlockIdExt id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                                         td::uint32 priority, td::Timestamp timeout,
+                                         td::Promise<td::BufferSlice> promise) = 0;
 
   virtual void download_block_proof(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
                                     td::Promise<td::BufferSlice> promise) = 0;
@@ -60,8 +65,11 @@ class FullNodeShard : public td::actor::Actor {
                                          td::Promise<td::BufferSlice> promise) = 0;
   virtual void get_next_key_blocks(BlockIdExt block_id, td::Timestamp timeout,
                                    td::Promise<std::vector<BlockIdExt>> promise) = 0;
-  virtual void download_archive(BlockSeqno masterchain_seqno, std::string tmp_dir, td::Timestamp timeout,
-                                td::Promise<std::string> promise) = 0;
+  virtual void download_archive(BlockSeqno masterchain_seqno, ShardIdFull shard_prefix, std::string tmp_dir,
+                                td::Timestamp timeout, td::Promise<std::string> promise) = 0;
+  virtual void download_out_msg_queue_proof(ShardIdFull dst_shard, std::vector<BlockIdExt> blocks,
+                                            block::ImportedMsgQueueLimits limits, td::Timestamp timeout,
+                                            td::Promise<std::vector<td::Ref<OutMsgQueueProof>>> promise) = 0;
 
   virtual void set_handle(BlockHandle handle, td::Promise<td::Unit> promise) = 0;
 
@@ -69,10 +77,10 @@ class FullNodeShard : public td::actor::Actor {
 
   static td::actor::ActorOwn<FullNodeShard> create(
       ShardIdFull shard, PublicKeyHash local_id, adnl::AdnlNodeIdShort adnl_id, FileHash zero_state_file_hash,
-      FullNodeConfig config, td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
+      FullNodeOptions opts, td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
       td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<rldp2::Rldp> rldp2,
       td::actor::ActorId<overlay::Overlays> overlays, td::actor::ActorId<ValidatorManagerInterface> validator_manager,
-      td::actor::ActorId<adnl::AdnlExtClient> client);
+      td::actor::ActorId<adnl::AdnlExtClient> client, td::actor::ActorId<FullNode> full_node, bool active);
 };
 
 }  // namespace fullnode

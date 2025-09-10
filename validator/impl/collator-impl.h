@@ -40,16 +40,20 @@ namespace validator {
 using td::Ref;
 
 class Collator final : public td::actor::Actor {
+ public:
   static constexpr int supported_version() {
     return SUPPORTED_VERSION;
   }
   static constexpr long long supported_capabilities() {
-    return ton::capCreateStatsEnabled | ton::capBounceMsgBody | ton::capReportVersion | ton::capShortDequeue;
+    return ton::capCreateStatsEnabled | ton::capBounceMsgBody | ton::capReportVersion | ton::capShortDequeue |
+           ton::capStoreOutMsgQueueSize | ton::capMsgMetadata | ton::capDeferMessages | ton::capFullCollatedData;
   }
+
+ private:
   using LtCellRef = block::LtCellRef;
   using NewOutMsg = block::NewOutMsg;
   const ShardIdFull shard_;
-  ton::BlockId new_id;
+  ton::BlockId new_id{workchainInvalid, 0, 0};
   bool busy_{false};
   bool before_split_{false};
   bool after_split_{false};
@@ -64,17 +68,21 @@ class Collator final : public td::actor::Actor {
   bool libraries_changed_{false};
   bool prev_key_block_exists_{false};
   bool is_hardfork_{false};
-  UnixTime min_ts;
   BlockIdExt min_mc_block_id;
   std::vector<BlockIdExt> prev_blocks;
   std::vector<Ref<ShardState>> prev_states;
   std::vector<Ref<BlockData>> prev_block_data;
   Ed25519_PublicKey created_by_;
+  Ref<CollatorOptions> collator_opts_;
   Ref<ValidatorSet> validator_set_;
   td::actor::ActorId<ValidatorManager> manager;
   td::Timestamp timeout;
   td::Timestamp queue_cleanup_timeout_, soft_timeout_, medium_timeout_;
   td::Promise<BlockCandidate> main_promise;
+  adnl::AdnlNodeIdShort collator_node_id_ = adnl::AdnlNodeIdShort::zero();
+  unsigned mode_ = 0;
+  int attempt_idx_;
+  bool allow_repeat_collation_ = false;
   ton::BlockSeqno last_block_seqno{0};
   ton::BlockSeqno prev_mc_block_seqno{0};
   ton::BlockSeqno new_block_seqno{0};
@@ -87,9 +95,11 @@ class Collator final : public td::actor::Actor {
   static constexpr bool shard_splitting_enabled = true;
 
  public:
-  Collator(ShardIdFull shard, bool is_hardfork, td::uint32 min_ts, BlockIdExt min_masterchain_block_id,
-           std::vector<BlockIdExt> prev, Ref<ValidatorSet> validator_set, Ed25519_PublicKey collator_id,
-           td::actor::ActorId<ValidatorManager> manager, td::Timestamp timeout, td::Promise<BlockCandidate> promise);
+  Collator(ShardIdFull shard, bool is_hardfork, BlockIdExt min_masterchain_block_id, std::vector<BlockIdExt> prev,
+           Ref<ValidatorSet> validator_set, Ed25519_PublicKey collator_id, Ref<CollatorOptions> collator_opts,
+           td::actor::ActorId<ValidatorManager> manager, td::Timestamp timeout, td::Promise<BlockCandidate> promise,
+           adnl::AdnlNodeIdShort collator_node_id, td::CancellationToken cancellation_token, unsigned mode,
+           int attempt_idx);
   ~Collator() override = default;
   bool is_busy() const {
     return busy_;
@@ -104,20 +114,18 @@ class Collator final : public td::actor::Actor {
     return 2;
   }
 
-  static td::Result<std::unique_ptr<block::transaction::Transaction>>
-                        impl_create_ordinary_transaction(Ref<vm::Cell> msg_root,
-                                                         block::Account* acc,
-                                                         UnixTime utime, LogicalTime lt,
-                                                         block::StoragePhaseConfig* storage_phase_cfg,
-                                                         block::ComputePhaseConfig* compute_phase_cfg,
-                                                         block::ActionPhaseConfig* action_phase_cfg,
-                                                         bool external, LogicalTime after_lt);
+  static td::Result<std::unique_ptr<block::transaction::Transaction>> impl_create_ordinary_transaction(
+      Ref<vm::Cell> msg_root, block::Account* acc, UnixTime utime, LogicalTime lt,
+      block::StoragePhaseConfig* storage_phase_cfg, block::ComputePhaseConfig* compute_phase_cfg,
+      block::ActionPhaseConfig* action_phase_cfg, block::SerializeConfig* serialize_cfg, bool external,
+      LogicalTime after_lt);
 
  private:
   void start_up() override;
   void alarm() override;
   int verbosity{3 * 0};
   int verify{1};
+  bool full_collated_data_ = false;
   ton::LogicalTime start_lt, max_lt;
   ton::UnixTime now_;
   ton::UnixTime prev_now_;
@@ -132,6 +140,7 @@ class Collator final : public td::actor::Actor {
   std::unique_ptr<block::ConfigInfo> config_;
   std::unique_ptr<block::ShardConfig> shard_conf_;
   std::map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
+  std::map<ShardIdFull, td::int32> neighbor_msg_queues_limits_;
   std::vector<block::McShardDescr> neighbors_;
   std::unique_ptr<block::OutputQueueMerger> nb_out_msgs_;
   std::vector<ton::StdSmcAddress> special_smcs;
@@ -172,9 +181,12 @@ class Collator final : public td::actor::Actor {
   block::StoragePhaseConfig storage_phase_cfg_{&storage_prices_};
   block::ComputePhaseConfig compute_phase_cfg_;
   block::ActionPhaseConfig action_phase_cfg_;
+  block::SerializeConfig serialize_cfg_;
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
   std::unique_ptr<block::BlockLimits> block_limits_;
   std::unique_ptr<block::BlockLimitStatus> block_limit_status_;
+  vm::ProofStorageStat collated_data_stat;
+  int block_limit_class_ = 0;
   ton::LogicalTime min_new_msg_lt{std::numeric_limits<td::uint64>::max()};
   block::CurrencyCollection total_balance_, old_total_balance_, total_validator_fees_;
   block::CurrencyCollection global_balance_, old_global_balance_, import_created_{0};
@@ -183,11 +195,20 @@ class Collator final : public td::actor::Actor {
   block::ValueFlow value_flow_{block::ValueFlow::SetZero()};
   std::unique_ptr<vm::AugmentedDictionary> fees_import_dict_;
   std::map<ton::Bits256, int> ext_msg_map;
-  std::vector<std::pair<Ref<vm::Cell>, ExtMessage::Hash>> ext_msg_list_;
+  struct ExtMsg {
+    Ref<vm::Cell> cell;
+    ExtMessage::Hash hash;
+    int priority;
+  };
+  std::vector<ExtMsg> ext_msg_list_;
   std::priority_queue<NewOutMsg, std::vector<NewOutMsg>, std::greater<NewOutMsg>> new_msgs;
   std::pair<ton::LogicalTime, ton::Bits256> last_proc_int_msg_, first_unproc_int_msg_;
-  std::unique_ptr<vm::AugmentedDictionary> in_msg_dict, out_msg_dict, out_msg_queue_, sibling_out_msg_queue_;
-  td::uint32 out_msg_queue_size_ = 0;
+  std::unique_ptr<vm::AugmentedDictionary> in_msg_dict, out_msg_dict, old_out_msg_queue_, out_msg_queue_,
+      sibling_out_msg_queue_;
+  std::map<StdSmcAddress, size_t> unprocessed_deferred_messages_;  // number of messages from dispatch queue in new_msgs
+  td::uint64 out_msg_queue_size_ = 0;
+  td::uint64 old_out_msg_queue_size_ = 0;
+  bool have_out_msg_queue_size_in_state_ = false;
   std::unique_ptr<vm::Dictionary> ihr_pending;
   std::shared_ptr<block::MsgProcessedUptoCollection> processed_upto_, sibling_processed_upto_;
   std::unique_ptr<vm::Dictionary> block_create_stats_;
@@ -195,14 +216,49 @@ class Collator final : public td::actor::Actor {
   unsigned block_create_total_{0};
   std::vector<ExtMessage::Hash> bad_ext_msgs_, delay_ext_msgs_;
   Ref<vm::Cell> shard_account_blocks_;  // ShardAccountBlocks
+
+  std::map<td::Bits256, Ref<vm::Cell>> block_state_proofs_;
+  std::vector<vm::MerkleProofBuilder> neighbor_proof_builders_;
   std::vector<Ref<vm::Cell>> collated_roots_;
+
+  struct AccountStorageDict {
+    bool inited = false;
+    vm::MerkleProofBuilder mpb;
+    vm::ProofStorageStat proof_stat;
+    bool add_to_collated_data = false;
+    std::vector<Ref<vm::Cell>> storage_stat_updates;
+  };
+  std::map<td::Bits256, AccountStorageDict> account_storage_dicts_;
+
   std::unique_ptr<ton::BlockCandidate> block_candidate;
 
+  std::unique_ptr<vm::AugmentedDictionary> dispatch_queue_, old_dispatch_queue_;
+  std::map<StdSmcAddress, td::uint32> sender_generated_messages_count_;
+  unsigned dispatch_queue_ops_{0};
+  std::map<StdSmcAddress, LogicalTime> last_dispatch_queue_emitted_lt_;
+  bool have_unprocessed_account_dispatch_queue_ = false;
+  bool dispatch_queue_total_limit_reached_ = false;
+  td::uint64 defer_out_queue_size_limit_;
+  td::uint64 hard_defer_out_queue_size_limit_;
+
+  std::unique_ptr<vm::AugmentedDictionary> account_dict_estimator_;
+  std::set<td::Bits256> account_dict_estimator_added_accounts_;
+  unsigned account_dict_ops_{0};
+
+  bool msg_metadata_enabled_ = false;
+  bool deferring_messages_enabled_ = false;
+  bool store_out_msg_queue_size_ = false;
+
+  std::function<td::Ref<vm::Cell>(const td::Bits256&)> storage_stat_cache_;
+  std::vector<std::pair<td::Ref<vm::Cell>, td::uint32>> storage_stat_cache_update_;
+
   td::PerfWarningTimer perf_timer_;
+  td::PerfLog perf_log_;
   //
   block::Account* lookup_account(td::ConstBitPtr addr) const;
   std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account,
                                                     bool force_create);
+  bool init_account_storage_dict(block::Account& account);
   td::Result<block::Account*> make_account(td::ConstBitPtr addr, bool force_create = false);
   td::actor::ActorId<Collator> get_self() {
     return actor_id(this);
@@ -214,19 +270,22 @@ class Collator final : public td::actor::Actor {
   bool fatal_error(int err_code, std::string err_msg);
   bool fatal_error(std::string err_msg, int err_code = -666);
   void check_pending();
-  void after_get_mc_state(td::Result<std::pair<Ref<MasterchainState>, BlockIdExt>> res);
-  void after_get_shard_state(int idx, td::Result<Ref<ShardState>> res);
-  void after_get_block_data(int idx, td::Result<Ref<BlockData>> res);
-  void after_get_shard_blocks(td::Result<std::vector<Ref<ShardTopBlockDescription>>> res);
+  void after_get_mc_state(td::Result<std::pair<Ref<MasterchainState>, BlockIdExt>> res, td::PerfLogAction token);
+  void after_get_shard_state(int idx, td::Result<Ref<ShardState>> res, td::PerfLogAction token);
+  void after_get_block_data(int idx, td::Result<Ref<BlockData>> res, td::PerfLogAction token);
+  void after_get_shard_blocks(td::Result<std::vector<Ref<ShardTopBlockDescription>>> res, td::PerfLogAction token);
+  void after_get_storage_stat_cache(td::Result<std::function<td::Ref<vm::Cell>(const td::Bits256&)>> res,
+                                    td::PerfLogAction token);
   bool preprocess_prev_mc_state();
   bool register_mc_state(Ref<MasterchainStateQ> other_mc_state);
   bool request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ>& state);
   Ref<MasterchainStateQ> get_aux_mc_state(BlockSeqno seqno) const;
-  void after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res);
+  void after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res, td::PerfLogAction token);
   bool fix_one_processed_upto(block::MsgProcessedUpto& proc, const ton::ShardIdFull& owner);
   bool fix_processed_upto(block::MsgProcessedUptoCollection& upto);
-  void got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res);
-  void got_out_queue_size(size_t i, td::Result<td::uint32> res);
+  void got_neighbor_msg_queues(td::Result<std::map<BlockIdExt, Ref<OutMsgQueueProof>>> R, td::PerfLogAction token);
+  void got_neighbor_msg_queue(unsigned i, Ref<OutMsgQueueProof> res);
+  void got_out_queue_size(size_t i, td::Result<td::uint64> res);
   bool adjust_shard_config();
   bool store_shard_fees(ShardIdFull shard, const block::CurrencyCollection& fees,
                         const block::CurrencyCollection& created);
@@ -235,6 +294,7 @@ class Collator final : public td::actor::Actor {
   bool register_shard_block_creators(std::vector<td::Bits256> creator_list);
   bool init_block_limits();
   bool compute_minted_amount(block::CurrencyCollection& to_mint);
+  bool create_output_queue_merger();
   bool init_value_create();
   bool try_collate();
   bool do_preinit();
@@ -244,7 +304,8 @@ class Collator final : public td::actor::Actor {
                                   Ref<vm::Cell>& in_msg);
   bool create_ticktock_transactions(int mask);
   bool create_ticktock_transaction(const ton::StdSmcAddress& smc_addr, ton::LogicalTime req_start_lt, int mask);
-  Ref<vm::Cell> create_ordinary_transaction(Ref<vm::Cell> msg_root, bool is_special_tx = false);
+  Ref<vm::Cell> create_ordinary_transaction(Ref<vm::Cell> msg_root, td::optional<block::MsgMetadata> msg_metadata,
+                                            LogicalTime after_lt, bool is_special_tx = false);
   bool check_cur_validator_set();
   bool unpack_last_mc_state();
   bool unpack_last_state();
@@ -268,28 +329,38 @@ class Collator final : public td::actor::Actor {
   bool is_our_address(Ref<vm::CellSlice> addr_ref) const;
   bool is_our_address(ton::AccountIdPrefixFull addr_prefix) const;
   bool is_our_address(const ton::StdSmcAddress& addr) const;
-  void after_get_external_messages(td::Result<std::vector<Ref<ExtMessage>>> res);
-  td::Result<bool> register_external_message_cell(Ref<vm::Cell> ext_msg, const ExtMessage::Hash& ext_hash);
+  void after_get_external_messages(td::Result<std::vector<std::pair<Ref<ExtMessage>, int>>> res, td::PerfLogAction token);
+  td::Result<bool> register_external_message_cell(Ref<vm::Cell> ext_msg, const ExtMessage::Hash& ext_hash,
+                                                  int priority);
   // td::Result<bool> register_external_message(td::Slice ext_msg_boc);
   void register_new_msg(block::NewOutMsg msg);
-  void register_new_msgs(block::transaction::Transaction& trans);
+  void register_new_msgs(block::transaction::Transaction& trans, td::optional<block::MsgMetadata> msg_metadata);
   bool process_new_messages(bool enqueue_only = false);
   int process_one_new_message(block::NewOutMsg msg, bool enqueue_only = false, Ref<vm::Cell>* is_special = nullptr);
   bool process_inbound_internal_messages();
-  bool process_inbound_message(Ref<vm::CellSlice> msg, ton::LogicalTime lt, td::ConstBitPtr key,
-                               const block::McShardDescr& src_nb);
+  bool precheck_inbound_message(Ref<vm::CellSlice> msg, ton::LogicalTime lt);
+  bool process_inbound_message(Ref<vm::CellSlice> msg, ton::LogicalTime lt, td::ConstBitPtr key, int src_nb_idx);
   bool process_inbound_external_messages();
   int process_external_message(Ref<vm::Cell> msg);
-  bool enqueue_message(block::NewOutMsg msg, td::RefInt256 fwd_fees_remaining, ton::LogicalTime enqueued_lt);
+  bool process_dispatch_queue();
+  bool process_deferred_message(Ref<vm::CellSlice> enq_msg, StdSmcAddress src_addr, LogicalTime lt,
+                                td::optional<block::MsgMetadata>& msg_metadata);
+  bool enqueue_message(block::NewOutMsg msg, td::RefInt256 fwd_fees_remaining, StdSmcAddress src_addr,
+                       bool defer = false);
   bool enqueue_transit_message(Ref<vm::Cell> msg, Ref<vm::Cell> old_msg_env, ton::AccountIdPrefixFull prev_prefix,
                                ton::AccountIdPrefixFull cur_prefix, ton::AccountIdPrefixFull dest_prefix,
-                               td::RefInt256 fwd_fee_remaining);
+                               td::RefInt256 fwd_fee_remaining, td::optional<block::MsgMetadata> msg_metadata,
+                               td::optional<LogicalTime> emitted_lt = {});
   bool delete_out_msg_queue_msg(td::ConstBitPtr key);
   bool insert_in_msg(Ref<vm::Cell> in_msg);
   bool insert_out_msg(Ref<vm::Cell> out_msg);
   bool insert_out_msg(Ref<vm::Cell> out_msg, td::ConstBitPtr msg_hash);
   bool register_out_msg_queue_op(bool force = false);
+  bool register_dispatch_queue_op(bool force = false);
+  bool update_account_dict_estimation(const block::transaction::Transaction& trans);
+  void update_account_storage_dict_info(const block::transaction::Transaction& trans);
   bool update_min_mc_seqno(ton::BlockSeqno some_mc_seqno);
+  bool process_account_storage_dict(block::Account& account);
   bool combine_account_transactions();
   bool update_public_libraries();
   bool update_account_public_libraries(Ref<vm::Cell> orig_libs, Ref<vm::Cell> final_libs, const td::Bits256& addr);
@@ -317,11 +388,32 @@ class Collator final : public td::actor::Actor {
                            bool update_cc);
   bool create_mc_block_extra(Ref<vm::Cell>& mc_block_extra);
   bool create_block();
+
   Ref<vm::Cell> collate_shard_block_descr_set();
+  bool prepare_msg_queue_proof();
   bool create_collated_data();
+
   bool create_block_candidate();
   void return_block_candidate(td::Result<td::Unit> saved);
   bool update_last_proc_int_msg(const std::pair<ton::LogicalTime, ton::Bits256>& new_lt_hash);
+
+  td::CancellationToken cancellation_token_;
+  bool check_cancelled();
+
+ public:
+  static td::uint32 get_skip_externals_queue_size();
+
+ private:
+  td::Timer work_timer_{true};
+  td::ThreadCpuTimer cpu_work_timer_{true};
+  CollationStats stats_;
+
+  void finalize_stats();
+
+  AccountStorageDict* current_tx_storage_dict_ = nullptr;
+
+  void on_cell_loaded(const vm::LoadedCell& cell);
+  void set_current_tx_storage_dict(const block::Account& account);
 };
 
 }  // namespace validator

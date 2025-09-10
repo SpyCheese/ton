@@ -58,7 +58,7 @@ unsigned long long bits_load_long_top(ConstBitPtr from, unsigned top_bits);
 long long bits_load_long(ConstBitPtr from, unsigned bits);
 unsigned long long bits_load_ulong(ConstBitPtr from, unsigned bits);
 long parse_bitstring_hex_literal(unsigned char* buff, std::size_t buff_size, const char* str, const char* str_end);
-long parse_bitstring_binary_literal(BitPtr buff, std::size_t buff_size, const char* str, const char* str_end);
+long parse_bitstring_binary_literal(BitPtr buff, std::size_t buff_size_bits, const char* str, const char* str_end);
 
 void bits_sha256(BitPtr to, ConstBitPtr from, std::size_t size);
 
@@ -554,11 +554,7 @@ class BitArray {
     set_same(0);
   }
   void set_zero_s() {
-    volatile uint8* p = data();
-    auto x = m;
-    while (x--) {
-      *p++ = 0;
-    }
+    as_slice().fill_zero_secure();
   }
   void set_ones() {
     set_same(1);

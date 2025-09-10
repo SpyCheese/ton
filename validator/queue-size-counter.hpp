@@ -21,16 +21,22 @@ namespace ton::validator {
 
 class QueueSizeCounter : public td::actor::Actor {
  public:
-  QueueSizeCounter(td::Ref<MasterchainState> last_masterchain_state, td::actor::ActorId<ValidatorManager> manager)
-      : init_masterchain_state_(last_masterchain_state), manager_(std::move(manager)) {
+  QueueSizeCounter(td::Ref<MasterchainState> last_masterchain_state, td::Ref<ValidatorManagerOptions> opts,
+                   td::actor::ActorId<ValidatorManager> manager)
+      : init_masterchain_state_(last_masterchain_state), opts_(std::move(opts)), manager_(std::move(manager)) {
   }
 
   void start_up() override;
-  void get_queue_size(BlockIdExt block_id, td::Promise<td::uint32> promise);
+  void get_queue_size(BlockIdExt block_id, td::Promise<td::uint64> promise);
   void alarm() override;
+
+  void update_options(td::Ref<ValidatorManagerOptions> opts) {
+    opts_ = std::move(opts);
+  }
 
  private:
   td::Ref<MasterchainState> init_masterchain_state_;
+  td::Ref<ValidatorManagerOptions> opts_;
   td::actor::ActorId<ValidatorManager> manager_;
   bool simple_mode_ = false;
 
@@ -42,14 +48,14 @@ class QueueSizeCounter : public td::actor::Actor {
     bool started_ = false;
     bool done_ = false;
     bool calc_whole_ = false;
-    td::uint32 queue_size_ = 0;
-    std::vector<td::Promise<td::uint32>> promises_;
+    td::uint64 queue_size_ = 0;
+    std::vector<td::Promise<td::uint64>> promises_;
   };
   std::map<BlockIdExt, Entry> results_;
 
-  void get_queue_size_ex(BlockIdExt block_id, bool calc_whole, td::Promise<td::uint32> promise);
+  void get_queue_size_ex(BlockIdExt block_id, bool calc_whole, td::Promise<td::uint64> promise);
   void get_queue_size_cont(BlockHandle handle, td::Ref<ShardState> state);
-  void get_queue_size_cont2(td::Ref<ShardState> state, td::Ref<ShardState> prev_state, td::uint32 prev_size);
+  void get_queue_size_cont2(td::Ref<ShardState> state, td::Ref<ShardState> prev_state, td::uint64 prev_size);
   void on_error(BlockIdExt block_id, td::Status error);
 
   void process_top_shard_blocks();

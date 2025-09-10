@@ -24,9 +24,12 @@
 #include "interfaces/proof.h"
 #include "interfaces/shard.h"
 #include "full-node-private-overlay.hpp"
+#include "full-node-fast-sync-overlays.hpp"
 
 #include <map>
 #include <set>
+#include <queue>
+#include <token-manager.h>
 
 namespace ton {
 
@@ -42,10 +45,11 @@ class FullNodeImpl : public FullNode {
 
   void add_permanent_key(PublicKeyHash key, td::Promise<td::Unit> promise) override;
   void del_permanent_key(PublicKeyHash key, td::Promise<td::Unit> promise) override;
+  void add_collator_adnl_id(adnl::AdnlNodeIdShort id) override;
+  void del_collator_adnl_id(adnl::AdnlNodeIdShort id) override;
 
-  void sign_shard_overlay_certificate(ShardIdFull shard_id, PublicKeyHash signed_key,
-                                      td::uint32 expiry_at, td::uint32 max_size,
-                                      td::Promise<td::BufferSlice> promise) override;
+  void sign_shard_overlay_certificate(ShardIdFull shard_id, PublicKeyHash signed_key, td::uint32 expiry_at,
+                                      td::uint32 max_size, td::Promise<td::BufferSlice> promise) override;
   void import_shard_overlay_certificate(ShardIdFull shard_id, PublicKeyHash signed_key,
                                         std::shared_ptr<ton::overlay::Certificate> cert,
                                         td::Promise<td::Unit> promise) override;
@@ -53,8 +57,10 @@ class FullNodeImpl : public FullNode {
   void update_adnl_id(adnl::AdnlNodeIdShort adnl_id, td::Promise<td::Unit> promise) override;
   void set_config(FullNodeConfig config) override;
 
-  void add_shard(ShardIdFull shard);
-  void del_shard(ShardIdFull shard);
+  void add_custom_overlay(CustomOverlayParams params, td::Promise<td::Unit> promise) override;
+  void del_custom_overlay(std::string name, td::Promise<td::Unit> promise) override;
+
+  void on_new_masterchain_block(td::Ref<MasterchainState> state, std::set<ShardIdFull> shards_to_monitor);
 
   void sync_completed();
 
@@ -62,42 +68,72 @@ class FullNodeImpl : public FullNode {
   void send_ihr_message(AccountIdPrefixFull dst, td::BufferSlice data);
   void send_ext_message(AccountIdPrefixFull dst, td::BufferSlice data);
   void send_shard_block_info(BlockIdExt block_id, CatchainSeqno cc_seqnp, td::BufferSlice data);
-  void send_broadcast(BlockBroadcast broadcast);
+  void send_block_candidate(BlockIdExt block_id, CatchainSeqno cc_seqno, td::uint32 validator_set_hash,
+                            td::BufferSlice data, int mode);
+  void send_broadcast(BlockBroadcast broadcast, int mode);
+  void send_out_msg_queue_proof_broadcast(td::Ref<OutMsgQueueProofBroadcast> broadcats);
   void download_block(BlockIdExt id, td::uint32 priority, td::Timestamp timeout, td::Promise<ReceivedBlock> promise);
   void download_zero_state(BlockIdExt id, td::uint32 priority, td::Timestamp timeout,
                            td::Promise<td::BufferSlice> promise);
-  void download_persistent_state(BlockIdExt id, BlockIdExt masterchain_block_id, td::uint32 priority,
-                                 td::Timestamp timeout, td::Promise<td::BufferSlice> promise);
+  void download_persistent_state(BlockIdExt id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                                 td::uint32 priority, td::Timestamp timeout, td::Promise<td::BufferSlice> promise);
   void download_block_proof(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
                             td::Promise<td::BufferSlice> promise);
   void download_block_proof_link(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
                                  td::Promise<td::BufferSlice> promise);
   void get_next_key_blocks(BlockIdExt block_id, td::Timestamp timeout, td::Promise<std::vector<BlockIdExt>> promise);
-  void download_archive(BlockSeqno masterchain_seqno, std::string tmp_dir, td::Timestamp timeout,
-                        td::Promise<std::string> promise);
+  void download_archive(BlockSeqno masterchain_seqno, ShardIdFull shard_prefix, std::string tmp_dir,
+                        td::Timestamp timeout, td::Promise<std::string> promise);
+  void download_out_msg_queue_proof(ShardIdFull dst_shard, std::vector<BlockIdExt> blocks,
+                                    block::ImportedMsgQueueLimits limits, td::Timestamp timeout,
+                                    td::Promise<std::vector<td::Ref<OutMsgQueueProof>>> promise);
 
-  void got_key_block_proof(td::Ref<ProofLink> proof);
-  void got_zero_block_state(td::Ref<ShardState> state);
+  void got_key_block_config(td::Ref<ConfigHolder> config);
   void new_key_block(BlockHandle handle);
+  void send_validator_telemetry(PublicKeyHash key, tl_object_ptr<ton_api::validator_telemetry> telemetry);
+
+  void process_block_broadcast(BlockBroadcast broadcast) override;
+  void process_block_candidate_broadcast(BlockIdExt block_id, CatchainSeqno cc_seqno, td::uint32 validator_set_hash,
+                                         td::BufferSlice data) override;
+  void get_out_msg_queue_query_token(td::Promise<std::unique_ptr<ActionToken>> promise) override;
+
+  void set_validator_telemetry_filename(std::string value) override;
+
+  void import_fast_sync_member_certificate(adnl::AdnlNodeIdShort local_id,
+                                           overlay::OverlayMemberCertificate cert) override {
+    VLOG(FULL_NODE_DEBUG) << "Importing fast sync overlay certificate for " << local_id << " issued by "
+                          << cert.issued_by().compute_short_id() << " expires in "
+                          << (double)cert.expire_at() - td::Clocks::system();
+    fast_sync_overlays_.add_member_certificate(local_id, std::move(cert));
+  }
 
   void start_up() override;
 
   FullNodeImpl(PublicKeyHash local_id, adnl::AdnlNodeIdShort adnl_id, FileHash zero_state_file_hash,
-               FullNodeConfig config, td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
+               FullNodeOptions opts, td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
                td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<rldp2::Rldp> rldp2,
                td::actor::ActorId<dht::Dht> dht, td::actor::ActorId<overlay::Overlays> overlays,
                td::actor::ActorId<ValidatorManagerInterface> validator_manager,
-               td::actor::ActorId<adnl::AdnlExtClient> client, std::string db_root);
+               td::actor::ActorId<adnl::AdnlExtClient> client, std::string db_root,
+               td::Promise<td::Unit> started_promise);
 
  private:
+  struct ShardInfo {
+    td::actor::ActorOwn<FullNodeShard> actor;
+    bool active = false;
+    td::Timestamp delete_at = td::Timestamp::never();
+  };
+
+  void update_shard_actor(ShardIdFull shard, bool active);
+
   PublicKeyHash local_id_;
   adnl::AdnlNodeIdShort adnl_id_;
   FileHash zero_state_file_hash_;
 
   td::actor::ActorId<FullNodeShard> get_shard(AccountIdPrefixFull dst);
-  td::actor::ActorId<FullNodeShard> get_shard(ShardIdFull dst);
-
-  std::map<ShardIdFull, td::actor::ActorOwn<FullNodeShard>> shards_;
+  td::actor::ActorId<FullNodeShard> get_shard(ShardIdFull shard);
+  std::map<ShardIdFull, ShardInfo> shards_;
+  int wc_monitor_min_split_ = 0;
 
   td::actor::ActorId<keyring::Keyring> keyring_;
   td::actor::ActorId<adnl::Adnl> adnl_;
@@ -115,12 +151,41 @@ class FullNodeImpl : public FullNode {
   std::map<PublicKeyHash, adnl::AdnlNodeIdShort> current_validators_;
 
   std::set<PublicKeyHash> local_keys_;
-  FullNodeConfig config_;
+  std::map<adnl::AdnlNodeIdShort, int> local_collator_nodes_;
 
-  std::map<PublicKeyHash, td::actor::ActorOwn<FullNodePrivateOverlay>> private_block_overlays_;
+  td::Promise<td::Unit> started_promise_;
+  FullNodeOptions opts_;
 
-  void update_private_block_overlays();
+  // Private overlays:
+  // Old overlays - one private overlay for all validators
+  // New overlays (fast sync overlays) - semiprivate overlay per shard (monitor_min_split depth)
+  //     for validators and authorized nodes
+  bool use_old_private_overlays_ = true;
+  std::map<PublicKeyHash, td::actor::ActorOwn<FullNodePrivateBlockOverlay>> private_block_overlays_;
+  FullNodeFastSyncOverlays fast_sync_overlays_;
+
+  struct CustomOverlayInfo {
+    CustomOverlayParams params_;
+    std::map<adnl::AdnlNodeIdShort, td::actor::ActorOwn<FullNodeCustomOverlay>> actors_;  // our local id -> actor
+  };
+  std::map<std::string, CustomOverlayInfo> custom_overlays_;
+  std::set<BlockIdExt> custom_overlays_sent_broadcasts_;
+  std::queue<BlockIdExt> custom_overlays_sent_broadcasts_lru_;
+
+  void update_private_overlays();
   void create_private_block_overlay(PublicKeyHash key);
+  void update_custom_overlay(CustomOverlayInfo& overlay);
+  void send_block_broadcast_to_custom_overlays(const BlockBroadcast& broadcast);
+  void send_block_candidate_broadcast_to_custom_overlays(const BlockIdExt& block_id, CatchainSeqno cc_seqno,
+                                                         td::uint32 validator_set_hash, const td::BufferSlice& data);
+
+  std::string validator_telemetry_filename_;
+  PublicKeyHash validator_telemetry_collector_key_ = PublicKeyHash::zero();
+
+  void update_validator_telemetry_collector();
+
+  td::actor::ActorOwn<TokenManager> out_msg_queue_query_token_manager_ =
+      td::actor::create_actor<TokenManager>("tokens", /* max_tokens = */ 1);
 };
 
 }  // namespace fullnode

@@ -32,11 +32,10 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   BlockIdExt init_block_id() const override {
     return init_block_id_;
   }
-  bool need_monitor(ShardIdFull shard) const override {
-    return check_shard_(shard, 0, ShardCheckMode::m_monitor);
-  }
-  bool need_validate(ShardIdFull shard, CatchainSeqno cc_seqno) const override {
-    return check_shard_(shard, cc_seqno, ShardCheckMode::m_validate);
+  bool need_monitor(ShardIdFull shard, const td::Ref<MasterchainState>& state) const override {
+    td::uint32 min_split = state->monitor_min_split_depth(shard.workchain);
+    return check_shard_((td::uint32)shard.pfx_len() <= min_split ? shard : shard_prefix(shard, min_split),
+                        state->get_seqno());
   }
   bool allow_blockchain_init() const override {
     return allow_blockchain_init_;
@@ -123,6 +122,60 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   double get_archive_preload_period() const override {
     return archive_preload_period_;
   }
+  bool get_disable_rocksdb_stats() const override {
+    return disable_rocksdb_stats_;
+  }
+  bool nonfinal_ls_queries_enabled() const override {
+    return nonfinal_ls_queries_enabled_;
+  }
+  td::optional<td::uint64> get_celldb_cache_size() const override {
+    return celldb_cache_size_;
+  }
+  bool get_celldb_direct_io() const override {
+    return celldb_direct_io_;
+  }
+  bool get_celldb_preload_all() const override {
+    return celldb_preload_all_;
+  }
+  bool get_celldb_in_memory() const override {
+    return celldb_in_memory_;
+  }
+  bool get_celldb_v2() const override {
+    return celldb_v2_;
+  }
+  bool get_celldb_disable_bloom_filter() const override {
+    return celldb_disable_bloom_filter_;
+  }
+  td::optional<double> get_catchain_max_block_delay() const override {
+    return catchain_max_block_delay_;
+  }
+  td::optional<double> get_catchain_max_block_delay_slow() const override {
+    return catchain_max_block_delay_slow_;
+  }
+  bool get_state_serializer_enabled() const override {
+    return state_serializer_enabled_;
+  }
+  td::Ref<CollatorOptions> get_collator_options() const override {
+    return collator_options_;
+  }
+  bool get_fast_state_serializer_enabled() const override {
+    return fast_state_serializer_enabled_;
+  }
+  double get_catchain_broadcast_speed_multiplier() const override {
+    return catchain_broadcast_speed_multipliers_;
+  }
+  bool get_permanent_celldb() const override {
+    return permanent_celldb_;
+  }
+  td::Ref<CollatorsList> get_collators_list() const override {
+    return collators_list_;
+  }
+  bool check_collator_node_whitelist(adnl::AdnlNodeIdShort id) const override {
+    return !collator_node_whitelist_enabled_ || collator_node_whitelist_.contains(id);
+  }
+  td::Ref<ShardBlockVerifierConfig> get_shard_block_verifier_config() const override {
+    return shard_block_verifier_config_;
+  }
 
   void set_zero_block_id(BlockIdExt block_id) override {
     zero_block_id_ = block_id;
@@ -130,7 +183,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_init_block_id(BlockIdExt block_id) override {
     init_block_id_ = block_id;
   }
-  void set_shard_check_function(std::function<bool(ShardIdFull, CatchainSeqno, ShardCheckMode)> check_shard) override {
+  void set_shard_check_function(std::function<bool(ShardIdFull, BlockSeqno)> check_shard) override {
     check_shard_ = std::move(check_shard);
   }
   void set_allow_blockchain_init(bool value) override {
@@ -185,20 +238,77 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_archive_preload_period(double value) override {
     archive_preload_period_ = value;
   }
+  void set_disable_rocksdb_stats(bool value) override {
+    disable_rocksdb_stats_ = value;
+  }
+  void set_nonfinal_ls_queries_enabled(bool value) override {
+    nonfinal_ls_queries_enabled_ = value;
+  }
+  void set_celldb_cache_size(td::uint64 value) override {
+    celldb_cache_size_ = value;
+  }
+  void set_celldb_direct_io(bool value) override {
+    celldb_direct_io_ = value;
+  }
+  void set_celldb_preload_all(bool value) override {
+    celldb_preload_all_ = value;
+  }
+  void set_celldb_in_memory(bool value) override {
+    celldb_in_memory_ = value;
+  }
+  void set_celldb_v2(bool value) override {
+    celldb_v2_ = value;
+  }
+  void set_celldb_disable_bloom_filter(bool value) override {
+    celldb_disable_bloom_filter_ = value;
+  }
+  void set_catchain_max_block_delay(double value) override {
+    catchain_max_block_delay_ = value;
+  }
+  void set_catchain_max_block_delay_slow(double value) override {
+    catchain_max_block_delay_slow_ = value;
+  }
+  void set_state_serializer_enabled(bool value) override {
+    state_serializer_enabled_ = value;
+  }
+  void set_collator_options(td::Ref<CollatorOptions> value) override {
+    collator_options_ = std::move(value);
+  }
+  void set_fast_state_serializer_enabled(bool value) override {
+    fast_state_serializer_enabled_ = value;
+  }
+  void set_catchain_broadcast_speed_multiplier(double value) override {
+    catchain_broadcast_speed_multipliers_ = value;
+  }
+  void set_permanent_celldb(bool value) override {
+    permanent_celldb_ = value;
+  }
+  void set_collators_list(td::Ref<CollatorsList> list) override {
+    collators_list_ = std::move(list);
+  }
+  void set_collator_node_whitelisted_validator(adnl::AdnlNodeIdShort id, bool add) override {
+    if (add) {
+      collator_node_whitelist_.insert(id);
+    } else {
+      collator_node_whitelist_.erase(id);
+    }
+  }
+  void set_collator_node_whitelist_enabled(bool enabled) override {
+    collator_node_whitelist_enabled_ = enabled;
+  }
+  void set_shard_block_verifier_config(td::Ref<ShardBlockVerifierConfig> config) override {
+    shard_block_verifier_config_ = std::move(config);
+  }
 
   ValidatorManagerOptionsImpl *make_copy() const override {
     return new ValidatorManagerOptionsImpl(*this);
   }
 
-  ValidatorManagerOptionsImpl(BlockIdExt zero_block_id, BlockIdExt init_block_id,
-                              std::function<bool(ShardIdFull, CatchainSeqno, ShardCheckMode)> check_shard,
-                              bool allow_blockchain_init, double sync_blocks_before,
-                              double block_ttl, double state_ttl, double max_mempool_num,
-                              double archive_ttl, double key_proof_ttl,
-                              bool initial_sync_disabled)
+  ValidatorManagerOptionsImpl(BlockIdExt zero_block_id, BlockIdExt init_block_id, bool allow_blockchain_init,
+                              double sync_blocks_before, double block_ttl, double state_ttl, double max_mempool_num,
+                              double archive_ttl, double key_proof_ttl, bool initial_sync_disabled)
       : zero_block_id_(zero_block_id)
       , init_block_id_(init_block_id)
-      , check_shard_(std::move(check_shard))
       , allow_blockchain_init_(allow_blockchain_init)
       , sync_blocks_before_(sync_blocks_before)
       , block_ttl_(block_ttl)
@@ -212,7 +322,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
  private:
   BlockIdExt zero_block_id_;
   BlockIdExt init_block_id_;
-  std::function<bool(ShardIdFull, CatchainSeqno, ShardCheckMode)> check_shard_;
+  std::function<bool(ShardIdFull, BlockSeqno)> check_shard_ = [](ShardIdFull, BlockSeqno) { return true; };
   bool allow_blockchain_init_;
   double sync_blocks_before_;
   double block_ttl_;
@@ -230,6 +340,24 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   td::uint32 celldb_compress_depth_{0};
   size_t max_open_archive_files_ = 0;
   double archive_preload_period_ = 0.0;
+  bool disable_rocksdb_stats_;
+  bool nonfinal_ls_queries_enabled_ = false;
+  td::optional<td::uint64> celldb_cache_size_;
+  bool celldb_direct_io_ = false;
+  bool celldb_preload_all_ = false;
+  bool celldb_in_memory_ = false;
+  bool celldb_v2_ = false;
+  bool celldb_disable_bloom_filter_ = false;
+  td::optional<double> catchain_max_block_delay_, catchain_max_block_delay_slow_;
+  bool state_serializer_enabled_ = true;
+  td::Ref<CollatorOptions> collator_options_{true};
+  bool fast_state_serializer_enabled_ = false;
+  double catchain_broadcast_speed_multipliers_;
+  bool permanent_celldb_ = false;
+  td::Ref<CollatorsList> collators_list_{true, CollatorsList::default_list()};
+  std::set<adnl::AdnlNodeIdShort> collator_node_whitelist_;
+  bool collator_node_whitelist_enabled_ = false;
+  td::Ref<ShardBlockVerifierConfig> shard_block_verifier_config_{true};
 };
 
 }  // namespace validator

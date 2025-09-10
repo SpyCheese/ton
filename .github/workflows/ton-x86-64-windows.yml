@@ -21,14 +21,33 @@ jobs:
         with:
           submodules: 'recursive'
 
+      - name: Create directories
+        run: |
+          mkdir third_libs
+
+      - name: Cache 3pp
+        id: cache-3pp
+        uses: actions/cache@v4
+        with:
+          path: third_libs
+          key: ${{ runner.os }}-${{ runner.arch }}-windows-2022-3pp-${{ hashFiles('**/assembly/native/build-windows-2022.bat') }}
+
       - name: Build TON
         run: |
-          copy assembly\native\build-windows-github.bat .
-          copy assembly\native\build-windows.bat .
-          build-windows-github.bat Enterprise
+          git submodule sync --recursive
+          git submodule update
+          copy assembly\native\build-windows-github-2022.bat .
+          copy assembly\native\build-windows-2022.bat .
+          build-windows-github-2022.bat Enterprise
+          ccache -sp
+
+#      - name: Run Tests
+#        run: |
+#          cd build
+#          ctest -C Release --output-on-failure -E "test-bigint" --timeout 1800
 
       - name: Upload artifacts
         uses: actions/upload-artifact@master
         with:
-          name: ton-win-binaries
+          name: ton-x86-64-windows
           path: artifacts

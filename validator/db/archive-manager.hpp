@@ -19,6 +19,7 @@
 #pragma once
 
 #include "archive-slice.hpp"
+#include "interfaces/persistent-state.h"
 
 namespace ton {
 
@@ -43,36 +44,48 @@ class ArchiveManager : public td::actor::Actor {
   void get_file(ConstBlockHandle handle, FileReference ref_id, td::Promise<td::BufferSlice> promise);
 
   void add_zero_state(BlockIdExt block_id, td::BufferSlice data, td::Promise<td::Unit> promise);
-  void add_persistent_state(BlockIdExt block_id, BlockIdExt masterchain_block_id, td::BufferSlice data,
-                            td::Promise<td::Unit> promise);
-  void add_persistent_state_gen(BlockIdExt block_id, BlockIdExt masterchain_block_id,
-                                std::function<td::Status(td::FileFd&)> write_state,
-                                td::Promise<td::Unit> promise);
+  void add_persistent_state(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                            td::BufferSlice data, td::Promise<td::Unit> promise);
+  void add_persistent_state_gen(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                                std::function<td::Status(td::FileFd &)> write_state, td::Promise<td::Unit> promise);
   void get_zero_state(BlockIdExt block_id, td::Promise<td::BufferSlice> promise);
-  void get_persistent_state(BlockIdExt block_id, BlockIdExt masterchain_block_id, td::Promise<td::BufferSlice> promise);
-  void get_persistent_state_slice(BlockIdExt block_id, BlockIdExt masterchain_block_id, td::int64 offset,
-                                  td::int64 max_size, td::Promise<td::BufferSlice> promise);
-  void check_persistent_state(BlockIdExt block_id, BlockIdExt masterchain_block_id, td::Promise<bool> promise);
+  void get_persistent_state(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                            td::Promise<td::BufferSlice> promise);
+  void get_persistent_state_slice(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                                  td::int64 offset, td::int64 max_size, td::Promise<td::BufferSlice> promise);
+  void get_persistent_state_file_size(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
+                                      td::Promise<td::uint64> promise);
   void check_zero_state(BlockIdExt block_id, td::Promise<bool> promise);
+  void get_previous_persistent_state_files(BlockSeqno cur_mc_seqno,
+                                           td::Promise<std::vector<std::pair<std::string, ShardIdFull>>> promise);
 
   void truncate(BlockSeqno masterchain_seqno, ConstBlockHandle handle, td::Promise<td::Unit> promise);
   //void truncate_continue(BlockSeqno masterchain_seqno, td::Promise<td::Unit> promise);
 
-  void run_gc(UnixTime mc_ts, UnixTime gc_ts, UnixTime archive_ttl);
+  void run_gc(UnixTime mc_ts, UnixTime gc_ts, double archive_ttl);
 
   /* from LTDB */
   void get_block_by_unix_time(AccountIdPrefixFull account_id, UnixTime ts, td::Promise<ConstBlockHandle> promise);
   void get_block_by_lt(AccountIdPrefixFull account_id, LogicalTime lt, td::Promise<ConstBlockHandle> promise);
   void get_block_by_seqno(AccountIdPrefixFull account_id, BlockSeqno seqno, td::Promise<ConstBlockHandle> promise);
 
-  void get_archive_id(BlockSeqno masterchain_seqno, td::Promise<td::uint64> promise);
+  void get_archive_id(BlockSeqno masterchain_seqno, ShardIdFull shard_prefix, td::Promise<td::uint64> promise);
   void get_archive_slice(td::uint64 archive_id, td::uint64 offset, td::uint32 limit,
                          td::Promise<td::BufferSlice> promise);
 
   void start_up() override;
+  void alarm() override;
 
   void commit_transaction();
   void set_async_mode(bool mode, td::Promise<td::Unit> promise);
+
+  void set_current_shard_split_depth(td::uint32 value) {
+    cur_shard_split_depth_ = value;
+  }
+
+  void prepare_stats(td::Promise<std::vector<std::pair<std::string, std::string>>> promise);
+
+  void iterate_temp_block_handles(std::function<void(const BlockHandleInterface &)> f);
 
   static constexpr td::uint32 archive_size() {
     return 20000;
@@ -172,12 +185,19 @@ class ArchiveManager : public td::actor::Actor {
   bool async_mode_ = false;
   bool huge_transaction_started_ = false;
   td::uint32 huge_transaction_size_ = 0;
+  td::uint32 cur_shard_split_depth_ = 0;
+
+  DbStatistics statistics_;
 
   FileMap &get_file_map(const PackageId &p) {
     return p.key ? key_files_ : p.temp ? temp_files_ : files_;
   }
 
-  std::map<FileHash, FileReferenceShort> perm_states_;
+  struct PermState {
+    FileReferenceShort id;
+    td::uint64 size;
+  };
+  std::map<std::pair<BlockSeqno, FileHash>, PermState> perm_states_;  // Mc block seqno, hash -> state
 
   void load_package(PackageId seqno);
   void delete_package(PackageId seqno, td::Promise<td::Unit> promise);
@@ -202,12 +222,12 @@ class ArchiveManager : public td::actor::Actor {
   PackageId get_max_temp_file_desc_idx();
   PackageId get_prev_temp_file_desc_idx(PackageId id);
 
-  void add_persistent_state_impl(BlockIdExt block_id, BlockIdExt masterchain_block_id, td::Promise<td::Unit> promise,
+  void add_persistent_state_impl(FileReferenceShort const &id, td::Promise<td::Unit> promise,
                                  std::function<void(std::string, td::Promise<std::string>)> create_writer);
-  void written_perm_state(FileReferenceShort id);
+  void register_perm_state(FileReferenceShort id);
 
-  void persistent_state_gc(FileHash last);
-  void got_gc_masterchain_handle(ConstBlockHandle handle, FileHash hash);
+  void persistent_state_gc(std::pair<BlockSeqno, FileHash> last);
+  void got_gc_masterchain_handle(ConstBlockHandle handle, std::pair<BlockSeqno, FileHash> key);
 
   std::string db_root_;
   td::Ref<ValidatorManagerOptions> opts_;
@@ -223,7 +243,7 @@ class ArchiveManager : public td::actor::Actor {
 
   void update_permanent_slices();
 
-  static const td::uint32 TEMP_PACKAGES_TTL = 86400 * 7;
+  static constexpr double TEMP_PACKAGES_TTL = 3600;
 };
 
 }  // namespace validator

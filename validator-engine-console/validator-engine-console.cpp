@@ -112,6 +112,7 @@ void ValidatorEngineConsole::run() {
   add_query_runner(std::make_unique<QueryRunnerImpl<ExportPublicKeyFileQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<SignQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<SignFileQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<ExportAllPrivateKeysQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<AddAdnlAddrQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<AddDhtIdQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<AddValidatorPermanentKeyQuery>>());
@@ -140,9 +141,38 @@ void ValidatorEngineConsole::run() {
   add_query_runner(std::make_unique<QueryRunnerImpl<GetOverlaysStatsJsonQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<ImportShardOverlayCertificateQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<SignShardOverlayCertificateQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<GetActorStatsQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<GetPerfTimerStatsJsonQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<GetShardOutQueueSizeQuery>>());
   add_query_runner(std::make_unique<QueryRunnerImpl<SetExtMessagesBroadcastDisabledQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<AddCustomOverlayQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<DelCustomOverlayQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<ShowCustomOverlaysQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<SetStateSerializerEnabledQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<SetCollatorOptionsJsonQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<ResetCollatorOptionsQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<GetCollatorOptionsJsonQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<GetAdnlStatsJsonQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<GetAdnlStatsQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<AddShardQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<DelShardQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<AddCollatorQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<DelCollatorQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<CollatorNodeAddWhitelistedValidatorQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<CollatorNodeDelWhitelistedValidatorQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<CollatorNodeEnableWhitelistQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<CollatorNodeShowWhitelistQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<SetCollatorsListQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<ClearCollatorsListQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<ShowCollatorsListQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<GetCollationManagerStatsQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<SignOverlayMemberCertificateQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<ImportFastSyncMemberCertificateQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<AddFastSyncOverlayClientQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<DelFastSyncOverlayClientQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<SetShardBlockVerifierConfigQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<ClearShardBlockVerifierConfigQuery>>());
+  add_query_runner(std::make_unique<QueryRunnerImpl<ShowShardBlockVerifierConfigQuery>>());
 }
 
 bool ValidatorEngineConsole::envelope_send_query(td::BufferSlice query, td::Promise<td::BufferSlice> promise) {
@@ -193,9 +223,8 @@ void ValidatorEngineConsole::show_help(std::string command, td::Promise<td::Buff
       td::TerminalIO::out() << cmd.second->help() << "\n";
     }
   } else {
-    auto it = query_runners_.find(command);
-    if (it != query_runners_.end()) {
-      td::TerminalIO::out() << it->second->help() << "\n";
+    if (auto query = get_query(command)) {
+      td::TerminalIO::out() << query->help() << "\n";
     } else {
       td::TerminalIO::out() << "unknown command '" << command << "'\n";
     }
@@ -219,10 +248,9 @@ void ValidatorEngineConsole::parse_line(td::BufferSlice data) {
   }
   auto name = tokenizer.get_token<std::string>().move_as_ok();
 
-  auto it = query_runners_.find(name);
-  if (it != query_runners_.end()) {
+  if (auto query = get_query(name)) {
     running_queries_++;
-    it->second->run(actor_id(this), std::move(tokenizer));
+    query->run(actor_id(this), std::move(tokenizer));
   } else {
     td::TerminalIO::out() << "unknown command '" << name << "'\n";
   }

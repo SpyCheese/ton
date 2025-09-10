@@ -1,3 +1,132 @@
+## 2025.07 Accelerator Update
+
+Separation of validation and collation processes that allows to host them on independent machines and achieve full horizontal scaling. [More details in documentation](https://docs.ton.org/v3/documentation/infra/nodes/validation/collators)
+
+## 2025.06 Update
+
+1. ADNL and candidate broadcast optimization
+2. [TVM version v11](./doc/GlobalVersions.md): new opcodes, and `c7` entry to improve developer experience. It also activates storage stats and `ihr_fee`  nullification.
+3. Fixed `start_lt` of tick transactions [see details on 01.06.2025 incident](https://telegra.ph/Report-on-June-1-2025-Operation-Incident-06-02).
+4. Introduction of persistent state sharding, as well as making serialization of large BOCs more deterministic
+5. Emulator improvements: in get methods, set config from provided `c7`; allow retrieval of logs from emulator runs for get methods
+6. Optimized package import for archive nodes
+
+Besides the work of the core team, this update is based on the efforts of the RSquad team (deterministic large BOC serialization); AArayz, wy666444, Robinlzw, Lucian-code233 from TonBit (early discovery of the TVM 11 bug); @Skydev0h (uninitialized `BLOCKLT` in get methods); and @yma-het from TONWhales (emulator improvements).
+
+
+## 2025.04 Update
+
+1. Introduced substantial improvements of CellDB performance: celldb-v2, bloom filters.
+2. Accelerated a number of intrinsic node operations: SHA256, cell operations, large boc serialization, validator set checks.
+3. [TVM version v10](./doc/GlobalVersions.md)
+4. Overlay broadcast speed up and improved network stats.
+5. Fixed some issues in tonlib
+6. [Added normalized hash](https://github.com/ton-blockchain/TEPs/pull/467)
+7. Fix SDBEGINS(Q) in Asm.fif
+
+Besides the work of the core team, this update is based on the efforts of  @Stanislav-Povolotsky (tonlib fixes); @ice-charon (tonlib fixes); RSquad team (due payments improvements in v10); Arayz, Robinlzw, @wy666444 @Lucian-code233 from TonBit (improvements in RUNVM); @Skydev0h and @pyAndr3w (Asm.fif).
+
+## 2025.03 Update
+1. New extracurrency behavior introduced, check [GlobalVersions.md](./doc/GlobalVersions.md#version-10)
+2. Optmization of validation process, in particular CellStorageStat.
+3. Flag for speeding up broadcasts in various overlays.
+4. Fixes for static builds for emulator and tonlibjson
+5. Improving getstats output: adds
+  * Liteserver queries count
+  * Collated/validated blocks count, number of active sessions
+  * Persistent state sizes
+  * Initial sync progress
+6. Fixes in logging, TON Storage, external message checking, persistent state downloading, UB in tonlib
+
+Besides the work of the core team, this update is based on the efforts of  @Sild from StonFi(UB in tonlib).
+
+## 2025.02 Update
+1. Series of improvement/fixes for `Config8.version >= 9`, check [GlobalVersions.md](./doc/GlobalVersions.md)
+2. Fix for better discovery of updated nodes' (validators') IPs: retry dht queries
+3. Series of improvements for extra currency adoption: fixed c7 in rungetmethod, reserve modes
+4. TVM: Fix processing continuation control data on deep jump
+5. A few fixes of tl-b schemes: crc computation, incorrect tag for merkle proofs, advance_ext, NatWidth print
+6. Emulator improvements: fix setting libraries,  extracurrency support
+7. Increase of gas limit for unlocking highload-v2 wallets locked in the beginning of 2024
+8. Validator console improvement: dashed names, better shard formats
+
+
+Besides the work of the core team, this update is based on the efforts of  @dbaranovstonfi from StonFi(libraries in emulator), @Rexagon (ret on deep jumps), @tvorogme from DTon (`advance_ext`), Nan from Zellic (`stk_und` and JNI)
+
+## 2024.12 Update
+
+1. FunC 0.4.6: Fix in try/catch handling, fixing pure flag for functions stored in variables
+2. Merging parts of Accelerator: support of specific shard monitoring, archive/liteserver slice format, support for partial liteservers, proxy liteserver, on-demand neighbour queue loading
+3. Fix of asynchronous cell loading
+4. Various improvements: caching certificates checks, better block overloading detection, `_malloc` in emulator
+5. Introduction of telemetry in overlays
+6. Use non-null local-id for tonlib-LS interaction - mitigates MitM attack.
+7. Adding `SECP256K1_XONLY_PUBKEY_TWEAK_ADD`, `SETCONTCTRMANY` instructions to TVM (activated by `Config8.version >= 9`)
+8. Private keys export via validator-engine-console - required for better backups
+9. Fix proof checking in tonlib, `hash` in `raw.Message` in tonlib_api
+
+Besides the work of the core team, this update is based on the efforts of OtterSec and LayerZero (FunC), tg:@throwunless (FunC), Aviv Frenkel and Dima Kogan from Fordefi (LS MitM), @hacker-volodya (Tonlib), OKX team (async cell loading), @krigga (emulator)
+
+## 2024.10 Update
+
+1. Parallel write to celldb: substantial improvement of sync and GC speed, especially with slow disks.
+2. Decreased network traffic: only first block candidate is sent optimistically.
+3. Improved channel creation and dht lookups, introduction of semi-private overlays
+4. New LS dispatch queue related methods and improvement security
+5. Fixing recursion in TVM continuations
+6. Improved stats for actors, validator sessions, perf counters, overlays, adnl, rocksdb
+7. Migration to C++20
+8. Improved block size estimates: account for depth in various structures
+9. Fix bug with `<<` optimization in FunC
+10. Minor changes of TVM which will be activated by `Config8.version >= 9`
+11. Multiple minor improvements
+
+Besides the work of the core team, this update is based on the efforts of @krigga (emulator), Arayz @ TonBit (LS security, TVM recursion), @ret2happy (UB in BLST).
+
+## 2024.08 Update
+
+1. Introduction of dispatch queues, message envelopes with transaction chain metadata, and explicitly stored msg_queue size, which will be activated by `Config8.version >= 8` and new `Config8.capabilities` bits: `capStoreOutMsgQueueSize`, `capMsgMetadata`, `capDeferMessages`. 
+2. A number of changes to transaction executor which will activated for `Config8.version >= 8`:
+    - Check mode on invalid `action_send_msg`. Ignore action if `IGNORE_ERROR` (+2) bit is set, bounce if `BOUNCE_ON_FAIL` (+16) bit is set.
+    - Slightly change random seed generation to fix mix of `addr_rewrite` and `addr`.
+    - Fill in `skipped_actions` for both invalid and valid messages with `IGNORE_ERROR` mode that can't be sent.
+    - Allow unfreeze through external messages.
+    - Don't use user-provided `fwd_fee` and `ihr_fee` for internal messages.
+3. A few issues with broadcasts were fixed: stop on receiving last piece, response to AdnlMessageCreateChannel
+4. A number of fixes and improvements for emulator and tonlib: correct work with config_addr, not accepted externals, bounces, debug ops gas consumption, added version and c5 dump, fixed tonlib crashes
+5. Added new flags and commands to the node, in particular `--fast-state-serializer`, `getcollatoroptionsjson`, `setcollatoroptionsjson`
+
+Besides the work of the core team, this update is based on the efforts of @krigga (emulator), stonfi team, in particular @dbaranovstonfi and @hey-researcher (emulator), and  @loeul, @xiaoxianBoy, @simlecode (typos in comments and docs).
+
+
+
+## 2024.06 Update
+
+1. Make Jemalloc default allocator
+2. Add candidate broadcasting and caching
+3. Limit per address speed for external messages broadcast by reasonably large number 
+4. Overlay improvements: fix dropping peers in small custom overlays, fix wrong certificate on missed keyblocks
+5. Extended statistics and logs for celldb usage, session stats, persistent state serialization
+6. Tonlib and explorer fixes
+7. Flags for precize control of Celldb: `--celldb-cache-size`, `--celldb-direct-io` and `--celldb-preload-all`
+8. Add valiator-console command to stop persistent state serialization
+9. Use `@` path separator for defining include path in fift and create-state utilities on Windows only.
+
+
+## 2024.04 Update
+
+1. Emulator: Single call optimized runGetMethod added
+2. Tonlib: a series of proof improvements, also breaking Change in `liteServer.getAllShardsInfo` method (see below)
+3. DB: usage statistics now collected, outdated persistent states are not serialized
+4. LS: fast `getOutMsgQueueSizes` added, preliminary support of non-final block requests
+5. Network: lz4 compression of block candidates (disabled by default).
+6. Overlays: add custom overlays
+7. Transaction Executor: fixed issue with due_payment collection
+
+* `liteServer.getAllShardsInfo` method was updated for better efficiency. Previously, field proof contained BoC with two roots: one for BlockState from block's root and another for ShardHashes from BlockState. Now, it returns a single-root proof BoC, specifically the merkle proof of ShardHashes directly from the block's root, streamlining data access and integrity. Checking of the proof requires to check that ShardHashes in the `data` correspond to ShardHashes from the block.
+
+Besides the work of the core team, this update is based on the efforts of @akifoq (due_payment issue).
+
 ## 2024.03 Update
 
 1. Preparatory (not enabled yet) code for pre-compiled smart-contract.
@@ -29,7 +158,7 @@
    * Fix error in proof generation for blocks after merge
    * Fix most of `block is not applied` issues related to sending too recent block in Proofs
    * LS now check external messages till `accept_message` (`set_gas`).
-3. Improvements in DHT work and storage, CellDb, config.json ammendment, peer misbehavior detection, validator session stats collection, emulator.
+3. Improvements in DHT work and storage, CellDb, config.json amendment, peer misbehavior detection, validator session stats collection, emulator.
 4. Change in CTOS and XLOAD behavior activated through setting `version >= 5` in `ConfigParam 8;`:
    * Loading "nested libraries" (i.e. a library cell that points to another library cell) throws an exception.
    * Loading a library consumes gas for cell load only once (for the library cell), not twice (both for the library cell and the cell in the library).
@@ -40,7 +169,7 @@ Besides the work of the Core team, this update is based on the efforts of @XaBbl
 ## 2023.12 Update
 
 1. Optimized message queue handling, now queue cleaning speed doesn't depend on total queue size
-     * Cleaning delivered messages using lt augmentation instead of random search / consequtive walk
+     * Cleaning delivered messages using lt augmentation instead of random search / consecutive walk
      * Keeping root cell of queue message in memory until outdated (caching)
 2. Changes to block collation/validation limits
 3. Stop accepting new external message if message queue is overloaded
@@ -132,7 +261,7 @@ Besides the work of the core team, this update is based on the efforts of @vtama
 Besides the work of the core team, this update is based on the efforts of @tvorogme (debug improvements), @AlexeyFSL (WASM builds)  and third-party security auditors.
 
 ## 2022.08 Update
-* Blockchain state serialization now works via separate db-handler which simplfies memory clearing after serialization
+* Blockchain state serialization now works via separate db-handler which simplifies memory clearing after serialization
 * CellDB now works asynchronously which substantially increase database access throughput
 * Abseil-cpp and crc32 updated: solve issues with compilation on recent OS distributives
 * Fixed a series of UBs and issues for exotic endianness hosts

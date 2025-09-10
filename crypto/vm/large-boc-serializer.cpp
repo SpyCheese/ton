@@ -14,6 +14,9 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
+#include "td/utils/Time.h"
+#include "td/utils/Timer.h"
+
 #include <map>
 #include "vm/boc.h"
 #include "vm/boc-writers.h"
@@ -29,9 +32,14 @@ namespace {
 class LargeBocSerializer {
  public:
   using Hash = Cell::Hash;
+  constexpr static int load_batch_size = 4'000'000;
 
-  explicit LargeBocSerializer(std::shared_ptr<CellDbReader> reader) : reader(std::move(reader)) {}
+  explicit LargeBocSerializer(std::shared_ptr<CellDbReader> reader) : reader(std::move(reader)) {
+  }
 
+  void set_logger(BagOfCellsLogger* logger_ptr) {
+    logger_ptr_ = logger_ptr;
+  }
   void add_root(Hash root);
   td::Status import_cells();
   td::Status serialize(td::FileFd& fd, int mode);
@@ -62,10 +70,11 @@ class LargeBocSerializer {
       return 4;
     }
   };
-  std::map<Hash, CellInfo> cells;
+  td::NodeHashMap<Hash, CellInfo> cells;
   std::vector<std::pair<const Hash, CellInfo>*> cell_list;
   struct RootInfo {
-    RootInfo(Hash hash, int idx) : hash(hash), idx(idx) {}
+    RootInfo(Hash hash, int idx) : hash(hash), idx(idx) {
+    }
     Hash hash;
     int idx;
   };
@@ -78,59 +87,150 @@ class LargeBocSerializer {
   void reorder_cells();
   int revisit(int cell_idx, int force = 0);
   td::uint64 compute_sizes(int mode, int& r_size, int& o_size);
+
+  BagOfCellsLogger* logger_ptr_{};
 };
 
 void LargeBocSerializer::add_root(Hash root) {
   roots.emplace_back(root, -1);
 }
 
+// Unlike crypto/vm/boc.cpp this implementation does not load all cells into memory
+// and traverses them in BFS order to utilize bulk load of cells on the same level.
 td::Status LargeBocSerializer::import_cells() {
+  if (logger_ptr_) {
+    logger_ptr_->start_stage("import_cells");
+  }
   for (auto& root : roots) {
     TRY_RESULT(idx, import_cell(root.hash));
     root.idx = idx;
   }
   reorder_cells();
   CHECK(!cell_list.empty());
+  if (logger_ptr_) {
+    logger_ptr_->finish_stage(PSLICE() << cell_count << " cells");
+  }
   return td::Status::OK();
 }
 
-td::Result<int> LargeBocSerializer::import_cell(Hash hash, int depth) {
-  if (depth > Cell::max_depth) {
-    return td::Status::Error("error while importing a cell into a bag of cells: cell depth too large");
+td::Result<int> LargeBocSerializer::import_cell(Hash root_hash, int root_depth) {
+  const int start_ind = cell_count;
+  td::BTreeMap<Hash, std::pair<int, bool>> current_depth_hashes;
+
+  auto existing_it = cells.find(root_hash);
+  if (existing_it != cells.end()) {
+    existing_it->second.should_cache = true;
+  } else {
+    current_depth_hashes.emplace(root_hash, std::make_pair(cell_count, false));
   }
-  auto it = cells.find(hash);
-  if (it != cells.end()) {
-    it->second.should_cache = true;
-    return it->second.idx;
+  int current_depth = root_depth;
+  int next_child_idx = cell_count + 1;
+  while (!current_depth_hashes.empty()) {
+    if (current_depth > Cell::max_depth) {
+      return td::Status::Error("error while importing a cell into a bag of cells: cell depth too large");
+    }
+    
+    cell_list.resize(cell_list.size() + current_depth_hashes.size());
+    td::BTreeMap<Hash, std::pair<int, bool>> next_depth_hashes;
+    auto batch_start = current_depth_hashes.begin();
+    while (batch_start != current_depth_hashes.end()) {
+      std::vector<td::Slice> batch_hashes;
+      batch_hashes.reserve(load_batch_size);
+      std::vector<std::pair<int, bool>*> batch_idxs_should_cache;
+      batch_idxs_should_cache.reserve(load_batch_size);
+
+      while (batch_hashes.size() < load_batch_size && batch_start != current_depth_hashes.end()) {
+        batch_hashes.push_back(batch_start->first.as_slice());
+        batch_idxs_should_cache.push_back(&batch_start->second);
+        ++batch_start;
+      }
+
+      TRY_RESULT_PREFIX(loaded_results, reader->load_bulk(batch_hashes), 
+                "error while importing a cell into a bag of cells: ");
+      DCHECK(loaded_results.size() == batch_hashes.size());
+
+      for (size_t i = 0; i < loaded_results.size(); ++i) {
+        auto& cell = loaded_results[i];
+
+        if (cell->get_virtualization() != 0) {
+          return td::Status::Error(
+            "error while importing a cell into a bag of cells: cell has non-zero virtualization level");
+        }
+
+        const auto hash = cell->get_hash();
+        CellSlice cs(std::move(cell));
+
+        DCHECK(cs.size_refs() <= 4);
+        std::array<int, 4> refs{-1, -1, -1, -1};
+        for (unsigned j = 0; j < cs.size_refs(); j++) {
+          auto child = cs.prefetch_ref(j);
+          const auto child_hash = child->get_hash();
+
+          auto existing_global_it = cells.find(child_hash);
+          if (existing_global_it != cells.end()) {
+            existing_global_it->second.should_cache = true;
+            refs[j] = existing_global_it->second.idx;
+            continue;
+          }
+          auto current_depth_it = current_depth_hashes.find(child_hash);
+          if (current_depth_it != current_depth_hashes.end()) {
+            current_depth_it->second.second = true;
+            refs[j] = current_depth_it->second.first;
+            continue;
+          }
+          auto next_depth_it = next_depth_hashes.find(child_hash);
+          if (next_depth_it != next_depth_hashes.end()) {
+            next_depth_it->second.second = true;
+            refs[j] = next_depth_it->second.first;
+            continue;
+          }
+          auto res = next_depth_hashes.emplace(child_hash, std::make_pair(next_child_idx, false));
+          refs[j] = next_child_idx++;
+        }
+
+        auto dc = cs.move_as_loaded_cell().data_cell;
+        auto idx_should_cache = batch_idxs_should_cache[i];
+        auto res = cells.emplace(hash, CellInfo(idx_should_cache->first, std::move(refs)));
+        DCHECK(res.second);
+        cell_list[idx_should_cache->first] = &*res.first;
+        CellInfo& dc_info = res.first->second;
+        dc_info.should_cache = idx_should_cache->second;
+        dc_info.hcnt = static_cast<unsigned char>(dc->get_level_mask().get_hashes_count());
+        DCHECK(dc_info.hcnt <= 4);
+        dc_info.wt = 0; // will be calculated after traversing
+        TRY_RESULT(serialized_size, td::narrow_cast_safe<unsigned short>(dc->get_serialized_size()));
+        data_bytes += dc_info.serialized_size = serialized_size;
+        cell_count++;
+      }
+      if (logger_ptr_) {
+        TRY_STATUS(logger_ptr_->on_cells_processed(batch_hashes.size()));
+      }
+    }
+
+    current_depth_hashes = std::move(next_depth_hashes);
+    next_depth_hashes.clear();
+    current_depth++;
   }
-  TRY_RESULT(cell, reader->load_cell(hash.as_slice()));
-  if (cell->get_virtualization() != 0) {
-    return td::Status::Error(
-        "error while importing a cell into a bag of cells: cell has non-zero virtualization level");
+  DCHECK(next_child_idx == cell_count);
+  
+  for (int idx = cell_count - 1; idx >= start_ind; --idx) {
+    CellInfo& cell_info = cell_list[idx]->second;
+
+    unsigned sum_child_wt = 1;
+    for (size_t j = 0; j < cell_info.ref_idx.size(); ++j) {
+      int child_idx = cell_info.ref_idx[j];
+      if (child_idx == -1) {
+        continue;
+      }
+      sum_child_wt += cell_list[child_idx]->second.wt;
+      ++int_refs;
+    }
+    cell_info.wt = static_cast<unsigned char>(std::min(0xffU, sum_child_wt));
   }
-  CellSlice cs(std::move(cell));
-  std::array<int, 4> refs;
-  std::fill(refs.begin(), refs.end(), -1);
-  DCHECK(cs.size_refs() <= 4);
-  unsigned sum_child_wt = 1;
-  for (unsigned i = 0; i < cs.size_refs(); i++) {
-    TRY_RESULT(ref, import_cell(cs.prefetch_ref(i)->get_hash(), depth + 1));
-    refs[i] = ref;
-    sum_child_wt += cell_list[ref]->second.wt;
-    ++int_refs;
-  }
-  auto dc = cs.move_as_loaded_cell().data_cell;
-  auto res = cells.emplace(hash, CellInfo(cell_count, refs));
-  DCHECK(res.second);
-  cell_list.push_back(&*res.first);
-  CellInfo& dc_info = res.first->second;
-  dc_info.wt = (unsigned char)std::min(0xffU, sum_child_wt);
-  unsigned hcnt = dc->get_level_mask().get_hashes_count();
-  DCHECK(hcnt <= 4);
-  dc_info.hcnt = (unsigned char)hcnt;
-  TRY_RESULT(serialized_size, td::narrow_cast_safe<unsigned short>(dc->get_serialized_size()));
-  data_bytes += dc_info.serialized_size = serialized_size;
-  return cell_count++;
+
+  auto root_it = cells.find(root_hash);
+  DCHECK(root_it != cells.end());
+  return root_it->second.idx;
 }
 
 void LargeBocSerializer::reorder_cells() {
@@ -313,13 +413,9 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
     return td::Status::Error("bag of cells is too large");
   }
 
-  boc_writers::FileWriter writer{fd, (size_t) info.total_size};
-  auto store_ref = [&](unsigned long long value) {
-    writer.store_uint(value, info.ref_byte_size);
-  };
-  auto store_offset = [&](unsigned long long value) {
-    writer.store_uint(value, info.offset_byte_size);
-  };
+  boc_writers::FileWriter writer{fd, (size_t)info.total_size};
+  auto store_ref = [&](unsigned long long value) { writer.store_uint(value, info.ref_byte_size); };
+  auto store_offset = [&](unsigned long long value) { writer.store_uint(value, info.offset_byte_size); };
 
   writer.store_uint(info.magic, 4);
 
@@ -349,6 +445,9 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
   DCHECK(writer.position() == info.index_offset);
   DCHECK((unsigned)cell_count == cell_list.size());
   if (info.has_index) {
+    if (logger_ptr_) {
+      logger_ptr_->start_stage("generate_index");
+    }
     std::size_t offs = 0;
     for (int i = cell_count - 1; i >= 0; --i) {
       const auto& dc_info = cell_list[i]->second;
@@ -366,28 +465,56 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
         fixed_offset = offs * 2 + dc_info.should_cache;
       }
       store_offset(fixed_offset);
+      if (logger_ptr_) {
+        TRY_STATUS(logger_ptr_->on_cells_processed(1));
+      }
     }
     DCHECK(offs == info.data_size);
+    if (logger_ptr_) {
+      logger_ptr_->finish_stage("");
+    }
   }
   DCHECK(writer.position() == info.data_offset);
   size_t keep_position = writer.position();
-  for (int i = 0; i < cell_count; ++i) {
-    auto hash = cell_list[cell_count - 1 - i]->first;
-    const auto& dc_info = cell_list[cell_count - 1 - i]->second;
-    TRY_RESULT(dc, reader->load_cell(hash.as_slice()));
-    bool with_hash = (mode & Mode::WithIntHashes) && !dc_info.wt;
-    if (dc_info.is_root_cell && (mode & Mode::WithTopHash)) {
-      with_hash = true;
+  if (logger_ptr_) {
+    logger_ptr_->start_stage("serialize");
+  }
+  for (int batch_start = 0; batch_start < cell_count; batch_start += load_batch_size) {
+    int batch_end = std::min(batch_start + static_cast<int>(load_batch_size), cell_count);
+    
+    std::vector<td::Slice> batch_hashes;
+    batch_hashes.reserve(batch_end - batch_start);
+    for (int i = batch_start; i < batch_end; ++i) {
+      int cell_index = cell_count - 1 - i;
+      batch_hashes.push_back(cell_list[cell_index]->first.as_slice());
     }
-    unsigned char buf[256];
-    int s = dc->serialize(buf, 256, with_hash);
-    writer.store_bytes(buf, s);
-    DCHECK(dc->size_refs() == dc_info.get_ref_num());
-    unsigned ref_num = dc_info.get_ref_num();
-    for (unsigned j = 0; j < ref_num; ++j) {
-      int k = cell_count - 1 - dc_info.ref_idx[j];
-      DCHECK(k > i && k < cell_count);
-      store_ref(k);
+    
+    TRY_RESULT(batch_cells, reader->load_bulk(std::move(batch_hashes)));
+    
+    for (int i = batch_start; i < batch_end; ++i) {
+      int idx_in_batch = i - batch_start;
+      int cell_index = cell_count - 1 - i;
+      
+      const auto& dc_info = cell_list[cell_index]->second;
+      auto& dc = batch_cells[idx_in_batch];
+      
+      bool with_hash = (mode & Mode::WithIntHashes) && !dc_info.wt;
+      if (dc_info.is_root_cell && (mode & Mode::WithTopHash)) {
+        with_hash = true;
+      }
+      unsigned char buf[256];
+      int s = dc->serialize(buf, 256, with_hash);
+      writer.store_bytes(buf, s);
+      DCHECK(dc->size_refs() == dc_info.get_ref_num());
+      unsigned ref_num = dc_info.get_ref_num();
+      for (unsigned j = 0; j < ref_num; ++j) {
+        int k = cell_count - 1 - dc_info.ref_idx[j];
+        DCHECK(k > i && k < cell_count);
+        store_ref(k);
+      }
+    }
+    if (logger_ptr_) {
+      TRY_STATUS(logger_ptr_->on_cells_processed(batch_hashes.size()));
     }
   }
   DCHECK(writer.position() - keep_position == info.data_size);
@@ -396,17 +523,26 @@ td::Status LargeBocSerializer::serialize(td::FileFd& fd, int mode) {
     writer.store_uint(td::bswap32(crc), 4);
   }
   DCHECK(writer.empty());
-  return writer.finalize();
+  TRY_STATUS(writer.finalize());
+  if (logger_ptr_) {
+    logger_ptr_->finish_stage(PSLICE() << cell_count << " cells, " << writer.position() << " bytes");
+  }
+  return td::Status::OK();
 }
-}
+}  // namespace
 
-td::Status std_boc_serialize_to_file_large(std::shared_ptr<CellDbReader> reader, Cell::Hash root_hash,
-                                           td::FileFd& fd, int mode) {
+td::Status boc_serialize_to_file_large(std::shared_ptr<CellDbReader> reader, Cell::Hash root_hash, td::FileFd& fd,
+                                           int mode, td::CancellationToken cancellation_token) {
+  td::Timer timer;
   CHECK(reader != nullptr)
   LargeBocSerializer serializer(reader);
+  BagOfCellsLogger logger(std::move(cancellation_token));
+  serializer.set_logger(&logger);
   serializer.add_root(root_hash);
   TRY_STATUS(serializer.import_cells());
-  return serializer.serialize(fd, mode);
+  TRY_STATUS(serializer.serialize(fd, mode));
+  LOG(ERROR) << "serialization took " << timer.elapsed() << "s";
+  return td::Status::OK();
 }
 
-}
+}  // namespace vm

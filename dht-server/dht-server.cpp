@@ -54,7 +54,7 @@ Config::Config() {
   out_port = 3278;
 }
 
-Config::Config(ton::ton_api::engine_validator_config &config) {
+Config::Config(const ton::ton_api::engine_validator_config &config) {
   out_port = static_cast<td::uint16>(config.out_port_);
   if (!out_port) {
     out_port = 3278;
@@ -147,6 +147,7 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
   }
 
   std::vector<ton::tl_object_ptr<ton::ton_api::engine_validator>> val_vec;
+  std::vector<ton::tl_object_ptr<ton::ton_api::engine_collator>> col_vec;
 
   std::vector<ton::tl_object_ptr<ton::ton_api::engine_validator_fullNodeSlave>> full_node_slaves_vec;
   std::vector<ton::tl_object_ptr<ton::ton_api::engine_validator_fullNodeMaster>> full_node_masters_vec;
@@ -162,15 +163,16 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
     control_vec.push_back(ton::create_tl_object<ton::ton_api::engine_controlInterface>(x.second.key.tl(), x.first,
                                                                                        std::move(control_proc_vec)));
   }
+  std::vector<ton::tl_object_ptr<ton::ton_api::tonNode_shardId>> shard_vec;
 
   auto gc_vec = ton::create_tl_object<ton::ton_api::engine_gc>(std::vector<td::Bits256>{});
   for (auto &id : gc) {
     gc_vec->ids_.push_back(id.tl());
   }
   return ton::create_tl_object<ton::ton_api::engine_validator_config>(
-      out_port, std::move(addrs_vec), std::move(adnl_vec), std::move(dht_vec), std::move(val_vec),
-      ton::PublicKeyHash::zero().tl(), std::move(full_node_slaves_vec), std::move(full_node_masters_vec),
-      nullptr, std::move(liteserver_vec), std::move(control_vec), std::move(gc_vec));
+      out_port, std::move(addrs_vec), std::move(adnl_vec), std::move(dht_vec), std::move(val_vec), std::move(col_vec),
+      ton::PublicKeyHash::zero().tl(), std::move(full_node_slaves_vec), std::move(full_node_masters_vec), nullptr,
+      nullptr, std::move(liteserver_vec), std::move(control_vec), std::move(shard_vec), std::move(gc_vec));
 }
 
 td::Result<bool> Config::config_add_network_addr(td::IPAddress in_ip, td::IPAddress out_ip,
@@ -1193,7 +1195,8 @@ int main(int argc, char *argv[]) {
     SET_VERBOSITY_LEVEL(v);
   });
   p.add_option('V', "version", "shows dht-server build information", [&]() {
-    std::cout << "dht-server build information: [ Commit: " << GitMetadata::CommitSHA1() << ", Date: " << GitMetadata::CommitDate() << "]\n";
+    std::cout << "dht-server build information: [ Commit: " << GitMetadata::CommitSHA1()
+              << ", Date: " << GitMetadata::CommitDate() << "]\n";
     std::exit(0);
   });
   p.add_option('h', "help", "prints_help", [&]() {
@@ -1231,15 +1234,19 @@ int main(int argc, char *argv[]) {
   });
   td::uint32 threads = 7;
   p.add_checked_option(
-      't', "threads", PSTRING() << "number of threads (default=" << threads << ")", [&](td::Slice fname) {
+      't', "threads", PSTRING() << "number of threads (default=" << threads << ")", [&](td::Slice arg) {
         td::int32 v;
         try {
-          v = std::stoi(fname.str());
+          v = std::stoi(arg.str());
         } catch (...) {
           return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: not a number");
         }
-        if (v < 1 || v > 256) {
-          return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: should be in range [1..256]");
+        if (v <= 0) {
+          return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: should be > 0");
+        }
+        if (v > 127) {
+          LOG(WARNING) << "`--threads " << v << "` is too big, effective value will be 127";
+          v = 127;
         }
         threads = v;
         return td::Status::OK();

@@ -288,7 +288,7 @@ void parse_const_decl(Lexer& lex) {
     code.emplace_back(loc, Op::_Import, std::vector<var_idx_t>());
     auto tmp_vars = x->pre_compile(code);
     code.emplace_back(loc, Op::_Return, std::move(tmp_vars));
-    code.emplace_back(loc, Op::_Nop); // This is neccessary to prevent SIGSEGV!
+    code.emplace_back(loc, Op::_Nop); // This is necessary to prevent SIGSEGV!
     // It is REQUIRED to execute "optimizations" as in func.cpp
     code.simplify_var_types();
     code.prune_unreachable_code();
@@ -427,7 +427,7 @@ Expr* make_func_apply(Expr* fun, Expr* x) {
     res->flags = Expr::_IsRvalue | (fun->flags & Expr::_IsImpure);
   } else {
     res = new Expr{Expr::_VarApply, {fun, x}};
-    res->flags = Expr::_IsRvalue;
+    res->flags = Expr::_IsRvalue | Expr::_IsImpure; // for `some_var()`, don't make any considerations about runtime value, it's impure
   }
   return res;
 }

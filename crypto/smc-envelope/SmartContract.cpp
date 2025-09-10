@@ -19,6 +19,7 @@
 #include "SmartContract.h"
 
 #include "GenericAccount.h"
+#include "transaction.h"
 
 #include "block/block.h"
 #include "block/block-auto.h"
@@ -149,19 +150,20 @@ td::Ref<vm::Tuple> prepare_vm_c7(SmartContract::Args args, td::Ref<vm::Cell> cod
   }
 
   std::vector<vm::StackEntry> tuple = {
-      td::make_refint(0x076ef1ea),                            // [ magic:0x076ef1ea
-      td::make_refint(0),                                     //   actions:Integer
-      td::make_refint(0),                                     //   msgs_sent:Integer
-      td::make_refint(now),                                   //   unixtime:Integer
-      td::make_refint(0),              //TODO:                //   block_lt:Integer
-      td::make_refint(0),              //TODO:                //   trans_lt:Integer
-      std::move(rand_seed_int),                               //   rand_seed:Integer
-      block::CurrencyCollection(args.balance).as_vm_tuple(),  //   balance_remaining:[Integer (Maybe Cell)]
-      vm::load_cell_slice_ref(address),                       //  myself:MsgAddressInt
-      vm::StackEntry::maybe(config)                           //vm::StackEntry::maybe(td::Ref<vm::Cell>())
+      td::make_refint(0x076ef1ea),  // [ magic:0x076ef1ea
+      td::make_refint(0),           //   actions:Integer
+      td::make_refint(0),           //   msgs_sent:Integer
+      td::make_refint(now),         //   unixtime:Integer
+      td::make_refint(0),           //   block_lt:Integer (TODO)
+      td::make_refint(0),           //   trans_lt:Integer (TODO)
+      std::move(rand_seed_int),     //   rand_seed:Integer
+      block::CurrencyCollection(args.balance, args.extra_currencies)
+          .as_vm_tuple(),                //   balance_remaining:[Integer (Maybe Cell)]
+      vm::load_cell_slice_ref(address),  //   myself:MsgAddressInt
+      vm::StackEntry::maybe(config)      //   vm::StackEntry::maybe(td::Ref<vm::Cell>())
   };
   if (args.config && args.config.value()->get_global_version() >= 4) {
-    tuple.push_back(code.not_null() ? code : vm::StackEntry{});        // code:Cell
+    tuple.push_back(vm::StackEntry::maybe(code));                      // code:Cell
     tuple.push_back(block::CurrencyCollection::zero().as_vm_tuple());  // in_msg_value:[Integer (Maybe Cell)]
     tuple.push_back(td::zero_refint());                                // storage_fees:Integer
 
@@ -174,11 +176,55 @@ td::Ref<vm::Tuple> prepare_vm_c7(SmartContract::Args args, td::Ref<vm::Cell> cod
   if (args.config && args.config.value()->get_global_version() >= 6) {
     tuple.push_back(args.config.value()->get_unpacked_config_tuple(now));  // unpacked_config_tuple
     tuple.push_back(td::zero_refint());                                    // due_payment
-    tuple.push_back(vm::StackEntry());                                     // precompiled_gas_usage:Integer
+    // precompiled_gas_usage:(Maybe Integer)
+    td::optional<block::PrecompiledContractsConfig::Contract> precompiled;
+    if (code.not_null()) {
+      precompiled = args.config.value()->get_precompiled_contracts_config().get_contract(code->get_hash().bits());
+    }
+    tuple.push_back(precompiled ? td::make_refint(precompiled.value().gas_usage) : vm::StackEntry());
+  }
+  if (args.config && args.config.value()->get_global_version() >= 11) {
+    tuple.push_back(block::transaction::Transaction::prepare_in_msg_params_tuple(nullptr, {}, {}));
   }
   auto tuple_ref = td::make_cnt_ref<std::vector<vm::StackEntry>>(std::move(tuple));
   //LOG(DEBUG) << "SmartContractInfo initialized with " << vm::StackEntry(tuple).to_string();
   return vm::make_tuple_ref(std::move(tuple_ref));
+}
+
+std::shared_ptr<const block::Config> try_fetch_config_from_c7(td::Ref<vm::Tuple> c7) {
+  if (c7.is_null() || c7->size() < 1) {
+    return nullptr;
+  }
+  auto c7_tuple = c7->at(0).as_tuple();
+  if (c7_tuple.is_null() || c7_tuple->size() < 10) {
+    return nullptr;
+  }
+  auto config_cell = c7_tuple->at(9).as_cell();
+  if (config_cell.is_null()) {
+    return nullptr;
+  }
+  auto config_dict = std::make_unique<vm::Dictionary>(config_cell, 32);
+  auto config_addr_cell = config_dict->lookup_ref(td::BitArray<32>::zero());
+  ton::StdSmcAddress config_addr;
+  if (config_addr_cell.is_null()) {
+    config_addr = ton::StdSmcAddress::zero();
+  } else {
+    auto config_addr_cs = vm::load_cell_slice(std::move(config_addr_cell));
+    if (config_addr_cs.size() != 0x100) {
+      LOG(WARNING) << "Config parameter 0 with config address has wrong size";
+      config_addr = ton::StdSmcAddress::zero();
+    } else {
+      config_addr_cs.fetch_bits_to(config_addr);
+    }
+  }
+  auto global_config = block::Config(config_cell, std::move(config_addr), 
+      block::Config::needWorkchainInfo | block::Config::needSpecialSmc | block::Config::needCapabilities);
+  auto unpack_res = global_config.unpack();
+  if (unpack_res.is_error()) {
+    LOG(ERROR) << "Failed to unpack config: " << unpack_res.error();
+    return nullptr;
+  }
+  return std::make_shared<block::Config>(std::move(global_config));
 }
 
 SmartContract::Answer run_smartcont(SmartContract::State state, td::Ref<vm::Stack> stack, td::Ref<vm::Tuple> c7,
@@ -217,14 +263,14 @@ SmartContract::Answer run_smartcont(SmartContract::State state, td::Ref<vm::Stac
     stack->dump(os, 2);
     LOG(DEBUG) << "VM stack:\n" << os.str();
   }
-  vm::VmState vm{state.code, std::move(stack), gas, 1, state.data, log};
+  int global_version = config ? config->get_global_version() : 0;
+  vm::VmState vm{state.code, global_version, std::move(stack), gas, 1, state.data, log};
   vm.set_c7(std::move(c7));
   vm.set_chksig_always_succeed(ignore_chksig);
   if (!libraries.is_null()) {
     vm.register_library_collection(libraries);
   }
   if (config) {
-    vm.set_global_version(config->get_global_version());
     auto r_limits = config->get_size_limits_config();
     if (r_limits.is_ok()) {
       vm.set_max_data_depth(r_limits.ok().max_vm_data_depth);
@@ -304,6 +350,9 @@ td::Ref<vm::Cell> SmartContract::get_init_state() const {
 }
 
 SmartContract::Answer SmartContract::run_method(Args args) {
+  if (args.c7 && !args.config) {
+    args.config = try_fetch_config_from_c7(args.c7.value());
+  }
   if (!args.c7) {
     args.c7 = prepare_vm_c7(args, state_.code);
   }
@@ -325,6 +374,9 @@ SmartContract::Answer SmartContract::run_method(Args args) {
 }
 
 SmartContract::Answer SmartContract::run_get_method(Args args) const {
+  if (args.c7 && !args.config) {
+    args.config = try_fetch_config_from_c7(args.c7.value());
+  }
   if (!args.c7) {
     args.c7 = prepare_vm_c7(args, state_.code);
   }

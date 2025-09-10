@@ -347,6 +347,9 @@ std::size_t bits_memscan_rev(ConstBitPtr bs, std::size_t bit_count, bool cmp_to)
 int bits_memcmp(const unsigned char* bs1, int bs1_offs, const unsigned char* bs2, int bs2_offs, std::size_t bit_count,
                 std::size_t* same_upto) {
   if (!bit_count) {
+    if (same_upto) {
+      *same_upto = 0;
+    }
     return 0;
   }
   bs1 += (bs1_offs >> 3);
@@ -640,11 +643,11 @@ long parse_bitstring_hex_literal(unsigned char* buff, std::size_t buff_size, con
   return bits;
 }
 
-long parse_bitstring_binary_literal(BitPtr buff, std::size_t buff_size, const char* str, const char* str_end) {
+long parse_bitstring_binary_literal(BitPtr buff, std::size_t buff_size_bits, const char* str, const char* str_end) {
   const char* ptr = str;
-  while (ptr < str_end && buff_size && (*ptr == '0' || *ptr == '1')) {
+  while (ptr < str_end && buff_size_bits && (*ptr == '0' || *ptr == '1')) {
     *buff++ = (bool)(*ptr++ & 1);
-    --buff_size;
+    --buff_size_bits;
   }
   return td::narrow_cast<long>(ptr == str_end ? ptr - str : str - ptr - 1);
 }
