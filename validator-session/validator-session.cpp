@@ -242,8 +242,7 @@ void ValidatorSessionImpl::process_broadcast(PublicKeyHash src, td::BufferSlice 
   td::Timer deserialize_timer;
   auto R =
       deserialize_candidate(data, compress_block_candidates_,
-                            description().opts().max_block_size + description().opts().max_collated_data_size + 1024,
-                            description().opts().proto_version);
+                            description().opts().max_block_size + description().opts().max_collated_data_size + 1024);
   double deserialize_time = deserialize_timer.elapsed();
   if (R.is_error()) {
     VLOG(VALIDATOR_SESSION_WARNING) << this << "[node " << src << "][broadcast " << sha256_bits256(data.as_slice())
@@ -1012,8 +1011,7 @@ void ValidatorSessionImpl::downloaded_accepted_candidate(td::uint32 round, const
   }
   auto R =
       deserialize_candidate(result, compress_block_candidates_,
-                            description().opts().max_block_size + description().opts().max_collated_data_size + 1024,
-                            description().opts().proto_version);
+                            description().opts().max_block_size + description().opts().max_collated_data_size + 1024);
   if (R.is_error()) {
     VLOG(VALIDATOR_SESSION_WARNING) << this << ": failed to download accepted candidate " << candidate_id << ": "
                                     << R.move_as_error();
@@ -1580,18 +1578,18 @@ void ValidatorSessionImpl::generate_block_optimistic(td::uint32 cur_round,
   if (!stat) {
     return;
   }
-  callback_->generate_block_optimistic(BlockSourceInfo{description().get_source_public_key(local_idx()),
-                                                       BlockCandidatePriority{cur_round + 1, cur_round + 1, 0}},
-                                       block->data_.clone(), block->root_hash_, stat->block_id.file_hash,
-                                       [=, SelfId = actor_id(this)](td::Result<GeneratedCandidate> R) {
-                                         if (R.is_error()) {
-                                           LOG(DEBUG) << "Optimistic generation error: " << R.move_as_error();
-                                           return;
-                                         }
-                                         td::actor::send_closure(SelfId,
-                                                                 &ValidatorSessionImpl::generated_optimistic_candidate,
-                                                                 cur_round + 1, R.move_as_ok(), prev_candidate_id);
-                                       });
+  callback_->generate_block_optimistic(
+      BlockSourceInfo{description().get_source_public_key(local_idx()),
+                      BlockCandidatePriority{cur_round + 1, cur_round + 1, 0}},
+      block->data_.clone(), block->collated_data_.clone(), block->root_hash_, stat->block_id.file_hash,
+      [=, SelfId = actor_id(this)](td::Result<GeneratedCandidate> R) {
+        if (R.is_error()) {
+          LOG(DEBUG) << "Optimistic generation error: " << R.move_as_error();
+          return;
+        }
+        td::actor::send_closure(SelfId, &ValidatorSessionImpl::generated_optimistic_candidate, cur_round + 1,
+                                R.move_as_ok(), prev_candidate_id);
+      });
 }
 
 void ValidatorSessionImpl::generated_optimistic_candidate(td::uint32 round, GeneratedCandidate candidate,

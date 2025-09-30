@@ -110,9 +110,9 @@ void ValidatorGroup::generate_block_candidate_cont(validatorsession::BlockSource
       [=, this, params = std::move(params), promise = std::move(promise)](td::Result<td::Unit> R) mutable {
         TRY_STATUS_PROMISE(promise, cancellation_token.check());
         TRY_STATUS_PROMISE(promise, R.move_as_status());
-        td::actor::send_closure(collation_manager_, &CollationManager::collate_block, params, source_info.priority,
-                                max_answer_size, std::move(cancellation_token), std::move(promise),
-                                config_.proto_version);
+        td::actor::send_closure(collation_manager_, &CollationManager::collate_block, std::move(params),
+                                source_info.priority, max_answer_size, std::move(cancellation_token),
+                                std::move(promise));
       });
 }
 
@@ -249,27 +249,26 @@ void ValidatorGroup::validate_block_candidate(validatorsession::BlockSourceInfo 
     return;
   }
   VLOG(VALIDATOR_DEBUG) << "validating block candidate " << next_block_id;
-  Ref<BlockData> optimistic_prev_block_data;
-  if (is_optimistic) {
-    TRY_RESULT_PROMISE_PREFIX_ASSIGN(
-        P, optimistic_prev_block_data,
-        create_block(optimistic_prev_block.value().id, std::move(optimistic_prev_block.value().data)),
-        "failed to parse optimistic prev block: ");
-  }
-
   ValidateParams params{.shard = shard_,
                         .min_masterchain_block_id = min_masterchain_block_id_,
                         .prev = std::move(prev),
                         .validator_set = validator_set_,
                         .local_validator_id = local_id_,
-                        .optimistic_prev_block = optimistic_prev_block_data,
                         .collated_data_merger = collated_data_merger_.get()};
-  wait_collated_data_merged(
-      next_block_id.seqno(), [block = std::move(block), params = std::move(params), manager = manager_,
-                              P = std::move(P)](td::Result<td::Unit> R) mutable {
-        TRY_STATUS_PROMISE(P, R.move_as_status());
-        run_validate_query(std::move(block), std::move(params), manager, td::Timestamp::in(15.0), std::move(P));
-      });
+  if (is_optimistic) {
+    TRY_RESULT_PROMISE_PREFIX_ASSIGN(
+        P, params.optimistic_prev_block,
+        create_block(optimistic_prev_block.value().id, std::move(optimistic_prev_block.value().data)),
+        "failed to parse optimistic prev block: ");
+    params.optimistic_prev_collated_data = std::move(optimistic_prev_block.value().collated_data);
+  }
+  wait_collated_data_merged(next_block_id.seqno() - (is_optimistic ? 1 : 0),
+                            [block = std::move(block), params = std::move(params), manager = manager_,
+                             P = std::move(P)](td::Result<td::Unit> R) mutable {
+                              TRY_STATUS_PROMISE(P, R.move_as_status());
+                              run_validate_query(std::move(block), std::move(params), manager, td::Timestamp::in(15.0),
+                                                 std::move(P));
+                            });
 }
 
 void ValidatorGroup::update_approve_cache(CacheKey key, UnixTime value) {
@@ -391,8 +390,9 @@ void ValidatorGroup::get_approved_candidate(PublicKey source, RootHash root_hash
 }
 
 void ValidatorGroup::generate_block_optimistic(validatorsession::BlockSourceInfo source_info,
-                                               td::BufferSlice prev_block, RootHash prev_root_hash,
-                                               FileHash prev_file_hash, td::Promise<GeneratedCandidate> promise) {
+                                               td::BufferSlice prev_block, td::BufferSlice prev_collated_data,
+                                               RootHash prev_root_hash, FileHash prev_file_hash,
+                                               td::Promise<GeneratedCandidate> promise) {
   if (destroying_) {
     promise.set_error(td::Status::Error("validator session finished"));
     return;
@@ -409,7 +409,7 @@ void ValidatorGroup::generate_block_optimistic(validatorsession::BlockSourceInfo
     promise.set_error(td::Status::Error("optimistic generation already in progress"));
     return;
   }
-  BlockIdExt block_id{create_next_block_id_simple(), prev_root_hash, prev_file_hash};
+  BlockIdExt prev_block_id{create_next_block_id_simple(), prev_root_hash, prev_file_hash};
   optimistic_generation_ = std::make_unique<OptimisticGeneration>();
   optimistic_generation_->round = source_info.priority.round;
   optimistic_generation_->prev = BlockIdExt{create_next_block_id_simple(), prev_root_hash, prev_file_hash};
@@ -418,25 +418,25 @@ void ValidatorGroup::generate_block_optimistic(validatorsession::BlockSourceInfo
   td::Promise<GeneratedCandidate> P = [=, SelfId = actor_id(this)](td::Result<GeneratedCandidate> R) {
     td::actor::send_closure(SelfId, &ValidatorGroup::generated_block_optimistic, source_info, std::move(R));
   };
-  LOG(WARNING) << "Optimistically generating next block after " << block_id.to_str();
+  LOG(WARNING) << "Optimistically generating next block after " << prev_block_id.to_str();
   td::uint64 max_answer_size = config_.max_block_size + config_.max_collated_data_size + 1024;
-  TRY_RESULT_PROMISE(promise, prev_block_data, create_block(block_id, std::move(prev_block)));
+  TRY_RESULT_PROMISE(P, prev_block_data, create_block(prev_block_id, std::move(prev_block)));
   CollateParams params{.shard = shard_,
                        .min_masterchain_block_id = min_masterchain_block_id_,
-                       .prev = {block_id},
+                       .prev = {prev_block_id},
                        .creator = Ed25519_PublicKey{local_id_full_.ed25519_value().raw()},
                        .validator_set = validator_set_,
                        .collator_opts = opts_->get_collator_options(),
                        .optimistic_prev_block = prev_block_data,
+                       .optimistic_prev_collated_data = std::move(prev_collated_data),
                        .collated_data_deduplicator = collated_data_deduplicator_};
   auto token = optimistic_generation_->cancellation_token_source.get_cancellation_token();
-  wait_collated_data_merged(block_id.seqno(), [=, this, params = std::move(params), token = std::move(token),
-                                               promise = std::move(promise)](td::Result<td::Unit> R) mutable {
-    TRY_STATUS_PROMISE(promise, token.check());
-    TRY_STATUS_PROMISE(promise, R.move_as_status());
+  wait_collated_data_merged(prev_block_id.seqno(), [=, this, params = std::move(params), token = std::move(token),
+                                                    P = std::move(P)](td::Result<td::Unit> R) mutable {
+    TRY_STATUS_PROMISE(P, token.check());
+    TRY_STATUS_PROMISE(P, R.move_as_status());
     td::actor::send_closure(collation_manager_, &CollationManager::collate_block, std::move(params),
-                            source_info.priority, max_answer_size, std::move(token), std::move(promise),
-                            config_.proto_version);
+                            source_info.priority, max_answer_size, std::move(token), std::move(P));
   });
 }
 
@@ -553,10 +553,10 @@ std::unique_ptr<validatorsession::ValidatorSession::Callback> ValidatorGroup::ma
                               collated_data_file_hash, std::move(promise));
     }
     void generate_block_optimistic(validatorsession::BlockSourceInfo source_info, td::BufferSlice prev_block,
-                                   RootHash prev_root_hash, FileHash prev_file_hash,
+                                   td::BufferSlice prev_collated_data, RootHash prev_root_hash, FileHash prev_file_hash,
                                    td::Promise<GeneratedCandidate> promise) override {
       td::actor::send_closure(id_, &ValidatorGroup::generate_block_optimistic, source_info, std::move(prev_block),
-                              prev_root_hash, prev_file_hash, std::move(promise));
+                              std::move(prev_collated_data), prev_root_hash, prev_file_hash, std::move(promise));
     }
     void on_optimistic_candidate(validatorsession::BlockSourceInfo source_info,
                                  validatorsession::ValidatorSessionRootHash root_hash, td::BufferSlice data,
@@ -708,6 +708,12 @@ void ValidatorGroup::destroy() {
                             });
   }
   cancellation_token_source_.cancel();
+  for (auto &[_, vec] : collated_data_merged_waiters_) {
+    for (auto &promise : vec) {
+      promise.set_error(td::Status::Error("validator session finished"));
+    }
+  }
+  collated_data_merged_waiters_.clear();
   delay_action([SelfId = actor_id(this)]() { td::actor::send_closure(SelfId, &ValidatorGroup::destroy_cont); },
                td::Timestamp::in(10.0));
 }
@@ -781,9 +787,13 @@ void ValidatorGroup::get_validator_group_info_for_litequery_cont(
 void ValidatorGroup::send_block_candidate_broadcast(BlockIdExt id, td::BufferSlice data,
                                                     td::BufferSlice collated_data) {
   if (sent_block_candidate_broadcasts_.insert(id).second) {
+    td::optional<td::BufferSlice> o_collated_data;
+    if (merge_collated_data_enabled_) {
+      o_collated_data = std::move(collated_data);
+    }
     td::actor::send_closure(manager_, &ValidatorManager::send_block_candidate_broadcast, id,
                             validator_set_->get_catchain_seqno(), validator_set_->get_validator_set_hash(),
-                            std::move(data), std::move(collated_data),
+                            std::move(data), std::move(o_collated_data),
                             fullnode::FullNode::broadcast_mode_fast_sync | fullnode::FullNode::broadcast_mode_custom);
   }
 }

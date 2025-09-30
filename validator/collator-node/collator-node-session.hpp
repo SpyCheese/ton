@@ -49,6 +49,8 @@ class CollatorNodeSession : public td::actor::Actor {
                        bool is_optimistic, td::Timestamp timeout, td::Promise<BlockCandidate> promise);
   void update_masterchain_config(td::Ref<MasterchainState> state);
 
+  void alarm() override;
+
  private:
   ShardIdFull shard_;
   std::vector<BlockIdExt> prev_;
@@ -77,18 +79,17 @@ class CollatorNodeSession : public td::actor::Actor {
   BlockSeqno next_block_seqno_;
   std::map<std::vector<BlockIdExt>, std::shared_ptr<CacheEntry>> cache_;
 
-  td::uint32 proto_version_ = 0;
   td::uint32 max_candidate_size_ = 0;
 
   void generate_block(std::vector<BlockIdExt> prev_blocks, td::optional<BlockCandidatePriority> o_priority,
-                      td::Ref<BlockData> o_optimistic_prev_block, td::Timestamp timeout,
-                      td::Promise<BlockCandidate> promise);
+                      td::Ref<BlockData> o_optimistic_prev_block, td::BufferSlice o_optimistic_prev_collated_data,
+                      td::Timestamp timeout, td::Promise<BlockCandidate> promise);
   void process_result(std::shared_ptr<CacheEntry> cache_entry, td::Result<BlockCandidate> R);
 
   void process_request_optimistic_cont(adnl::AdnlNodeIdShort src, BlockIdExt prev_block_id,
                                        BlockCandidatePriority priority, td::Timestamp timeout,
                                        td::Promise<BlockCandidate> promise,
-                                       td::Result<td::BufferSlice> prev_block_data);
+                                       td::Result<std::pair<td::BufferSlice, td::BufferSlice>> prev_candidate);
   void process_request_optimistic_cont2(BlockIdExt prev_block_id, BlockCandidatePriority priority,
                                         td::Timestamp timeout, td::Promise<BlockCandidate> promise,
                                         td::Result<td::BufferSlice> R);
@@ -98,15 +99,17 @@ class CollatorNodeSession : public td::actor::Actor {
   std::shared_ptr<CollatedDataDeduplicator> collated_data_deduplicator_;
   std::set<BlockSeqno> collated_data_merged_;
   BlockSeqno collated_data_merged_upto_ = 0;
-  std::map<BlockSeqno, std::vector<td::Promise<td::Unit>>> collated_data_merged_waiters_;
+  std::map<BlockSeqno, std::vector<std::pair<td::Promise<td::Unit>, td::Timestamp>>> collated_data_merged_waiters_;
 
-  void wait_collated_data_merged(BlockSeqno seqno, td::Promise<td::Unit> promise);
+  void wait_collated_data_merged(BlockSeqno seqno, td::Timestamp timeout, td::Promise<td::Unit> promise);
   void try_merge_collated_data(BlockIdExt block_id);
   void try_merge_collated_data_from_net(BlockIdExt block_id);
   void try_merge_collated_data_from_net_cont(BlockIdExt block_id, Ref<BlockData> block_data);
   void try_merge_collated_data_from_net_cont2(BlockIdExt block_id, Ref<BlockData> block_data,
                                               td::BufferSlice collated_data);
   void try_merge_collated_data_finish(BlockCandidate candidate, bool from_disk);
+  void try_merge_collated_data_ignore(BlockIdExt block_id);
+  void process_collated_data_merged_upto();
 };
 
 }  // namespace ton::validator
