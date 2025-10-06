@@ -22,6 +22,7 @@
 #include "ton/ton-types.h"
 #include "validator/validator.h"
 #include "adnl/adnl-ext-client.h"
+#include "td/actor/coro_task.h"
 
 #include <stats-provider.h>
 
@@ -43,18 +44,12 @@ class DownloadState : public td::actor::Actor {
 
   void abort_query(td::Status reason);
   void alarm() override;
-  void finish_query();
+  void finish_query(td::BufferSlice state);
 
   void start_up() override;
-  void get_block_handle();
-  void got_block_handle(BlockHandle handle);
-  void got_node_to_download(adnl::AdnlNodeIdShort node);
-  void got_block_state_description(td::BufferSlice data_description);
-  void got_state_size(td::BufferSlice size_or_not_found);
-  void request_total_size();
-  void got_total_size(td::uint64 size);
-  void got_block_state_part(td::BufferSlice data, td::uint32 requested_size);
-  void got_block_state(td::BufferSlice data);
+  td::actor::Task<td::BufferSlice> run();
+  td::actor::StartedTask<td::BufferSlice> send_query(std::string name, td::BufferSlice query, td::Timestamp timeout);
+  td::actor::Task<td::Unit> request_total_size();
 
  private:
   BlockIdExt block_id_;
@@ -76,15 +71,7 @@ class DownloadState : public td::actor::Actor {
   td::actor::ActorId<adnl::AdnlExtClient> client_;
   td::Promise<td::BufferSlice> promise_;
 
-  BlockHandle handle_;
-  td::BufferSlice state_;
-  std::vector<td::BufferSlice> parts_;
-  td::uint64 sum_ = 0;
-
-  td::uint64 prev_logged_sum_ = 0;
-  td::Timer prev_logged_timer_;
   td::uint64 total_size_ = 0;
-
   ProcessStatus status_;
 };
 
