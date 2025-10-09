@@ -32,10 +32,14 @@
 #include "manager-init.h"
 #include "state-serializer.hpp"
 #include "rldp/rldp.h"
+#include "rldp2/rldp.h"
 #include "token-manager.h"
 #include "queue-size-counter.hpp"
-#include "validator-telemetry.hpp"
+#include "storage-stat-cache.hpp"
 #include "impl/candidates-buffer.hpp"
+#include "collator-node/collator-node.hpp"
+#include "shard-block-verifier.hpp"
+#include "shard-block-retainer.hpp"
 #include "td/utils/LRUCache.h"
 
 #include <map>
@@ -161,9 +165,17 @@ class ValidatorManagerImpl : public ValidatorManager {
     WaitList() = default;
 
     std::pair<td::Timestamp, td::uint32> get_timeout() const {
+      return get_timeout_impl(waiting_);
+    }
+    void check_timers() {
+      check_timers_impl(waiting_);
+    }
+
+   protected:
+    static std::pair<td::Timestamp, td::uint32> get_timeout_impl(const std::vector<Waiter<ResType>> &waiting) {
       td::Timestamp t = td::Timestamp::now();
       td::uint32 prio = 0;
-      for (auto &v : waiting_) {
+      for (auto &v : waiting) {
         if (v.timeout.at() > t.at()) {
           t = v.timeout;
         }
@@ -173,10 +185,10 @@ class ValidatorManagerImpl : public ValidatorManager {
       }
       return {td::Timestamp::at(t.at() + 10.0), prio};
     }
-    void check_timers() {
+    static void check_timers_impl(std::vector<Waiter<ResType>> &waiting) {
       td::uint32 j = 0;
-      auto f = waiting_.begin();
-      auto t = waiting_.end();
+      auto f = waiting.begin();
+      auto t = waiting.end();
       while (f < t) {
         if (f->timeout.is_in_past()) {
           f->promise.set_error(td::Status::Error(ErrorCode::timeout, "timeout"));
@@ -187,16 +199,26 @@ class ValidatorManagerImpl : public ValidatorManager {
           j++;
         }
       }
-      waiting_.resize(j);
+      waiting.resize(j);
     }
   };
   template <typename ActorT, typename ResType>
-  struct WaitListCaching : public WaitList<ActorT, ResType> {
-    bool done_ = false;
-    ResType result_;
-    td::Timestamp remove_at_;
+  struct WaitListPreliminary : WaitList<ActorT, ResType> {
+    std::vector<Waiter<ResType>> waiting_preliminary_;
+    bool preliminary_done_ = false;
+    ResType preliminary_result_;
+
+    std::pair<td::Timestamp, td::uint32> get_timeout() const {
+      auto t1 = WaitList<ActorT, ResType>::get_timeout_impl(this->waiting_);
+      auto t2 = WaitList<ActorT, ResType>::get_timeout_impl(waiting_preliminary_);
+      return {std::max(t1.first, t2.first), std::max(t1.second, t2.second)};
+    }
+    void check_timers() {
+      WaitList<ActorT, ResType>::check_timers_impl(this->waiting_);
+      WaitList<ActorT, ResType>::check_timers_impl(waiting_preliminary_);
+    }
   };
-  std::map<BlockIdExt, WaitList<WaitBlockState, td::Ref<ShardState>>> wait_state_;
+  std::map<BlockIdExt, WaitListPreliminary<WaitBlockState, td::Ref<ShardState>>> wait_state_;
   std::map<BlockIdExt, WaitList<WaitBlockData, td::Ref<BlockData>>> wait_block_data_;
 
   struct CachedBlockState {
@@ -209,6 +231,8 @@ class ValidatorManagerImpl : public ValidatorManager {
     std::vector<td::Promise<BlockHandle>> waiting_;
   };
   std::map<BlockIdExt, WaitBlockHandle> wait_block_handle_;
+
+  td::actor::ActorOwn<OutMsgQueueImporter> out_msg_queue_importer_;
 
  private:
   // HANDLES CACHE
@@ -233,7 +257,16 @@ class ValidatorManagerImpl : public ValidatorManager {
     }
   };
   // DATA FOR COLLATOR
-  std::map<ShardTopBlockDescriptionId, td::Ref<ShardTopBlockDescription>> shard_blocks_;
+  // Shard block will not be used until it is confirmed by trusted nodes (see ShardBlockVerifier) and
+  // msg queue to masterchain is ready (to avoid too long masterchain collation)
+  // latest_desc - latest known block
+  // ready_desc - block ready to be used (may be null)
+  struct ShardTopBlock {
+    td::Ref<ShardTopBlockDescription> latest_desc;
+    td::Ref<ShardTopBlockDescription> ready_desc;
+  };
+  std::map<ShardTopBlockDescriptionId, ShardTopBlock> shard_blocks_;
+  std::map<BlockIdExt, td::Ref<OutMsgQueueProof>> cached_msg_queue_to_masterchain_;
 
   td::LRUCache<BlockIdExt, td::BufferSlice> cached_block_data_{/* max_size = */ 128};
   td::LRUCache<BlockIdExt, td::Unit> cached_checked_shard_block_descriptions_{/* max_size = */ 1024};
@@ -274,12 +307,15 @@ class ValidatorManagerImpl : public ValidatorManager {
                                                              td::Ref<ValidatorSet> validator_set, BlockSeqno key_seqno,
                                                              validatorsession::ValidatorSessionOptions opts,
                                                              bool create_catchain);
+  td::actor::ActorId<CollationManager> get_collation_manager(adnl::AdnlNodeIdShort adnl_id);
+
   struct ValidatorGroupEntry {
     td::actor::ActorOwn<ValidatorGroup> actor;
     ShardIdFull shard;
   };
   std::map<ValidatorSessionId, ValidatorGroupEntry> validator_groups_;
   std::map<ValidatorSessionId, ValidatorGroupEntry> next_validator_groups_;
+  std::map<adnl::AdnlNodeIdShort, td::actor::ActorOwn<CollationManager>> collation_managers_;
 
   std::set<ValidatorSessionId> check_gc_list_;
   std::vector<ValidatorSessionId> gc_list_;
@@ -347,7 +383,6 @@ class ValidatorManagerImpl : public ValidatorManager {
   }
   void add_temp_key(PublicKeyHash key, td::Promise<td::Unit> promise) override {
     temp_keys_.insert(key);
-    init_validator_telemetry();
     promise.set_value(td::Unit());
   }
   void del_permanent_key(PublicKeyHash key, td::Promise<td::Unit> promise) override {
@@ -356,7 +391,6 @@ class ValidatorManagerImpl : public ValidatorManager {
   }
   void del_temp_key(PublicKeyHash key, td::Promise<td::Unit> promise) override {
     temp_keys_.erase(key);
-    init_validator_telemetry();
     promise.set_value(td::Unit());
   }
 
@@ -422,10 +456,12 @@ class ValidatorManagerImpl : public ValidatorManager {
                                        std::function<td::Status(td::FileFd &)> write_data,
                                        td::Promise<td::Unit> promise) override;
   void store_zero_state_file(BlockIdExt block_id, td::BufferSlice state, td::Promise<td::Unit> promise) override;
-  void wait_block_state(BlockHandle handle, td::uint32 priority, td::Timestamp timeout,
+  void wait_block_state(BlockHandle handle, td::uint32 priority, td::Timestamp timeout, bool wait_store,
                         td::Promise<td::Ref<ShardState>> promise) override;
-  void wait_block_state_short(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
+  void wait_block_state_short(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout, bool wait_store,
                               td::Promise<td::Ref<ShardState>> promise) override;
+  void wait_neighbor_msg_queue_proofs(ShardIdFull dst_shard, std::vector<BlockIdExt> blocks, td::Timestamp timeout,
+                                      td::Promise<std::map<BlockIdExt, td::Ref<OutMsgQueueProof>>> promise) override;
 
   void set_block_data(BlockHandle handle, td::Ref<BlockData> data, td::Promise<td::Unit> promise) override;
   void wait_block_data(BlockHandle handle, td::uint32 priority, td::Timestamp,
@@ -467,8 +503,8 @@ class ValidatorManagerImpl : public ValidatorManager {
   void get_external_messages(ShardIdFull shard,
                              td::Promise<std::vector<std::pair<td::Ref<ExtMessage>, int>>> promise) override;
   void get_ihr_messages(ShardIdFull shard, td::Promise<std::vector<td::Ref<IhrMessage>>> promise) override;
-  void get_shard_blocks(BlockIdExt masterchain_block_id,
-                        td::Promise<std::vector<td::Ref<ShardTopBlockDescription>>> promise) override;
+  void get_shard_blocks_for_collator(BlockIdExt masterchain_block_id,
+                                     td::Promise<std::vector<td::Ref<ShardTopBlockDescription>>> promise) override;
   void complete_external_messages(std::vector<ExtMessage::Hash> to_delay,
                                   std::vector<ExtMessage::Hash> to_delete) override;
   void complete_ihr_messages(std::vector<IhrMessage::Hash> to_delay, std::vector<IhrMessage::Hash> to_delete) override;
@@ -519,7 +555,6 @@ class ValidatorManagerImpl : public ValidatorManager {
   void send_ihr_message(td::Ref<IhrMessage> message) override;
   void send_top_shard_block_description(td::Ref<ShardTopBlockDescription> desc) override;
   void send_block_broadcast(BlockBroadcast broadcast, int mode) override;
-  void send_validator_telemetry(PublicKeyHash key, tl_object_ptr<ton_api::validator_telemetry> telemetry) override;
   void send_get_out_msg_queue_proof_request(ShardIdFull dst_shard, std::vector<BlockIdExt> blocks,
                                             block::ImportedMsgQueueLimits limits,
                                             td::Promise<std::vector<td::Ref<OutMsgQueueProof>>> promise) override;
@@ -557,10 +592,14 @@ class ValidatorManagerImpl : public ValidatorManager {
 
   void add_shard_block_description(td::Ref<ShardTopBlockDescription> desc);
   void add_cached_block_data(BlockIdExt block_id, td::BufferSlice data);
+  void preload_msg_queue_to_masterchain(td::Ref<ShardTopBlockDescription> desc, td::Promise<td::Unit> promise);
+  void loaded_msg_queue_to_masterchain(td::Ref<ShardTopBlockDescription> desc, td::Ref<OutMsgQueueProof> res,
+                                       td::Promise<td::Unit> promise);
+  void set_shard_block_description_ready(td::Ref<ShardTopBlockDescription> desc);
 
   void register_block_handle(BlockHandle handle);
 
-  void finished_wait_state(BlockHandle handle, td::Result<td::Ref<ShardState>> R);
+  void finished_wait_state(BlockHandle handle, td::Result<td::Ref<ShardState>> R, bool preliminary);
   void finished_wait_data(BlockHandle handle, td::Result<td::Ref<BlockData>> R);
 
   void start_up() override;
@@ -571,11 +610,19 @@ class ValidatorManagerImpl : public ValidatorManager {
   bool is_validator();
   bool validating_masterchain();
   PublicKeyHash get_validator(ShardIdFull shard, td::Ref<ValidatorSet> val_set);
+  bool is_shard_collator(ShardIdFull shard);
 
   ValidatorManagerImpl(td::Ref<ValidatorManagerOptions> opts, std::string db_root,
                        td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
-                       td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<overlay::Overlays> overlays)
-      : opts_(std::move(opts)), db_root_(db_root), keyring_(keyring), adnl_(adnl), rldp_(rldp), overlays_(overlays) {
+                       td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<rldp2::Rldp> rldp2,
+                       td::actor::ActorId<overlay::Overlays> overlays)
+      : opts_(std::move(opts))
+      , db_root_(db_root)
+      , keyring_(keyring)
+      , adnl_(adnl)
+      , rldp_(rldp)
+      , rldp2_(rldp2)
+      , overlays_(overlays) {
   }
 
  public:
@@ -599,13 +646,20 @@ class ValidatorManagerImpl : public ValidatorManager {
 
   void wait_shard_client_state(BlockSeqno seqno, td::Timestamp timeout, td::Promise<td::Unit> promise) override;
 
-  void log_validator_session_stats(BlockIdExt block_id, validatorsession::ValidatorSessionStats stats) override;
+  void log_validator_session_stats(validatorsession::ValidatorSessionStats stats) override;
   void log_new_validator_group_stats(validatorsession::NewValidatorGroupStats stats) override;
   void log_end_validator_group_stats(validatorsession::EndValidatorGroupStats stats) override;
 
   void update_options(td::Ref<ValidatorManagerOptions> opts) override;
 
   void add_persistent_state_description(td::Ref<PersistentStateDescription> desc) override;
+
+  void add_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) override;
+  void del_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) override;
+  void add_out_msg_queue_proof(ShardIdFull dst_shard, td::Ref<OutMsgQueueProof> proof) override;
+
+  void get_collation_manager_stats(
+      td::Promise<tl_object_ptr<ton_api::engine_validator_collationManagerStats>> promise) override;
 
   void get_out_msg_queue_size(BlockIdExt block_id, td::Promise<td::uint64> promise) override {
     if (queue_size_counter_.empty()) {
@@ -648,6 +702,13 @@ class ValidatorManagerImpl : public ValidatorManager {
     ++(success ? total_ls_queries_ok_ : total_ls_queries_error_)[lite_query_id];
   }
 
+  void get_storage_stat_cache(td::Promise<std::function<td::Ref<vm::Cell>(const td::Bits256&)>> promise) override {
+    td::actor::send_closure(storage_stat_cache_, &StorageStatCache::get_cache, std::move(promise));
+  }
+  void update_storage_stat_cache(std::vector<std::pair<td::Ref<vm::Cell>, td::uint32>> data) override {
+    td::actor::send_closure(storage_stat_cache_, &StorageStatCache::update, std::move(data));
+  }
+
  private:
   td::Timestamp resend_shard_blocks_at_;
   td::Timestamp check_waiters_at_;
@@ -686,6 +747,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   td::actor::ActorId<keyring::Keyring> keyring_;
   td::actor::ActorId<adnl::Adnl> adnl_;
   td::actor::ActorId<rldp::Rldp> rldp_;
+  td::actor::ActorId<rldp2::Rldp> rldp2_;
   td::actor::ActorId<overlay::Overlays> overlays_;
 
   td::actor::ActorOwn<AsyncStateSerializer> serializer_;
@@ -743,29 +805,28 @@ class ValidatorManagerImpl : public ValidatorManager {
 
   td::actor::ActorOwn<CandidatesBuffer> candidates_buffer_;
 
-  struct RecordedBlockStats {
-    double collator_work_time_ = -1.0;
-    double collator_cpu_work_time_ = -1.0;
-    td::optional<CollationStats> collator_stats_;
-    double validator_work_time_ = -1.0;
-    double validator_cpu_work_time_ = -1.0;
-  };
-  std::map<BlockIdExt, RecordedBlockStats> recorded_block_stats_;
-  std::queue<BlockIdExt> recorded_block_stats_lru_;
-
-  void record_collate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time,
-                                  td::optional<CollationStats> stats) override;
-  void record_validate_query_stats(BlockIdExt block_id, double work_time, double cpu_work_time, bool success) override;
-  RecordedBlockStats &new_block_stats_record(BlockIdExt block_id);
+  void log_collate_query_stats(CollationStats stats) override;
+  void log_validate_query_stats(ValidationStats stats) override;
+  void log_collator_node_response_stats(CollatorNodeResponseStats stats) override;
 
   void register_stats_provider(
       td::uint64 idx, std::string prefix,
       std::function<void(td::Promise<std::vector<std::pair<std::string, std::string>>>)> callback) override;
   void unregister_stats_provider(td::uint64 idx) override;
 
-  std::map<PublicKeyHash, td::actor::ActorOwn<ValidatorTelemetry>> validator_telemetry_;
+  void wait_verify_shard_blocks(std::vector<BlockIdExt> blocks, td::Promise<td::Unit> promise) override;
 
-  void init_validator_telemetry();
+  void add_shard_block_retainer(adnl::AdnlNodeIdShort id) override;
+
+  void iterate_temp_block_handles(std::function<void(const BlockHandleInterface &)> f) override;
+
+  struct Collator {
+    td::actor::ActorOwn<CollatorNode> actor;
+    std::set<ShardIdFull> shards;
+
+    bool can_collate_shard(ShardIdFull shard) const;
+  };
+  std::map<adnl::AdnlNodeIdShort, Collator> collator_nodes_;
 
   std::map<BlockSeqno, td::Ref<PersistentStateDescription>> persistent_state_descriptions_;
   std::map<BlockIdExt, td::Ref<PersistentStateDescription>> persistent_state_blocks_;
@@ -773,6 +834,17 @@ class ValidatorManagerImpl : public ValidatorManager {
   std::map<td::uint64,
            std::pair<std::string, std::function<void(td::Promise<std::vector<std::pair<std::string, std::string>>>)>>>
       stats_providers_;
+
+  td::actor::ActorOwn<StorageStatCache> storage_stat_cache_;
+
+  template<typename T>
+  void write_session_stats(const T &obj);
+
+  td::actor::ActorOwn<ShardBlockVerifier> shard_block_verifier_;
+  adnl::AdnlNodeIdShort shard_block_verifier_local_id_ = adnl::AdnlNodeIdShort::zero();
+  std::map<adnl::AdnlNodeIdShort, td::actor::ActorOwn<ShardBlockRetainer>> shard_block_retainers_;
+
+  void init_shard_block_verifier(adnl::AdnlNodeIdShort local_id);
 };
 
 }  // namespace validator

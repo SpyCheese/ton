@@ -16,13 +16,12 @@
 */
 #pragma once
 
-#include "tolk.h"
+#include "ton/ton-types.h"
+#include "tl/generate/auto/tl/ton_api.h"
 
-namespace tolk {
+namespace ton::validator {
 
-std::vector<var_idx_t> generate_createMessage(CodeBlob& code, SrcLocation loc, TypePtr bodyT, std::vector<var_idx_t>&& rvect);
-std::vector<var_idx_t> generate_createExternalLogMessage(CodeBlob& code, SrcLocation loc, TypePtr bodyT, std::vector<var_idx_t>&& rvect);
-
-std::vector<var_idx_t> generate_address_buildInAnotherShard(CodeBlob& code, SrcLocation loc, std::vector<var_idx_t>&& ir_self_address, std::vector<var_idx_t>&& ir_shard_options);
-
-} // namespace tolk
+tl_object_ptr<ton_api::collatorNode_Candidate> serialize_candidate(const BlockCandidate& block, bool compress);
+td::Result<BlockCandidate> deserialize_candidate(tl_object_ptr<ton_api::collatorNode_Candidate> f,
+                                                 int max_decompressed_data_size, int proto_version);
+}  // namespace ton::validator

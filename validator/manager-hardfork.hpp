@@ -185,7 +185,8 @@ class ValidatorManagerImpl : public ValidatorManager {
                                  td::Promise<td::Ref<ShardState>> promise) override {
     UNREACHABLE();
   }
-  void set_block_state_from_data_preliminary(std::vector<td::Ref<BlockData>> blocks, td::Promise<td::Unit> promise) {
+  void set_block_state_from_data_preliminary(std::vector<td::Ref<BlockData>> blocks,
+                                             td::Promise<td::Unit> promise) override {
     UNREACHABLE();
   }
   void get_cell_db_reader(td::Promise<std::shared_ptr<vm::CellDbReader>> promise) override;
@@ -201,10 +202,14 @@ class ValidatorManagerImpl : public ValidatorManager {
   void store_zero_state_file(BlockIdExt block_id, td::BufferSlice state, td::Promise<td::Unit> promise) override {
     UNREACHABLE();
   }
-  void wait_block_state(BlockHandle handle, td::uint32 priority, td::Timestamp timeout,
+  void wait_block_state(BlockHandle handle, td::uint32 priority, td::Timestamp timeout, bool wait_store,
                         td::Promise<td::Ref<ShardState>> promise) override;
-  void wait_block_state_short(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout,
+  void wait_block_state_short(BlockIdExt block_id, td::uint32 priority, td::Timestamp timeout, bool wait_store,
                               td::Promise<td::Ref<ShardState>> promise) override;
+  void wait_neighbor_msg_queue_proofs(ShardIdFull dst_shard, std::vector<BlockIdExt> blocks, td::Timestamp timeout,
+                                      td::Promise<std::map<BlockIdExt, td::Ref<OutMsgQueueProof>>> promise) override {
+    UNREACHABLE();
+  }
 
   void set_block_data(BlockHandle handle, td::Ref<BlockData> data, td::Promise<td::Unit> promise) override {
     UNREACHABLE();
@@ -242,7 +247,7 @@ class ValidatorManagerImpl : public ValidatorManager {
     promise.set_value(td::Unit());
   }
   void send_block_candidate_broadcast(BlockIdExt id, CatchainSeqno cc_seqno, td::uint32 validator_set_hash,
-                                      td::BufferSlice data, int mode) {
+                                      td::BufferSlice data, int mode) override {
     callback_->send_block_candidate(id, cc_seqno, validator_set_hash, std::move(data), mode);
   }
 
@@ -258,7 +263,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   void get_external_messages(ShardIdFull shard,
                              td::Promise<std::vector<std::pair<td::Ref<ExtMessage>, int>>> promise) override;
   void get_ihr_messages(ShardIdFull shard, td::Promise<std::vector<td::Ref<IhrMessage>>> promise) override;
-  void get_shard_blocks(BlockIdExt masterchain_block_id,
+  void get_shard_blocks_for_collator(BlockIdExt masterchain_block_id,
                         td::Promise<std::vector<td::Ref<ShardTopBlockDescription>>> promise) override;
   void complete_external_messages(std::vector<ExtMessage::Hash> to_delay,
                                   std::vector<ExtMessage::Hash> to_delete) override {
@@ -346,8 +351,6 @@ class ValidatorManagerImpl : public ValidatorManager {
     UNREACHABLE();
   }
   void send_block_broadcast(BlockBroadcast broadcast, int mode) override {
-  }
-  void send_validator_telemetry(PublicKeyHash key, tl_object_ptr<ton_api::validator_telemetry> telemetry) override {
   }
   void send_get_out_msg_queue_proof_request(ShardIdFull dst_shard, std::vector<BlockIdExt> blocks,
                                             block::ImportedMsgQueueLimits limits,
@@ -453,15 +456,6 @@ class ValidatorManagerImpl : public ValidatorManager {
   void wait_shard_client_state(BlockSeqno seqno, td::Timestamp timeout, td::Promise<td::Unit> promise) override {
     UNREACHABLE();
   }
-  void log_validator_session_stats(BlockIdExt block_id, validatorsession::ValidatorSessionStats stats) override {
-    UNREACHABLE();
-  }
-  void log_new_validator_group_stats(validatorsession::NewValidatorGroupStats stats) override {
-    UNREACHABLE();
-  }
-  void log_end_validator_group_stats(validatorsession::EndValidatorGroupStats stats) override {
-    UNREACHABLE();
-  }
   void get_out_msg_queue_size(BlockIdExt block_id, td::Promise<td::uint64> promise) override {
     if (queue_size_counter_.empty()) {
       queue_size_counter_ = td::actor::create_actor<QueueSizeCounter>("queuesizecounter", td::Ref<MasterchainState>{},
@@ -503,6 +497,18 @@ class ValidatorManagerImpl : public ValidatorManager {
     opts_ = std::move(opts);
   }
   void add_persistent_state_description(td::Ref<PersistentStateDescription> desc) override {
+  }
+
+  void add_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) override {
+    UNREACHABLE();
+  }
+  void del_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) override {
+    UNREACHABLE();
+  }
+
+  void get_collation_manager_stats(
+      td::Promise<tl_object_ptr<ton_api::engine_validator_collationManagerStats>> promise) override {
+    UNREACHABLE();
   }
 
  private:

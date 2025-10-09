@@ -354,6 +354,7 @@ struct ChunkIdentifierOrKeyword final : ChunkLexerBase {
         if (str == "self") return tok_self;
         if (str == "tolk") return tok_tolk;
         if (str == "type") return tok_type;
+        if (str == "lazy") return tok_lazy;
         if (str == "enum") return tok_enum;
         break;
       case 5:
@@ -379,8 +380,10 @@ struct ChunkIdentifierOrKeyword final : ChunkLexerBase {
         break;
       case 7:
         if (str == "builtin") return tok_builtin;
+        if (str == "private") return tok_private;
         break;
       case 8:
+        if (str == "readonly") return tok_readonly;
         if (str == "continue") return tok_continue;
         if (str == "operator") return tok_operator;
         break;

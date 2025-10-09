@@ -47,15 +47,14 @@ void pipeline_discover_and_parse_sources(const std::string& stdlib_filename, con
     tolk_assert(!file->ast);
 
     file->ast = parse_src_file_to_ast(file);
-    // if (!file->is_stdlib_file()) file->ast->debug_print();
+    // if (!file->is_stdlib_file) file->ast->debug_print();
 
     for (AnyV v_toplevel : file->ast->as<ast_tolk_file>()->get_toplevel_declarations()) {
       if (auto v_import = v_toplevel->try_as<ast_import_directive>()) {
         std::string imported_str = v_import->get_file_name();
-        size_t cur_slash_pos = file->rel_filename.rfind('/');
-        std::string rel_filename = cur_slash_pos == std::string::npos || imported_str[0] == '@'
+        std::string rel_filename = imported_str[0] == '@'
           ? std::move(imported_str)
-          : file->rel_filename.substr(0, cur_slash_pos + 1) + imported_str;
+          : file->extract_dirname() + imported_str;
 
         const SrcFile* imported = G.all_src_files.locate_and_register_source_file(rel_filename, v_import->loc);
         file->imports.push_back(SrcFile::ImportDirective{imported});

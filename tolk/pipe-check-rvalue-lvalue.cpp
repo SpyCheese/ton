@@ -18,6 +18,7 @@
 #include "ast.h"
 #include "ast-visitor.h"
 #include "platform-utils.h"
+#include "type-system.h"
 
 /*
  *   This pipe checks lvalue/rvalue for validity.
@@ -37,12 +38,17 @@ static void fire_error_cannot_be_used_as_lvalue(FunctionPtr cur_f, AnyV v, const
 }
 
 GNU_ATTRIBUTE_NORETURN GNU_ATTRIBUTE_COLD
-static void fire_error_modifying_immutable_variable(FunctionPtr cur_f, AnyExprV v, LocalVarPtr var_ref) {
+static void fire_error_modifying_immutable_variable(FunctionPtr cur_f, SrcLocation loc, LocalVarPtr var_ref) {
   if (var_ref->param_idx == 0 && var_ref->name == "self") {
-    throw ParseError(cur_f, v->loc, "modifying `self`, which is immutable by default; probably, you want to declare `mutate self`");
+    throw ParseError(cur_f, loc, "modifying `self`, which is immutable by default; probably, you want to declare `mutate self`");
   } else {
-    throw ParseError(cur_f, v->loc, "modifying immutable variable `" + var_ref->name + "`");
+    throw ParseError(cur_f, loc, "modifying immutable variable `" + var_ref->name + "`");
   }
+}
+
+GNU_ATTRIBUTE_NORETURN GNU_ATTRIBUTE_COLD
+static void fire_error_modifying_readonly_field(FunctionPtr cur_f, SrcLocation loc, StructPtr struct_ref, StructFieldPtr field_ref) {
+  throw ParseError(cur_f, loc, "modifying readonly field `" + struct_ref->as_human_readable() + "." + field_ref->name + "`");
 }
 
 // validate a function used as rvalue, like `var cb = f`
@@ -58,6 +64,13 @@ static void validate_function_used_as_noncall(FunctionPtr cur_f, AnyExprV v, Fun
 
 class CheckRValueLvalueVisitor final : public ASTVisitorFunctionBody {
   FunctionPtr cur_f = nullptr;
+
+  void on_var_used_as_lvalue(SrcLocation loc, LocalVarPtr var_ref) const {
+    if (var_ref->is_immutable()) {
+      fire_error_modifying_immutable_variable(cur_f, loc, var_ref);
+    }
+    var_ref->mutate()->assign_used_as_lval();
+  }
 
   void visit(V<ast_braced_expression> v) override {
     if (v->is_lvalue) {
@@ -118,6 +131,13 @@ class CheckRValueLvalueVisitor final : public ASTVisitorFunctionBody {
     parent::visit(v->get_expr());
   }
 
+  void visit(V<ast_lazy_operator> v) override {
+    if (v->is_lvalue) {
+      fire_error_cannot_be_used_as_lvalue(cur_f, v, "lazy expression");
+    }
+    parent::visit(v->get_expr());
+  }
+
   void visit(V<ast_int_const> v) override {
     if (v->is_lvalue) {
       fire_error_cannot_be_used_as_lvalue(cur_f, v, "literal");
@@ -145,10 +165,20 @@ class CheckRValueLvalueVisitor final : public ASTVisitorFunctionBody {
   void visit(V<ast_dot_access> v) override {
     // check for `immutableVal.field = rhs` or any other mutation of an immutable tensor/tuple/object
     // don't allow cheating like `((immutableVal!)).field = rhs`
+    // same here: check for `obj.readonlyField = rhs` or any other mutation of a readonly field
     if (v->is_lvalue) {
-      AnyExprV leftmost_obj = v->get_obj();
+      AnyExprV leftmost_obj = v;
       while (true) {
         if (auto as_dot = leftmost_obj->try_as<ast_dot_access>()) {
+          if (as_dot->is_target_struct_field()) {
+            StructFieldPtr field_ref = std::get<StructFieldPtr>(as_dot->target);
+            const TypeDataStruct* obj_type = as_dot->get_obj()->inferred_type->unwrap_alias()->try_as<TypeDataStruct>();
+            tolk_assert(obj_type);
+            if (field_ref->is_readonly) {
+              fire_error_modifying_readonly_field(cur_f, as_dot->loc, obj_type->struct_ref, field_ref);
+            }
+          }
+
           leftmost_obj = as_dot->get_obj();
         } else if (auto as_par = leftmost_obj->try_as<ast_parenthesized_expression>()) {
           leftmost_obj = as_par->get_expr();
@@ -162,8 +192,14 @@ class CheckRValueLvalueVisitor final : public ASTVisitorFunctionBody {
       }
 
       if (auto as_ref = leftmost_obj->try_as<ast_reference>()) {
-        if (LocalVarPtr var_ref = as_ref->sym->try_as<LocalVarPtr>(); var_ref && var_ref->is_immutable()) {
-          fire_error_modifying_immutable_variable(cur_f, leftmost_obj, var_ref);
+        if (LocalVarPtr var_ref = as_ref->sym->try_as<LocalVarPtr>()) {
+          on_var_used_as_lvalue(leftmost_obj->loc, var_ref);
+        }
+        if (as_ref->sym->try_as<const TypeReferenceUsedAsSymbol*>()) {  // `Point.create = f`
+          if (v->is_target_enum_member()) {
+            fire(cur_f, v->loc, "modifying immutable constant");
+          }
+          fire(cur_f, v->loc, "invalid left side of assignment");
         }
       }
     }
@@ -172,6 +208,8 @@ class CheckRValueLvalueVisitor final : public ASTVisitorFunctionBody {
     if (v->is_rvalue && v->is_target_fun_ref()) {
       validate_function_used_as_noncall(cur_f, v, std::get<FunctionPtr>(v->target));
     }
+
+    parent::visit(v);
   }
 
   void visit(V<ast_function_call> v) override {
@@ -211,8 +249,8 @@ class CheckRValueLvalueVisitor final : public ASTVisitorFunctionBody {
   void visit(V<ast_reference> v) override {
     if (v->is_lvalue) {
       tolk_assert(v->sym);
-      if (LocalVarPtr var_ref = v->sym->try_as<LocalVarPtr>(); var_ref && var_ref->is_immutable()) {
-        fire_error_modifying_immutable_variable(cur_f, v, var_ref);
+      if (LocalVarPtr var_ref = v->sym->try_as<LocalVarPtr>()) {
+        on_var_used_as_lvalue(v->loc, var_ref);
       } else if (v->sym->try_as<GlobalConstPtr>()) {
         fire(cur_f, v->loc, "modifying immutable constant");
       } else if (v->sym->try_as<FunctionPtr>()) {

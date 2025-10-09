@@ -52,6 +52,9 @@ static int calculate_tvm_method_id_for_entrypoint(std::string_view func_name) {
   if (func_name == "onSplitInstall") {
     return -4;
   }
+  if (func_name == "onBouncedMessage") {
+    return FunctionData::EMPTY_TVM_METHOD_ID;
+  }
   tolk_assert(false);
 }
 
@@ -95,7 +98,7 @@ static void validate_arg_ret_order_of_asm_function(V<ast_asm_body> v_body, int n
 static GlobalConstPtr register_constant(V<ast_constant_declaration> v) {
   GlobalConstData* c_sym = new GlobalConstData(static_cast<std::string>(v->get_identifier()->name), v->loc, v->type_node, v->get_init_value());
 
-  G.symtable.add_global_const(c_sym);
+  G.symtable.add_global_symbol(c_sym);
   G.all_constants.push_back(c_sym);
   v->mutate()->assign_const_ref(c_sym);
   return c_sym;
@@ -104,7 +107,7 @@ static GlobalConstPtr register_constant(V<ast_constant_declaration> v) {
 static GlobalVarPtr register_global_var(V<ast_global_var_declaration> v) {
   GlobalVarData* g_sym = new GlobalVarData(static_cast<std::string>(v->get_identifier()->name), v->loc, v->type_node);
 
-  G.symtable.add_global_var(g_sym);
+  G.symtable.add_global_symbol(g_sym);
   G.all_global_vars.push_back(g_sym);
   v->mutate()->assign_glob_ref(g_sym);
   return g_sym;
@@ -119,9 +122,34 @@ static AliasDefPtr register_type_alias(V<ast_type_alias_declaration> v, AliasDef
   AliasDefData* a_sym = new AliasDefData(std::move(name), v->loc, v->underlying_type_node, genericTs, substitutedTs, v);
   a_sym->base_alias_ref = base_alias_ref;   // for `Response<int>`, here is `Response<T>`
 
-  G.symtable.add_type_alias(a_sym);
+  G.symtable.add_global_symbol(a_sym);
   v->mutate()->assign_alias_ref(a_sym);
   return a_sym;
+}
+
+static EnumDefPtr register_enum(V<ast_enum_declaration> v) {
+  auto v_body = v->get_enum_body();
+
+  std::vector<EnumMemberPtr> members;
+  members.reserve(v_body->get_num_members());
+  for (int i = 0; i < v_body->get_num_members(); ++i) {
+    auto v_member = v_body->get_member(i);
+    std::string member_name = static_cast<std::string>(v_member->get_identifier()->name);
+
+    for (EnumMemberPtr prev : members) {
+      if (UNLIKELY(prev->name == member_name)) {
+        v_member->error("redeclaration of member `" + member_name + "`");
+      }
+    }
+    members.emplace_back(new EnumMemberData(member_name, v_member->loc, v_member->init_value));
+  }
+
+  EnumDefData* e_sym = new EnumDefData(static_cast<std::string>(v->get_identifier()->name), v->loc, v->colon_type, std::move(members));
+
+  G.symtable.add_global_symbol(e_sym);
+  G.all_enums.push_back(e_sym);
+  v->mutate()->assign_enum_ref(e_sym);
+  return e_sym;
 }
 
 static StructPtr register_struct(V<ast_struct_declaration> v, StructPtr base_struct_ref = nullptr, std::string override_name = {}, const GenericsSubstitutions* substitutedTs = nullptr) {
@@ -138,7 +166,7 @@ static StructPtr register_struct(V<ast_struct_declaration> v, StructPtr base_str
         v_field->error("redeclaration of field `" + field_name + "`");
       }
     }
-    fields.emplace_back(new StructFieldData(field_name, v_field->loc, i, v_field->type_node, v_field->default_value));
+    fields.emplace_back(new StructFieldData(field_name, v_field->loc, i, v_field->is_private, v_field->is_readonly, v_field->type_node, v_field->default_value));
   }
 
   PackOpcode opcode(0, 0);
@@ -167,7 +195,7 @@ static StructPtr register_struct(V<ast_struct_declaration> v, StructPtr base_str
   StructData* s_sym = new StructData(std::move(name), v->loc, std::move(fields), opcode, v->overflow1023_policy, genericTs, substitutedTs, v);
   s_sym->base_struct_ref = base_struct_ref;   // for `Container<int>`, here is `Container<T>`
 
-  G.symtable.add_struct(s_sym);
+  G.symtable.add_global_symbol(s_sym);
   G.all_structs.push_back(s_sym);
   v->mutate()->assign_struct_ref(s_sym);
   return s_sym;
@@ -215,7 +243,7 @@ static FunctionPtr register_function(V<ast_function_declaration> v, FunctionPtr 
 
   const GenericsDeclaration* genericTs = nullptr;   // at registering it's null; will be assigned after types resolving
   FunctionBody f_body = v->get_body()->kind == ast_block_statement ? static_cast<FunctionBody>(new FunctionBodyCode) : static_cast<FunctionBody>(new FunctionBodyAsm);
-  FunctionData* f_sym = new FunctionData(std::move(name), v->loc, std::move(method_name), v->receiver_type_node, v->return_type_node, std::move(parameters), 0, genericTs, substitutedTs, f_body, v);
+  FunctionData* f_sym = new FunctionData(std::move(name), v->loc, std::move(method_name), v->receiver_type_node, v->return_type_node, std::move(parameters), 0, v->inline_mode, genericTs, substitutedTs, f_body, v);
   f_sym->base_fun_ref = base_fun_ref;   // for `f<int>`, here is `f<T>`
 
   if (auto v_asm = v->get_body()->try_as<ast_asm_body>()) {
@@ -280,6 +308,9 @@ static void iterate_through_file_symbols(const SrcFile* file) {
         break;
       case ast_type_alias_declaration:
         register_type_alias(v->as<ast_type_alias_declaration>());
+        break;
+      case ast_enum_declaration:
+        register_enum(v->as<ast_enum_declaration>());
         break;
       case ast_struct_declaration:
         register_struct(v->as<ast_struct_declaration>());

@@ -71,24 +71,24 @@ static void fire_error_generic_type_used_without_T(FunctionPtr cur_f, SrcLocatio
   fire(cur_f, loc, "type `" + type_name_with_Ts + "` is generic, you should provide type arguments");
 }
 
-static TypePtr parse_intN(std::string_view strN, bool is_unsigned) {
+static TypePtr parse_intN_uintN(std::string_view strN, bool is_unsigned) {
   int n;
-  auto result = std::from_chars(strN.data() + 3 + static_cast<int>(is_unsigned), strN.data() + strN.size(), n);
+  auto result = std::from_chars(strN.data(), strN.data() + strN.size(), n);
   bool parsed = result.ec == std::errc() && result.ptr == strN.data() + strN.size();
-  if (!parsed || n <= 0 || n > 256 + static_cast<int>(is_unsigned)) {
+  if (!parsed || n <= 0 || n > 257 - static_cast<int>(is_unsigned)) {
     return nullptr;   // `int1000`, maybe it's user-defined alias, let it be unresolved
   }
-  return TypeDataIntN::create(is_unsigned, false, n);
+  return TypeDataIntN::create(n, is_unsigned, false);
 }
 
-static TypePtr parse_bytesN(std::string_view strN, bool is_bits) {
+static TypePtr parse_bytesN_bitsN(std::string_view strN, bool is_bits) {
   int n;
-  auto result = std::from_chars(strN.data() + 5  - static_cast<int>(is_bits), strN.data() + strN.size(), n);
+  auto result = std::from_chars(strN.data(), strN.data() + strN.size(), n);
   bool parsed = result.ec == std::errc() && result.ptr == strN.data() + strN.size();
   if (!parsed || n <= 0 || n > 1024) {
     return nullptr;   // `bytes9999`, maybe it's user-defined alias, let it be unresolved
   }
-  return TypeDataBytesN::create(is_bits, n);
+  return TypeDataBitsN::create(n, is_bits);
 }
 
 static TypePtr try_parse_predefined_type(std::string_view str) {
@@ -113,8 +113,12 @@ static TypePtr try_parse_predefined_type(std::string_view str) {
       if (str == "address") return TypeDataAddress::create();
       break;
     case 8:
-      if (str == "varint16") return TypeDataIntN::create(false, true, 16);
-      if (str == "varint32") return TypeDataIntN::create(false, true, 32);
+      if (str == "varint16") return TypeDataIntN::create(16, false, true);
+      if (str == "varint32") return TypeDataIntN::create(32, false, true);
+      break;
+    case 9:
+      if (str == "varuint16") return TypeDataIntN::create(16, true, true);
+      if (str == "varuint32") return TypeDataIntN::create(32, true, true);
       break;
     case 12:
       if (str == "continuation") return TypeDataContinuation::create();
@@ -124,22 +128,22 @@ static TypePtr try_parse_predefined_type(std::string_view str) {
   }
 
   if (str.starts_with("int")) {
-    if (TypePtr intN = parse_intN(str, false)) {
+    if (TypePtr intN = parse_intN_uintN(str.substr(3), false)) {
       return intN;
     }
   }
-  if (str.size() > 4 && str.starts_with("uint")) {
-    if (TypePtr uintN = parse_intN(str, true)) {
+  if (str.starts_with("uint")) {
+    if (TypePtr uintN = parse_intN_uintN(str.substr(4), true)) {
       return uintN;
     }
   }
-  if (str.size() > 4 && str.starts_with("bits")) {
-    if (TypePtr bitsN = parse_bytesN(str, true)) {
+  if (str.starts_with("bits")) {
+    if (TypePtr bitsN = parse_bytesN_bitsN(str.substr(4), true)) {
       return bitsN;
     }
   }
-  if (str.size() > 5 && str.starts_with("bytes")) {
-    if (TypePtr bytesN = parse_bytesN(str, false)) {
+  if (str.starts_with("bytes")) {
+    if (TypePtr bytesN = parse_bytesN_bitsN(str.substr(5), false)) {
       return bytesN;
     }
   }
@@ -166,8 +170,17 @@ class TypeNodesVisitorResolver {
           // if we're inside `f<int>`, replace "T" with TypeDataInt
           return substitutedTs->get_substitution_for_nameT(text);
         }
+        if (text == "map") {
+          if (!allow_without_type_arguments) {
+            fire_error_generic_type_used_without_T(cur_f, loc, "map<K,V>");
+          }
+          return TypeDataMapKV::create(TypeDataGenericT::create("K"), TypeDataGenericT::create("V"));
+        }
         if (const Symbol* sym = lookup_global_symbol(text)) {
           if (TypePtr custom_type = try_resolve_user_defined_type(cur_f, loc, sym, allow_without_type_arguments)) {
+            if (!v->loc.is_symbol_from_same_or_builtin_file(sym->loc)) {
+              sym->check_import_exists_when_used_from(cur_f, v->loc);
+            }
             return custom_type;
           }
         }
@@ -258,6 +271,9 @@ class TypeNodesVisitorResolver {
       }
       return TypeDataStruct::create(struct_ref);
     }
+    if (EnumDefPtr enum_ref = sym->try_as<EnumDefPtr>()) {
+      return TypeDataEnum::create(enum_ref);
+    }
     return nullptr;
   }
 
@@ -290,6 +306,12 @@ class TypeNodesVisitorResolver {
         return TypeDataGenericTypeWithTs::create(nullptr, alias_ref, std::move(type_arguments));
       }
       return TypeDataAlias::create(instantiate_generic_alias(alias_ref, GenericsSubstitutions(alias_ref->genericTs, type_arguments)));
+    }
+    if (const TypeDataMapKV* t_map = type_to_instantiate->try_as<TypeDataMapKV>(); t_map && t_map->TKey->try_as<TypeDataGenericT>()) {
+      if (type_arguments.size() != 2) {
+        fire(cur_f, loc, "type `map<K,V>` expects 2 type arguments, but " + std::to_string(type_arguments.size()) + " provided");
+      }
+      return TypeDataMapKV::create(type_arguments[0], type_arguments[1]);
     }
     if (const TypeDataGenericT* asT = type_to_instantiate->try_as<TypeDataGenericT>()) {
       fire_error_unknown_type_name(cur_f, loc, asT->nameT);
@@ -573,6 +595,23 @@ public:
       }
     }
   }
+
+  void start_visiting_enum_members(EnumDefPtr enum_ref) {
+    type_nodes_visitor = TypeNodesVisitorResolver(nullptr, nullptr, nullptr, false);
+
+    // same for struct field `v: int8 = 0 as int8`
+    for (EnumMemberPtr member_ref : enum_ref->members) {
+      if (member_ref->has_init_value()) {
+        parent::visit(member_ref->init_value);
+      }
+    }
+
+    // serialization type: `enum Role: int8`
+    if (enum_ref->colon_type_node) {
+      TypePtr colon_type = finalize_type_node(enum_ref->colon_type_node);
+      enum_ref->mutate()->assign_resolved_colon_type(colon_type); // later it will be checked to be intN
+    }
+  }
 };
 
 // prevent recursion like `struct A { field: A }`;
@@ -645,6 +684,9 @@ void pipeline_resolve_types_and_aliases() {
           TypeNodesVisitorResolver::visit_symbol(v_struct->struct_ref);
         }
         visitor.start_visiting_struct_fields(v_struct->struct_ref);
+
+      } else if (auto v_enum = v->try_as<ast_enum_declaration>()) {
+        visitor.start_visiting_enum_members(v_enum->enum_ref);
       }
     }
   }

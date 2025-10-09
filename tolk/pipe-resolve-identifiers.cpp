@@ -64,19 +64,12 @@ static void fire_error_type_used_as_symbol(FunctionPtr cur_f, V<ast_identifier> 
   }
 }
 
-static void check_import_exists_when_using_sym(FunctionPtr cur_f, AnyV v_usage, const Symbol* used_sym) {
-  SrcLocation sym_loc = used_sym->loc;
-  if (!v_usage->loc.is_symbol_from_same_or_builtin_file(sym_loc)) {
-    const SrcFile* declared_in = sym_loc.get_src_file();
-    bool has_import = false;
-    for (const SrcFile::ImportDirective& import : v_usage->loc.get_src_file()->imports) {
-      if (import.imported_file == declared_in) {
-        has_import = true;
-      }
-    }
-    if (!has_import) {
-      throw ParseError(cur_f, v_usage->loc, "Using a non-imported symbol `" + used_sym->name + "`. Forgot to import \"" + declared_in->rel_filename + "\"?");
-    }
+GNU_ATTRIBUTE_NORETURN GNU_ATTRIBUTE_COLD
+static void fire_error_using_self_not_in_method(FunctionPtr cur_f, SrcLocation loc) {
+  if (cur_f->is_static_method()) {
+    fire(cur_f, loc, "using `self` in a static method");
+  } else {
+    fire(cur_f, loc, "using `self` in a regular function (not a method)");
   }
 }
 
@@ -173,14 +166,16 @@ protected:
     if (!sym) {
       fire_error_undefined_symbol(cur_f, v->get_identifier());
     }
-    if (sym->try_as<AliasDefPtr>() || sym->try_as<StructPtr>()) {
+    if (sym->try_as<AliasDefPtr>() || sym->try_as<StructPtr>() || sym->try_as<EnumDefPtr>()) {
       fire_error_type_used_as_symbol(cur_f, v->get_identifier());
     }
     v->mutate()->assign_sym(sym);
 
     // for global functions, global vars and constants, `import` must exist
     if (!sym->try_as<LocalVarPtr>()) {
-      check_import_exists_when_using_sym(cur_f, v, sym);
+      if (!v->loc.is_symbol_from_same_or_builtin_file(sym->loc)) {
+        sym->check_import_exists_when_used_from(cur_f, v->loc);
+      }
     }
   }
 
@@ -188,9 +183,12 @@ protected:
     try {
       parent::visit(v->get_obj());
     } catch (const ParseError&) {
-      if (v->get_obj()->kind == ast_reference) {
-        // for `Point.create` / `int.zero`, "undefined symbol" is fired for Point/int
+      if (auto v_type_name = v->get_obj()->try_as<ast_reference>()) {
+        // for `Point.create` / `int.zero` / `Color.Red`, "undefined symbol" is fired for Point/int/Color
         // suppress this exception till a later pipe, it will be tried to be resolved as a type
+        if (v_type_name->get_identifier()->name == "self") {
+          fire_error_using_self_not_in_method(cur_f, v_type_name->loc);
+        }
         return;
       }
       throw;
@@ -211,7 +209,7 @@ protected:
 
   void visit(V<ast_match_arm> v) override {
     // resolve identifiers after => at first
-    parent::visit(v->get_body());
+    visit(v->get_body());
     // because handling lhs of => is comprehensive
 
     switch (v->pattern_kind) {
@@ -300,6 +298,15 @@ public:
       }
     }
   }
+
+  void start_visiting_enum_members(EnumDefPtr enum_ref) {
+    // member `Red = Another.Blue`, resolve `Another` 
+    for (EnumMemberPtr member_ref : enum_ref->members) {
+      if (member_ref->has_init_value()) {
+        parent::visit(member_ref->init_value);
+      }
+    }
+  }
 };
 
 NameAndScopeResolver AssignSymInsideFunctionVisitor::current_scope;
@@ -322,6 +329,10 @@ void pipeline_resolve_identifiers_and_assign_symbols() {
       } else if (auto v_struct = v->try_as<ast_struct_declaration>()) {
         tolk_assert(v_struct->struct_ref);
         visitor.start_visiting_struct_fields(v_struct->struct_ref);
+
+      } else if (auto v_enum = v->try_as<ast_enum_declaration>()) {
+        tolk_assert(v_enum->enum_ref);
+        visitor.start_visiting_enum_members(v_enum->enum_ref);
       }
     }
   }

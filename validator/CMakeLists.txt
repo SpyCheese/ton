@@ -59,7 +59,14 @@ set(VALIDATOR_HEADERS
   import-db-slice-local.hpp
   queue-size-counter.hpp
   validator-telemetry.hpp
+  storage-stat-cache.hpp
+  shard-block-verifier.hpp
+  shard-block-retainer.hpp
 
+  collation-manager.hpp
+  collator-node/collator-node.hpp
+  collator-node/collator-node-session.hpp
+  collator-node/utils.hpp
   manager-disk.h
   manager-disk.hpp
   manager-init.h
@@ -75,6 +82,10 @@ set(VALIDATOR_HEADERS
 set(VALIDATOR_SOURCE
   apply-block.cpp
   block-handle.cpp
+  collation-manager.cpp
+  collator-node/collator-node.cpp
+  collator-node/collator-node-session.cpp
+  collator-node/utils.cpp
   get-next-key-blocks.cpp
   import-db-slice.cpp
   import-db-slice-local.cpp
@@ -87,6 +98,9 @@ set(VALIDATOR_SOURCE
   validator-options.cpp
   queue-size-counter.cpp
   validator-telemetry.cpp
+  storage-stat-cache.cpp
+  shard-block-verifier.cpp
+  shard-block-retainer.cpp
 
   downloaders/wait-block-data.cpp
   downloaders/wait-block-state.cpp
@@ -155,6 +169,8 @@ set(FULL_NODE_SOURCE
   full-node-private-overlay.cpp
   full-node-serializer.hpp
   full-node-serializer.cpp
+  full-node-fast-sync-overlays.hpp
+  full-node-fast-sync-overlays.cpp
 
   net/download-block.hpp
   net/download-block.cpp
