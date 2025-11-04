@@ -261,6 +261,7 @@ class ValidatorEngine : public td::actor::Actor {
   td::optional<ton::BlockSeqno> sync_upto_;
   ton::adnl::AdnlNodeIdShort shard_block_retainer_adnl_id_ = ton::adnl::AdnlNodeIdShort::zero();
   bool shard_block_retainer_adnl_id_fullnode_ = false;
+  double initial_sync_delay_ = 60.0;
   td::optional<ton::BlockSeqno> stop_at_block_;
 
   std::set<ton::CatchainSeqno> unsafe_catchains_;
@@ -394,6 +395,9 @@ class ValidatorEngine : public td::actor::Actor {
   }
   void set_shard_block_retainer_adnl_id_fullnode() {
     shard_block_retainer_adnl_id_fullnode_ = true;
+  }
+  void set_initial_sync_delay(double value) {
+    initial_sync_delay_ = value;
   }
   void set_stop_at_block(ton::BlockSeqno seqno) {
     stop_at_block_ = seqno;
