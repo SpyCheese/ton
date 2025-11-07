@@ -205,10 +205,10 @@ void CellDbIn::start_up() {
 
   if (opts_->get_celldb_v2()) {
     boc_v2_options = vm::DynamicBagOfCellsDb::CreateV2Options{
-      .extra_threads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u),
-      .executor = {},
-      .cache_ttl_max = 2000,
-      .cache_size_max = 1000000};
+        .extra_threads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u),
+        .executor = {},
+        .cache_ttl_max = 2000,
+        .cache_size_max = 1000000};
     size_t min_rocksdb_cache = std::max(size_t{1} << 30, boc_v2_options->cache_size_max * 5000);
     if (!o_celldb_cache_size || o_celldb_cache_size.value() < min_rocksdb_cache) {
       LOG(WARNING) << "Increase CellDb block cache size to " << td::format::as_size(min_rocksdb_cache) << " from "
@@ -219,11 +219,11 @@ void CellDbIn::start_up() {
   } else if (opts_->get_celldb_in_memory()) {
     // default options
     boc_in_memory_options = vm::DynamicBagOfCellsDb::CreateInMemoryOptions{
-      .extra_threads = std::thread::hardware_concurrency(),
-      .verbose = true,
-      .use_arena = false,
-      .use_less_memory_during_creation = true,
-  };
+        .extra_threads = std::thread::hardware_concurrency(),
+        .verbose = true,
+        .use_arena = false,
+        .use_less_memory_during_creation = true,
+    };
     LOG(WARNING) << "Using InMemory DynamicBagOfCells with options " << *boc_v2_options;
   } else {
     boc_v1_options = vm::DynamicBagOfCellsDb::CreateV1Options{};
@@ -1033,7 +1033,6 @@ void CellDb::load_cell(RootHash hash, td::Promise<td::Ref<vm::DataCell>> promise
 void CellDb::load_state_root(BlockIdExt block_id, td::Promise<td::Ref<vm::DataCell>> promise) {
   td::actor::send_closure(cell_db_, &CellDbIn::load_state_root, block_id, std::move(promise));
 }
-
 
 void CellDb::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, td::Promise<td::Ref<vm::DataCell>> promise) {
   td::actor::send_closure(cell_db_, &CellDbIn::store_cell, block_id, std::move(cell), std::move(promise));
