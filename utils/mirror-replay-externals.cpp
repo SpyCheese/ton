@@ -14,36 +14,31 @@
     You should have received a copy of the GNU General Public License
     along with TON Blockchain.  If not, see <http://www.gnu.org/licenses/>.
 */
-#include "td/utils/port/signals.h"
+#include <algorithm>
+#include <fstream>
+#include <list>
+#include <queue>
+
+#include "auto/tl/ton_api_json.h"
+#include "auto/tl/tonlib_api.h"
+#include "auto/tl/tonlib_api.hpp"
+#include "auto/tl/tonlib_api_json.h"
+#include "common/delay.h"
+#include "emulator/transaction-emulator.h"
+#include "keys/encryptor.h"
+#include "overlay/overlays.h"
+#include "td/actor/MultiPromise.h"
+#include "td/utils/JsonBuilder.h"
 #include "td/utils/OptionParser.h"
 #include "td/utils/Random.h"
-#include "common/delay.h"
-#include <fstream>
-#include "overlay/overlays.h"
-
+#include "td/utils/filesystem.h"
+#include "td/utils/overloaded.h"
+#include "td/utils/port/signals.h"
+#include "tl/tl_json.h"
 #include "tonlib/tonlib/TonlibClient.h"
 #include "tonlib/tonlib/TonlibClientWrapper.h"
 
-#include <algorithm>
-#include <list>
 #include "git.h"
-#include "td/utils/filesystem.h"
-#include "keys/encryptor.h"
-#include "td/utils/JsonBuilder.h"
-#include "auto/tl/tonlib_api.h"
-#include "auto/tl/tonlib_api.hpp"
-#include "auto/tl/ton_api_json.h"
-#include "auto/tl/tonlib_api_json.h"
-#include "td/actor/MultiPromise.h"
-#include "tl/tl_json.h"
-#include "td/utils/overloaded.h"
-
-#include "auto/tl/tonlib_api_json.h"
-#include "emulator/transaction-emulator.h"
-
-#include "tl/tl_json.h"
-
-#include <queue>
 
 namespace ton {
 

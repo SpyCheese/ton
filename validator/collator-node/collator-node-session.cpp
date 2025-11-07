@@ -15,10 +15,9 @@
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "collator-node-session.hpp"
-
 #include "block-auto.h"
 #include "checksum.h"
+#include "collator-node-session.hpp"
 #include "collator-node.hpp"
 #include "fabric.h"
 #include "full-node.h"

@@ -2006,7 +2006,8 @@ std::vector<ton::ValidatorDescr> Config::do_compute_validator_set(const Catchain
 }
 
 std::vector<ton::ValidatorDescr> Config::compute_total_validator_set(int next) const {
-  auto res = unpack_validator_set(get_config_param((next < 0 ? 33 : (next ? 37 : 35)), (next < 0 ? 32 : (next ? 36 : 34))));
+  auto res =
+      unpack_validator_set(get_config_param((next < 0 ? 33 : (next ? 37 : 35)), (next < 0 ? 32 : (next ? 36 : 34))));
   if (res.is_error()) {
     return {};
   }

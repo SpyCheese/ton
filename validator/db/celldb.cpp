@@ -16,39 +16,34 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include "celldb.hpp"
+#include <block-auto.h>
+#include <rocksdb/merge_operator.h>
 
+#include "block/block-auto.h"
+#include "common/delay.h"
+#include "common/promiseop.hpp"
+#include "rocksdb/utilities/optimistic_transaction_db.h"
+#include "td/actor/MultiPromise.h"
+#include "td/db/RocksDb.h"
+#include "ton/ton-io.hpp"
+#include "ton/ton-tl.hpp"
+
+#include "celldb-utils.h"
+#include "celldb.hpp"
 #include "files-async.hpp"
 #include "rootdb.hpp"
-
-#include "td/db/RocksDb.h"
-#include "rocksdb/utilities/optimistic_transaction_db.h"
-
-#include "ton/ton-tl.hpp"
-#include "ton/ton-io.hpp"
-#include "common/delay.h"
-#include "block/block-auto.h"
-#include "common/promiseop.hpp"
-#include "celldb-utils.h"
-#include "td/actor/MultiPromise.h"
-
-#include <block-auto.h>
-#include <rocksdb/merge_operator.h>
-
-#include <block-auto.h>
-#include <rocksdb/merge_operator.h>
 
 namespace ton {
 
 namespace validator {
 class CellDbAsyncExecutor : public vm::DynamicBagOfCellsDb::AsyncExecutor {
-public:
+ public:
   explicit CellDbAsyncExecutor(td::actor::ActorId<CellDbBase> cell_db) : cell_db_(std::move(cell_db)) {
   }
 
   void execute_async(std::function<void()> f) override {
     class Runner : public td::actor::Actor {
-    public:
+     public:
       explicit Runner(std::function<void()> f) : f_(std::move(f)) {
       }
       void start_up() override {
@@ -56,7 +51,7 @@ public:
         stop();
       }
 
-    private:
+     private:
       std::function<void()> f_;
     };
     td::actor::create_actor<Runner>("executeasync", std::move(f)).release();
@@ -66,7 +61,7 @@ public:
     td::actor::send_closure(cell_db_, &CellDbBase::execute_sync, std::move(f));
   }
 
-private:
+ private:
   td::actor::ActorId<CellDbBase> cell_db_;
 };
 
@@ -151,7 +146,7 @@ void CellDbIn::validate_meta() {
     if (!(tlb::unpack_cell(root, info) && shard.deserialize(info.shard_id.write()) &&
           tlb::unpack_cell(info.out_msg_queue_info, qinfo))) {
       LOG(FATAL) << "cannot create ShardDescr from a root in celldb";
-          }
+    }
     if (!partial_check && !root_hashes.contains(root->get_hash())) {
       unknown_roots++;
       LOG(ERROR) << "Unknown root" << ShardIdFull(shard).to_str() << ":" << info.seq_no;
@@ -211,10 +206,10 @@ void CellDbIn::start_up() {
 
   if (opts_->get_celldb_v2()) {
     boc_v2_options = vm::DynamicBagOfCellsDb::CreateV2Options{
-      .extra_threads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u),
-      .executor = {},
-      .cache_ttl_max = 2000,
-      .cache_size_max = 1000000};
+        .extra_threads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u),
+        .executor = {},
+        .cache_ttl_max = 2000,
+        .cache_size_max = 1000000};
     size_t min_rocksdb_cache = std::max(size_t{1} << 30, boc_v2_options->cache_size_max * 5000);
     if (!o_celldb_cache_size || o_celldb_cache_size.value() < min_rocksdb_cache) {
       LOG(WARNING) << "Increase CellDb block cache size to " << td::format::as_size(min_rocksdb_cache) << " from "
@@ -225,11 +220,11 @@ void CellDbIn::start_up() {
   } else if (opts_->get_celldb_in_memory()) {
     // default options
     boc_in_memory_options = vm::DynamicBagOfCellsDb::CreateInMemoryOptions{
-      .extra_threads = std::thread::hardware_concurrency(),
-      .verbose = true,
-      .use_arena = false,
-      .use_less_memory_during_creation = true,
-  };
+        .extra_threads = std::thread::hardware_concurrency(),
+        .verbose = true,
+        .use_arena = false,
+        .use_less_memory_during_creation = true,
+    };
     LOG(WARNING) << "Using InMemory DynamicBagOfCells with options " << *boc_v2_options;
   } else {
     boc_v1_options = vm::DynamicBagOfCellsDb::CreateV1Options{};
@@ -237,8 +232,8 @@ void CellDbIn::start_up() {
   }
 
   db_options.enable_bloom_filter = !opts_->get_celldb_disable_bloom_filter();
-  db_options.two_level_index_and_filter = db_options.enable_bloom_filter
-                                && opts_->state_ttl() >= 60 * 60 * 24 * 30; // 30 days
+  db_options.two_level_index_and_filter =
+      db_options.enable_bloom_filter && opts_->state_ttl() >= 60 * 60 * 24 * 30;  // 30 days
   if (db_options.two_level_index_and_filter && !opts_->get_celldb_in_memory()) {
     o_celldb_cache_size = std::max<td::uint64>(o_celldb_cache_size ? o_celldb_cache_size.value() : 0UL, 16UL << 30);
   }
@@ -918,59 +913,60 @@ void CellDbIn::gc_cont3(BlockHandle handle) {
                        P = std::move(P), N = std::move(N), cell = std::move(cell), timer = std::move(timer),
                        timer_all = std::move(timer_all), handle](td::Result<td::Unit> R) mutable {
         R.ensure();
-        td::actor::send_lambda_later(SelfId, [this, timer_boc = std::move(timer_boc), F = std::move(F), key_hash,
-                                        P = std::move(P), N = std::move(N), cell = std::move(cell),
-                                        timer = std::move(timer), timer_all = std::move(timer_all), handle]() mutable {
-          TD_PERF_COUNTER(celldb_gc_cell);
-          vm::CellStorer stor{*cell_db_};
-          timer_boc.reset();
+        td::actor::send_lambda_later(
+            SelfId,
+            [this, timer_boc = std::move(timer_boc), F = std::move(F), key_hash, P = std::move(P), N = std::move(N),
+             cell = std::move(cell), timer = std::move(timer), timer_all = std::move(timer_all), handle]() mutable {
+              TD_PERF_COUNTER(celldb_gc_cell);
+              vm::CellStorer stor{*cell_db_};
+              timer_boc.reset();
 
-          td::PerfWarningTimer timer_write_batch{"gccell_write_batch", 0.05};
-          cell_db_->begin_write_batch().ensure();
+              td::PerfWarningTimer timer_write_batch{"gccell_write_batch", 0.05};
+              cell_db_->begin_write_batch().ensure();
 
-          boc_->meta_erase(get_key(key_hash)).ensure();
-          set_block(F.prev, std::move(P));
-          set_block(F.next, std::move(N));
-          if (handle->id().is_masterchain()) {
-            last_deleted_mc_state_ = handle->id().seqno();
-            std::string key = "stats.last_deleted_mc_seqno", value = td::to_string(last_deleted_mc_state_);
-            boc_->meta_set(td::as_slice(key), td::as_slice(value));
-          }
+              boc_->meta_erase(get_key(key_hash)).ensure();
+              set_block(F.prev, std::move(P));
+              set_block(F.next, std::move(N));
+              if (handle->id().is_masterchain()) {
+                last_deleted_mc_state_ = handle->id().seqno();
+                std::string key = "stats.last_deleted_mc_seqno", value = td::to_string(last_deleted_mc_state_);
+                boc_->meta_set(td::as_slice(key), td::as_slice(value));
+              }
 
-          boc_->commit(stor).ensure();
-          cell_db_->commit_write_batch().ensure();
+              boc_->commit(stor).ensure();
+              cell_db_->commit_write_batch().ensure();
 
-          alarm_timestamp() = td::Timestamp::now();
-          timer_write_batch.reset();
+              alarm_timestamp() = td::Timestamp::now();
+              timer_write_batch.reset();
 
-          td::PerfWarningTimer timer_free_cells{"gccell_free_cells", 0.05};
-          auto before = td::ref_get_delete_count();
-          cell = {};
-          auto after = td::ref_get_delete_count();
-          if (timer_free_cells.elapsed() > 0.04) {
-            LOG(ERROR) << "deleted " << after - before << " cells";
-          }
-          timer_free_cells.reset();
+              td::PerfWarningTimer timer_free_cells{"gccell_free_cells", 0.05};
+              auto before = td::ref_get_delete_count();
+              cell = {};
+              auto after = td::ref_get_delete_count();
+              if (timer_free_cells.elapsed() > 0.04) {
+                LOG(ERROR) << "deleted " << after - before << " cells";
+              }
+              timer_free_cells.reset();
 
-          td::PerfWarningTimer timer_finish{"gccell_finish", 0.05};
-          if (!opts_->get_celldb_in_memory()) {
-            boc_->set_loader(std::make_unique<vm::CellLoader>(cell_db_->snapshot(), on_load_callback_)).ensure();
-            td::actor::send_closure(parent_, &CellDb::update_snapshot, cell_db_->snapshot());
-          }
+              td::PerfWarningTimer timer_finish{"gccell_finish", 0.05};
+              if (!opts_->get_celldb_in_memory()) {
+                boc_->set_loader(std::make_unique<vm::CellLoader>(cell_db_->snapshot(), on_load_callback_)).ensure();
+                td::actor::send_closure(parent_, &CellDb::update_snapshot, cell_db_->snapshot());
+              }
 
-          DCHECK(get_block(key_hash).is_error());
-          if (!opts_->get_disable_rocksdb_stats()) {
-            cell_db_statistics_.gc_cell_time_.insert(timer.elapsed() * 1e6);
-          }
-          if (handle->id().shard_full().pfx_len() > 5) {
-            LOG(WARNING) << "Deleted state " << handle->id().to_str() << " in " << timer_all.elapsed() << "s";
-          } else {
-            LOG(DEBUG) << "Deleted state " << handle->id().to_str() << " in " << timer_all.elapsed() << "s";
-          }
-          timer_finish.reset();
-          timer_all.reset();
-          release_db();
-        });
+              DCHECK(get_block(key_hash).is_error());
+              if (!opts_->get_disable_rocksdb_stats()) {
+                cell_db_statistics_.gc_cell_time_.insert(timer.elapsed() * 1e6);
+              }
+              if (handle->id().shard_full().pfx_len() > 5) {
+                LOG(WARNING) << "Deleted state " << handle->id().to_str() << " in " << timer_all.elapsed() << "s";
+              } else {
+                LOG(DEBUG) << "Deleted state " << handle->id().to_str() << " in " << timer_all.elapsed() << "s";
+              }
+              timer_finish.reset();
+              timer_all.reset();
+              release_db();
+            });
       });
 }
 
@@ -1136,7 +1132,6 @@ void CellDb::load_cell(RootHash hash, td::Promise<td::Ref<vm::DataCell>> promise
 void CellDb::load_state_root(BlockIdExt block_id, td::Promise<td::Ref<vm::DataCell>> promise) {
   td::actor::send_closure(cell_db_, &CellDbIn::load_state_root, block_id, std::move(promise));
 }
-
 
 void CellDb::store_cell(BlockIdExt block_id, td::Ref<vm::Cell> cell, td::Promise<td::Ref<vm::DataCell>> promise) {
   td::actor::send_closure(cell_db_, &CellDbIn::store_cell, block_id, std::move(cell), CellDbIn::KeyHash::zero(),

@@ -16,15 +16,15 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include "apply-block.hpp"
+#include "adnl/utils.hpp"
+#include "td/actor/MultiPromise.h"
+#include "ton/ton-io.hpp"
+#include "validator/fabric.h"
+#include "validator/invariants.hpp"
 
+#include "apply-block.hpp"
 #include "block-auto.h"
 #include "block-parse.h"
-#include "adnl/utils.hpp"
-#include "ton/ton-io.hpp"
-#include "validator/invariants.hpp"
-#include "td/actor/MultiPromise.h"
-#include "validator/fabric.h"
 
 namespace ton {
 
@@ -279,7 +279,6 @@ void ApplyBlock::applied_prev() {
     }
   });
   td::actor::send_closure(manager_, &ValidatorManager::new_block, handle_, state_, std::move(P));
-
 }
 
 void ApplyBlock::applied_set() {
@@ -310,18 +309,19 @@ void ApplyBlock::applied_set() {
       CHECK(tlb::csr_unpack(std::move(value), acc_blk));
       vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64,
                                          block::tlb::aug_AccountTransactions};
-      trans_dict.check_for_each_extra([&](td::Ref<vm::CellSlice> value, td::Ref<vm::CellSlice>, td::ConstBitPtr, int) -> bool {
-        ++stats->transactions_;
-        block::gen::Transaction::Record trans;
-        CHECK(tlb::unpack_cell(value->prefetch_ref(), trans));
-        if (trans.r1.in_msg->size_refs() > 0) {
-          vm::CellSlice msg{vm::NoVm(), trans.r1.in_msg->prefetch_ref()};
-          if (msg.prefetch_long(1)) {
-            ++stats->ext_msgs_;
-          }
-        }
-        return true;
-      });
+      trans_dict.check_for_each_extra(
+          [&](td::Ref<vm::CellSlice> value, td::Ref<vm::CellSlice>, td::ConstBitPtr, int) -> bool {
+            ++stats->transactions_;
+            block::gen::Transaction::Record trans;
+            CHECK(tlb::unpack_cell(value->prefetch_ref(), trans));
+            if (trans.r1.in_msg->size_refs() > 0) {
+              vm::CellSlice msg{vm::NoVm(), trans.r1.in_msg->prefetch_ref()};
+              if (msg.prefetch_long(1)) {
+                ++stats->ext_msgs_;
+              }
+            }
+            return true;
+          });
       return true;
     });
     td::actor::send_closure(manager_, &ValidatorManager::log_applied_block_stats, std::move(stats));

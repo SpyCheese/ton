@@ -470,7 +470,7 @@ Ref<vm::Cell> create_state() {
       && cb.store_long_bool(0, 32)                                // seq_no:#
       && cb.store_zeroes_bool(32)                                 // vert_seq_no:#
       && cb.store_long_bool(now, 32)                              // gen_utime:uint32
-      && cb.store_long_bool(100000000000099LL, 64)               // gen_lt:uint64
+      && cb.store_long_bool(100000000000099LL, 64)                // gen_lt:uint64
       && cb.store_ones_bool(32)                                   // min_ref_mc_seqno:uint32
       && cb2.store_zeroes_bool(1 + 64 + 2)                        // OutMsgQueueInfo
       && cb.store_ref_bool(cb2.finalize())                        // out_msg_queue_info:^OutMsgQueueInfo

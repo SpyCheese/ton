@@ -5590,15 +5590,13 @@ int main(int argc, char *argv[]) {
                          }
                          return td::Status::OK();
                        });
+  p.add_checked_option('\0', "sync-upto", "", [&](td::Slice s) -> td::Status {
+    TRY_RESULT(v, td::to_integer_safe<ton::BlockSeqno>(s));
+    acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_sync_upto, v); });
+    return td::Status::OK();
+  });
   p.add_checked_option(
-      '\0', "sync-upto", "", [&](td::Slice s) -> td::Status {
-        TRY_RESULT(v, td::to_integer_safe<ton::BlockSeqno>(s));
-        acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_sync_upto, v); });
-        return td::Status::OK();
-      });
-  p.add_checked_option(
-      '\0', "stop-at-block", "stor syncing masterchain at block <seqno>",
-      [&](td::Slice s) -> td::Status {
+      '\0', "stop-at-block", "stor syncing masterchain at block <seqno>", [&](td::Slice s) -> td::Status {
         TRY_RESULT(seqno, td::to_integer_safe<ton::BlockSeqno>(s));
         acts.push_back([&x, seqno]() { td::actor::send_closure(x, &ValidatorEngine::set_stop_at_block, seqno); });
         return td::Status::OK();
