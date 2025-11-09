@@ -378,7 +378,14 @@ struct [[nodiscard]] StartedTask {
   }
   StartedTask(StartedTask&& o) noexcept : h(std::exchange(o.h, {})) {
   }
-  StartedTask& operator=(StartedTask&& o) = delete;
+  StartedTask& operator=(StartedTask&& o) {
+    if (this != &o) {
+      detach();
+      h = std::exchange(o.h, {});
+    }
+    return *this;
+  }
+
   StartedTask(const StartedTask&) = delete;
   StartedTask& operator=(const StartedTask&) = delete;
 
