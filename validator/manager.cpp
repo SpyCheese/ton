@@ -2672,6 +2672,10 @@ td::actor::ActorOwn<IValidatorGroup> ValidatorManagerImpl::create_validator_grou
     auto adnl_id = adnl::AdnlNodeIdShort{
         descr->addr.is_zero() ? ValidatorFullId{descr->key}.compute_short_id().bits256_value() : descr->addr};
     auto create_fn = &IValidatorGroup::create_catchain;
+    // if (!shard.is_masterchain()) {
+    if (true) {
+      create_fn = &IValidatorGroup::create_bridge;
+    }
     auto G = create_fn(PSTRING() << "valgroup" << shard.to_str(), shard, validator_id, session_id, validator_set,
                        key_seqno, opts, keyring_, adnl_, rldp_, rldp2_, overlays_, db_root_, actor_id(this),
                        get_collation_manager(adnl_id), init_session,
