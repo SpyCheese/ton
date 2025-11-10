@@ -744,10 +744,6 @@ void ValidatorManagerImpl::created_ext_server(td::actor::ActorOwn<adnl::AdnlExtS
 }
 
 void ValidatorManagerImpl::run_ext_query(td::BufferSlice data, td::Promise<td::BufferSlice> promise) {
-  if (!started_) {
-    promise.set_error(td::Status::Error(ErrorCode::notready, "node not synced"));
-    return;
-  }
   auto F = fetch_tl_object<lite_api::liteServer_query>(data.clone(), true);
   if (F.is_ok()) {
     data = std::move(F.move_as_ok()->data_);
