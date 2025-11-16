@@ -281,6 +281,12 @@ overlay.getBroadcastList list:overlay.broadcastList = overlay.BroadcastList;
 
 ---types---
 
+dumbOverlay.broadcast send_as:int256 data:bytes = dumbOverlay.Broadcast;
+
+---functions---
+
+---types---
+
 overlay.db.nodesV2 nodes:overlay.nodesV2 = overlay.db.Nodes;
 overlay.db.nodes nodes:overlay.nodes = overlay.db.Nodes;
 overlay.db.key.nodes local_id:int256 overlay:int256 = overlay.db.Key;

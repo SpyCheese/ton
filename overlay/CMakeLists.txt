@@ -1,4 +1,5 @@
 set(OVERLAY_SOURCE
+  dumb-overlay.cpp
   overlay-manager.cpp
   overlay.cpp
   overlay-fec.cpp
@@ -6,6 +7,7 @@ set(OVERLAY_SOURCE
   overlay-broadcast.cpp
   overlay-peers.cpp
 
+  dumb-overlay.hpp
   overlay-fec.hpp
   overlay-broadcast.hpp
   overlay-fec-broadcast.hpp
