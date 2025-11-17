@@ -144,6 +144,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual td::optional<double> get_catchain_max_block_delay_slow() const = 0;
   virtual bool get_state_serializer_enabled() const = 0;
   virtual td::Ref<CollatorOptions> get_collator_options() const = 0;
+  virtual bool get_parallel_validation() const = 0;
   virtual double get_catchain_broadcast_speed_multiplier() const = 0;
   virtual bool get_permanent_celldb() const = 0;
   virtual td::Ref<CollatorsList> get_collators_list() const = 0;
@@ -190,6 +191,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual void set_collator_node_whitelisted_validator(adnl::AdnlNodeIdShort id, bool add) = 0;
   virtual void set_collator_node_whitelist_enabled(bool enabled) = 0;
   virtual void set_shard_block_verifier_config(td::Ref<ShardBlockVerifierConfig> config) = 0;
+  virtual void set_parallel_validation(bool value) = 0;
   virtual void set_stop_at_block(BlockSeqno seqno) = 0;
   virtual void set_readonly_celldb(bool value) = 0;
 

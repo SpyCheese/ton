@@ -57,7 +57,7 @@ static td::Result<BlockBroadcast> deserialize_block_broadcast(ton_api::tonNode_b
   }
   return BlockBroadcast{create_block_id(f.id_),
                         std::move(signatures),
-                        static_cast<UnixTime>(f.catchain_seqno_),
+                        static_cast<CatchainSeqno>(f.catchain_seqno_),
                         static_cast<td::uint32>(f.validator_set_hash_),
                         std::move(f.data_),
                         std::move(f.proof_)};
@@ -81,7 +81,7 @@ static td::Result<BlockBroadcast> deserialize_block_broadcast(ton_api::tonNode_b
                         << data.size() + proof.size() + signatures.size() * 96;
   return BlockBroadcast{create_block_id(f.id_),
                         std::move(signatures),
-                        static_cast<UnixTime>(f.catchain_seqno_),
+                        static_cast<CatchainSeqno>(f.catchain_seqno_),
                         static_cast<td::uint32>(f.validator_set_hash_),
                         std::move(data),
                         std::move(proof)};
@@ -103,7 +103,7 @@ static td::Result<BlockBroadcast> deserialize_block_broadcast(ton_api::tonNode_b
                         << data.size() + proof.size() + signatures.size() * 96;
   return BlockBroadcast{create_block_id(f.id_),
                         std::move(signatures),
-                        static_cast<UnixTime>(f.catchain_seqno_),
+                        static_cast<CatchainSeqno>(f.catchain_seqno_),
                         static_cast<td::uint32>(f.validator_set_hash_),
                         std::move(data),
                         std::move(proof)};

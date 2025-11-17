@@ -1641,6 +1641,7 @@ td::Status ValidatorEngine::load_global_config() {
   }
   validator_options_.write().set_hardforks(std::move(h));
   validator_options_.write().set_catchain_broadcast_speed_multiplier(broadcast_speed_multiplier_catchain_);
+  validator_options_.write().set_parallel_validation(parallel_validation_);
   if (stop_at_block_) {
     validator_options_.write().set_stop_at_block(stop_at_block_.value());
   }
@@ -5582,6 +5583,9 @@ int main(int argc, char *argv[]) {
                          }
                          return td::Status::OK();
                        });
+  p.add_option('\0', "parallel-validation", "parallel validation over different accounts", [&]() {
+    acts.push_back([&x]() { td::actor::send_closure(x, &ValidatorEngine::set_parallel_validation, true); });
+  });
   p.add_checked_option('\0', "sync-upto", "", [&](td::Slice s) -> td::Status {
     TRY_RESULT(v, td::to_integer_safe<ton::BlockSeqno>(s));
     acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_sync_upto, v); });
