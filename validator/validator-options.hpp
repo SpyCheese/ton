@@ -173,6 +173,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   td::Ref<ShardBlockVerifierConfig> get_shard_block_verifier_config() const override {
     return shard_block_verifier_config_;
   }
+  bool get_parallel_validation() const override {
+    return parallel_validation;
+  }
   bool get_readonly_celldb() const override {
     return readonly_celldb_;
   }
@@ -301,6 +304,10 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
     readonly_celldb_ = value;
   }
 
+  void set_parallel_validation(bool value) override {
+    parallel_validation = value;
+  }
+
   ValidatorManagerOptionsImpl* make_copy() const override {
     return new ValidatorManagerOptionsImpl(*this);
   }
@@ -358,6 +365,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   std::set<adnl::AdnlNodeIdShort> collator_node_whitelist_;
   bool collator_node_whitelist_enabled_ = false;
   td::Ref<ShardBlockVerifierConfig> shard_block_verifier_config_{true};
+  bool parallel_validation = false;
   bool readonly_celldb_ = false;
 };
 
