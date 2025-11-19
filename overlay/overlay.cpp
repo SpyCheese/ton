@@ -23,7 +23,9 @@
 #include "auto/tl/ton_api.hpp"
 #include "common/delay.h"
 #include "dht/dht.h"
+#include "dumb-overlay.hpp"
 #include "keys/encryptor.h"
+#include "rldp2/rldp.h"
 #include "td/utils/Random.h"
 #include "td/utils/Status.h"
 #include "td/utils/StringBuilder.h"
@@ -55,14 +57,13 @@ td::actor::ActorOwn<Overlay> Overlay::create_public(td::actor::ActorId<keyring::
 }
 
 td::actor::ActorOwn<Overlay> Overlay::create_private(
-    td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
-    td::actor::ActorId<OverlayManager> manager, td::actor::ActorId<dht::Dht> dht_node, adnl::AdnlNodeIdShort local_id,
+    td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<OverlayManager> manager,
+    td::actor::ActorId<rldp2::Rldp> rldp2, td::actor::ActorId<dht::Dht> dht_node, adnl::AdnlNodeIdShort local_id,
     OverlayIdFull overlay_id, std::vector<adnl::AdnlNodeIdShort> nodes, std::unique_ptr<Overlays::Callback> callback,
     OverlayPrivacyRules rules, std::string scope, OverlayOptions opts) {
-  return td::actor::create_actor<OverlayImpl>(
-      overlay_actor_name(overlay_id), keyring, adnl, manager, dht_node, local_id, std::move(overlay_id),
-      OverlayType::FixedMemberList, std::move(nodes), std::vector<PublicKeyHash>(), OverlayMemberCertificate{},
-      std::move(callback), std::move(rules), std::move(scope), std::move(opts));
+  return td::actor::create_actor<DumbOverlayImpl>(
+      overlay_actor_name(overlay_id), local_id, overlay_id.compute_short_id(), std::move(callback),
+      std::move(manager), std::move(rldp2), std::move(nodes));
 }
 
 td::actor::ActorOwn<Overlay> Overlay::create_semiprivate(

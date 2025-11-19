@@ -2152,7 +2152,7 @@ void ValidatorEngine::start_rldp() {
   atcp_ = td::actor::create_actor<ton::atcp::Atcp>(
       "atcp", td::actor::actor_dynamic_cast<ton::adnl::AdnlPeerTable>(adnl_.get()), config_.addrs.begin()->first.addr);
   td::actor::send_closure(rldp_, &ton::rldp::Rldp::set_default_mtu, 2048);
-  td::actor::send_closure(rldp2_, &ton::rldp2::Rldp::set_default_mtu, 2048);
+  td::actor::send_closure(rldp2_, &ton::rldp2::Rldp::set_default_mtu, 1048576);
   started_rldp();
 }
 
@@ -2162,8 +2162,8 @@ void ValidatorEngine::started_rldp() {
 
 void ValidatorEngine::start_overlays() {
   if (!default_dht_node_.is_zero()) {
-    overlay_manager_ =
-        ton::overlay::Overlays::create(db_root_, keyring_.get(), adnl_.get(), dht_nodes_[default_dht_node_].get());
+    overlay_manager_ = ton::overlay::Overlays::create(db_root_, keyring_.get(), adnl_.get(), rldp2_.get(),
+                                                      dht_nodes_[default_dht_node_].get());
   }
   started_overlays();
 }
