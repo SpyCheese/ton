@@ -43,6 +43,7 @@
 #include "validator/manager.h"
 #include "validator/validator.h"
 
+#include "atcp.hpp"
 #include "overlays.h"
 
 enum ValidatorEnginePermissions : td::uint32 { vep_default = 1, vep_modify = 2, vep_unsafe = 4 };
@@ -162,6 +163,7 @@ class ValidatorEngine : public td::actor::Actor {
   td::actor::ActorOwn<ton::adnl::Adnl> adnl_;
   td::actor::ActorOwn<ton::rldp::Rldp> rldp_;
   td::actor::ActorOwn<ton::rldp2::Rldp> rldp2_;
+  td::actor::ActorOwn<ton::atcp::Atcp> atcp_;
   std::map<ton::PublicKeyHash, td::actor::ActorOwn<ton::dht::Dht>> dht_nodes_;
   ton::PublicKeyHash default_dht_node_ = ton::PublicKeyHash::zero();
   td::actor::ActorOwn<ton::overlay::Overlays> overlay_manager_;

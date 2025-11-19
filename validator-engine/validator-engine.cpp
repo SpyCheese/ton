@@ -2148,6 +2148,9 @@ void ValidatorEngine::started_dht() {
 void ValidatorEngine::start_rldp() {
   rldp_ = ton::rldp::Rldp::create(adnl_.get());
   rldp2_ = ton::rldp2::Rldp::create(adnl_.get());
+  CHECK(!config_.addrs.empty());
+  atcp_ = td::actor::create_actor<ton::atcp::Atcp>(
+      "atcp", td::actor::actor_dynamic_cast<ton::adnl::AdnlPeerTable>(adnl_.get()), config_.addrs.begin()->first.addr);
   td::actor::send_closure(rldp_, &ton::rldp::Rldp::set_default_mtu, 2048);
   td::actor::send_closure(rldp2_, &ton::rldp2::Rldp::set_default_mtu, 2048);
   started_rldp();
@@ -2175,8 +2178,9 @@ void ValidatorEngine::start_validator() {
                                                           !state_serializer_disabled_flag_);
   load_collator_options();
 
-  validator_manager_ = ton::validator::ValidatorManagerFactory::create(
-      validator_options_, db_root_, keyring_.get(), adnl_.get(), rldp_.get(), rldp2_.get(), overlay_manager_.get());
+  validator_manager_ =
+      ton::validator::ValidatorManagerFactory::create(validator_options_, db_root_, keyring_.get(), adnl_.get(),
+                                                      rldp_.get(), rldp2_.get(), atcp_.get(), overlay_manager_.get());
 
   for (auto &v : config_.validators) {
     td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::add_permanent_key, v.first,

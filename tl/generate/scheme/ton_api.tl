@@ -736,6 +736,18 @@ adnl.ping value:long = adnl.Pong;
 
 ---types---
 
+atcp.tcpAddr ip:int port:int = atcp.TcpAddr;
+atcp.init local_id:PublicKey peer_id:adnl.id.short = atcp.Init;
+atcp.customMessage data:bytes = atcp.Message;
+atcp.query query_id:int256 data:bytes = atcp.Message;
+atcp.answer query_id:int256 data:bytes = atcp.Message;
+
+---functions---
+
+atcp.getTcpAddr = atcp.TcpAddr;
+
+---types---
+
 engine.validator.keyHash key_hash:int256 = engine.validator.KeyHash;
 engine.validator.signature signature:bytes = engine.validator.Signature;
 

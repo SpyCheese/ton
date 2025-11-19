@@ -516,11 +516,21 @@ class Result {
     status_.ensure_error();
   }
 #else
-  void ensure_impl(CSlice file_name, int line) const {
+  const Result &ensure_impl(CSlice file_name, int line) const {
     status_.ensure_impl(file_name, line);
+    return *this;
   }
-  void ensure_error_impl(CSlice file_name, int line) const {
+  const Result &ensure_error_impl(CSlice file_name, int line) const {
     status_.ensure_error_impl(file_name, line);
+    return *this;
+  }
+  Result &ensure_impl(CSlice file_name, int line) {
+    status_.ensure_impl(file_name, line);
+    return *this;
+  }
+  Result &ensure_error_impl(CSlice file_name, int line) {
+    status_.ensure_error_impl(file_name, line);
+    return *this;
   }
 #endif
   void ignore() const {

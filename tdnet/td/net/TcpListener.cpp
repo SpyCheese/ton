@@ -36,12 +36,12 @@ void TcpListener::start_up() {
   if (server_address_ == "@vsock") {
     r_socket = ServerSocketFd::open_vsock(port_);
   } else {
-    LOG(ERROR) << server_address_ << " " << port_;
+    LOG(DEBUG) << server_address_ << " " << port_;
     r_socket = ServerSocketFd::open(port_, server_address_);
   }
 
   if (r_socket.is_error()) {
-    LOG(ERROR) << r_socket.error();
+    LOG(INFO) << r_socket.error();
     return stop();
   }
 
@@ -78,7 +78,7 @@ void TcpListener::loop() {
   }();
 
   if (status.is_error()) {
-    LOG(ERROR) << "Server error " << status;
+    LOG(INFO) << "Server error " << status;
     return stop();
   }
 }
