@@ -24,7 +24,6 @@
 #include "adnl/adnl.h"
 #include "overlay/overlay.h"
 #include "overlay/overlays.h"
-#include "rldp2/rldp.h"
 #include "td/actor/actor.h"
 #include "td/utils/buffer.h"
 #include "tl/generate/auto/tl/ton_api.h"
@@ -38,7 +37,7 @@ class DumbOverlayImpl : public Overlay {
   DumbOverlayImpl(adnl::AdnlNodeIdShort local_id, OverlayIdShort overlay_id,
                   std::unique_ptr<Overlays::Callback> callback,
                   td::actor::ActorId<Overlays> manager,
-                  td::actor::ActorId<rldp2::Rldp> rldp2,
+                  td::actor::ActorId<adnl::AdnlSenderInterface> atcp,
                   std::vector<adnl::AdnlNodeIdShort> nodes);
   virtual void update_dht_node(td::actor::ActorId<dht::Dht> dht) {}
   virtual void receive_message(adnl::AdnlNodeIdShort src, tl_object_ptr<ton_api::overlay_messageExtra> extra,
@@ -73,7 +72,7 @@ class DumbOverlayImpl : public Overlay {
   OverlayIdShort overlay_id_;
   std::unique_ptr<Overlays::Callback> callback_;
   td::actor::ActorId<Overlays> manager_;
-  td::actor::ActorId<rldp2::Rldp> rldp2_;
+  td::actor::ActorId<adnl::AdnlSenderInterface> atcp_;
   std::vector<adnl::AdnlNodeIdShort> other_nodes_;
 };
 

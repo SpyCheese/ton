@@ -571,7 +571,7 @@ void ValidatorGroup::create_session() {
   config_.catchain_opts.broadcast_speed_multiplier = opts_->get_catchain_broadcast_speed_multiplier();
   if (!config_.new_catchain_ids) {
     session_ = validatorsession::ValidatorSession::create(session_id_, config_, local_id_, std::move(vec),
-                                                          make_validator_session_callback(), keyring_, adnl_, rldp2_,
+                                                          make_validator_session_callback(), keyring_, adnl_, atcp_,
                                                           overlays_, db_root_, "-", allow_unsafe_self_blocks_resync_);
   } else {
     session_ = validatorsession::ValidatorSession::create(

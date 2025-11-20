@@ -25,7 +25,6 @@
 #include "dht/dht.h"
 #include "dumb-overlay.hpp"
 #include "keys/encryptor.h"
-#include "rldp2/rldp.h"
 #include "td/utils/Random.h"
 #include "td/utils/Status.h"
 #include "td/utils/StringBuilder.h"
@@ -58,12 +57,12 @@ td::actor::ActorOwn<Overlay> Overlay::create_public(td::actor::ActorId<keyring::
 
 td::actor::ActorOwn<Overlay> Overlay::create_private(
     td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<OverlayManager> manager,
-    td::actor::ActorId<rldp2::Rldp> rldp2, td::actor::ActorId<dht::Dht> dht_node, adnl::AdnlNodeIdShort local_id,
+    td::actor::ActorId<adnl::AdnlSenderInterface> atcp, td::actor::ActorId<dht::Dht> dht_node, adnl::AdnlNodeIdShort local_id,
     OverlayIdFull overlay_id, std::vector<adnl::AdnlNodeIdShort> nodes, std::unique_ptr<Overlays::Callback> callback,
     OverlayPrivacyRules rules, std::string scope, OverlayOptions opts) {
   return td::actor::create_actor<DumbOverlayImpl>(
       overlay_actor_name(overlay_id), local_id, overlay_id.compute_short_id(), std::move(callback),
-      std::move(manager), std::move(rldp2), std::move(nodes));
+      std::move(manager), std::move(atcp), std::move(nodes));
 }
 
 td::actor::ActorOwn<Overlay> Overlay::create_semiprivate(

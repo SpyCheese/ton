@@ -16,6 +16,7 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+#include "adnl/adnl.h"
 #include "td/utils/Random.h"
 #include "td/utils/overloaded.h"
 #include "ton/ton-tl.hpp"
@@ -1140,7 +1141,7 @@ ValidatorSessionImpl::ValidatorSessionImpl(catchain::CatChainSessionId session_i
                                            PublicKeyHash local_id, std::vector<ValidatorSessionNode> nodes,
                                            std::unique_ptr<Callback> callback,
                                            td::actor::ActorId<keyring::Keyring> keyring,
-                                           td::actor::ActorId<adnl::Adnl> adnl, td::actor::ActorId<rldp2::Rldp> rldp,
+                                           td::actor::ActorId<adnl::Adnl> adnl, td::actor::ActorId<adnl::AdnlSenderInterface> rldp,
                                            td::actor::ActorId<overlay::Overlays> overlays, std::string db_root,
                                            std::string db_suffix, bool allow_unsafe_self_blocks_resync)
     : unique_hash_(session_id)
@@ -1477,7 +1478,7 @@ td::actor::ActorOwn<ValidatorSession> ValidatorSession::create(
     catchain::CatChainSessionId session_id, ValidatorSessionOptions opts, PublicKeyHash local_id,
     std::vector<ValidatorSessionNode> nodes, std::unique_ptr<Callback> callback,
     td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
-    td::actor::ActorId<rldp2::Rldp> rldp, td::actor::ActorId<overlay::Overlays> overlays, std::string db_root,
+    td::actor::ActorId<adnl::AdnlSenderInterface> rldp, td::actor::ActorId<overlay::Overlays> overlays, std::string db_root,
     std::string db_suffix, bool allow_unsafe_self_blocks_resync) {
   return td::actor::create_actor<ValidatorSessionImpl>("session", session_id, std::move(opts), local_id,
                                                        std::move(nodes), std::move(callback), keyring, adnl, rldp,

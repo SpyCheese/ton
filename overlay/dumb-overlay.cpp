@@ -35,13 +35,13 @@ DumbOverlayImpl::DumbOverlayImpl(adnl::AdnlNodeIdShort local_id,
                                  OverlayIdShort overlay_id,
                                  std::unique_ptr<Overlays::Callback> callback,
                                  td::actor::ActorId<Overlays> manager,
-                                 td::actor::ActorId<rldp2::Rldp> rldp2,
+                                 td::actor::ActorId<adnl::AdnlSenderInterface> atcp,
                                  std::vector<adnl::AdnlNodeIdShort> nodes)
   : local_id_(local_id)
   , overlay_id_(overlay_id)
   , callback_(std::move(callback))
   , manager_(std::move(manager))
-  , rldp2_(std::move(rldp2))
+  , atcp_(std::move(atcp))
   , other_nodes_(std::move(nodes))
 {
   other_nodes_.erase(std::remove(other_nodes_.begin(), other_nodes_.end(), local_id_), other_nodes_.end());
@@ -69,7 +69,7 @@ void DumbOverlayImpl::receive_query(adnl::AdnlNodeIdShort src,
 void DumbOverlayImpl::send_broadcast(PublicKeyHash send_as, td::uint32 flags, td::BufferSlice data) {
   td::BufferSlice obj = create_serialize_tl_object<ton_api::dumbOverlay_broadcast>(send_as.bits256_value(), std::move(data));
   for (auto &dst : other_nodes_) {
-    td::actor::send_closure(manager_, &Overlays::send_message_via, dst, local_id_, overlay_id_, obj.clone(), rldp2_);
+    td::actor::send_closure(manager_, &Overlays::send_message_via, dst, local_id_, overlay_id_, obj.clone(), atcp_);
   }
 }
 
