@@ -1157,3 +1157,4 @@ storage.daemon.removeStorageProvider = storage.daemon.Success;
 
 ---types---
 proxyLiteserver.config port:int id:PublicKey = proxyLiteserver.Config;
+engineConsoleClient.config address:string public_key:PublicKey private_key:PrivateKey = engineConsoleClient.Config;
