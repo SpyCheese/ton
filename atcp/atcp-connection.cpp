@@ -19,6 +19,7 @@
 #include "td/utils/Random.h"
 #include "td/utils/as.h"
 #include "td/utils/overloaded.h"
+#include "ton/ton-types.h"
 
 #include "atcp-connection.hpp"
 #include "atcp.hpp"
@@ -27,6 +28,7 @@
 namespace ton::atcp {
 
 void AtcpConnection::start_up() {
+  mtu_ = Atcp::DEFAULT_MTU;
   run().start().detach();
 }
 
@@ -50,6 +52,7 @@ td::actor::Task<> AtcpConnection::run() {
 }
 
 td::actor::Task<> AtcpConnection::run_inner() {
+  alarm_timestamp().relax(init_timeout_ = td::Timestamp::in(5.0));
   if (!inbound_) {
     pipe_ = td::make_socket_pipe(co_await td::SocketFd::open(outbound_ip_));
   }
@@ -79,9 +82,14 @@ td::actor::Task<> AtcpConnection::run_inner() {
   }
   init_promise_.set_value({peer_id_full_, local_id_});
   inited_ = true;
+  init_timeout_ = {};
+  update_timeout();
 
   while (true) {
     auto data = co_await read_message();
+    if (data.empty()) {
+      continue;
+    }
     auto res = fetch_tl_object<ton_api::atcp_Message>(data, true);
     if (res.is_error()) {
       LOG(DEBUG) << "Receive : " << res.error() << ", size=" << data.size();
@@ -91,42 +99,76 @@ td::actor::Task<> AtcpConnection::run_inner() {
     ton_api::downcast_call(
         *f, td::overloaded(
                 [&](ton_api::atcp_customMessage& message) {
+                  if (message.data_.size() > mtu_) {
+                    LOG(DEBUG) << "Dropping to big message, size=" << message.data_.size() << ", mtu=" << mtu_;
+                    return;
+                  }
                   LOG(DEBUG) << "Received message, size=" << message.data_.size();
                   td::actor::send_closure(adnl_, &adnl::AdnlPeerTable::deliver, peer_id_, local_id_,
                                           std::move(message.data_));
                 },
                 [&](ton_api::atcp_query& query) {
-                  LOG(DEBUG) << "Received query, size=" << query.data_.size();
+                  if (query.data_.size() > mtu_) {
+                    LOG(DEBUG) << "Dropping to big query, size=" << query.data_.size() << ", mtu=" << mtu_;
+                    return;
+                  }
+                  auto max_answer_size = (td::uint64)query.max_answer_size_;
+                  auto timeout = (UnixTime)query.timeout_;
+                  LOG(DEBUG) << "Received query, size=" << query.data_.size() << ", max_answer_size=" << max_answer_size
+                             << ", timeout="
+                             << (timeout ? td::to_string((double)timeout - td::Clocks::system()) : "none");
                   td::actor::send_closure(
                       adnl_, &adnl::AdnlPeerTable::deliver_query, peer_id_, local_id_, std::move(query.data_),
-                      [SelfId = actor_id(this), query_id = query.query_id_](td::Result<td::BufferSlice> R) {
-                        if (R.is_error()) {
-                          LOG(DEBUG) << "Query error: " << R.error();
-                        } else {
-                          td::actor::send_closure(SelfId, &AtcpConnection::send_query_answer, query_id, R.move_as_ok());
-                        }
+                      [=, SelfId = actor_id(this), query_id = query.query_id_](td::Result<td::BufferSlice> R) {
+                        td::actor::send_closure(SelfId, &AtcpConnection::send_query_answer, query_id, max_answer_size,
+                                                timeout, std::move(R));
                       });
                 },
                 [&](ton_api::atcp_answer& answer) {
-                  auto it = out_queries_.find(answer.query_id_);
-                  if (it == out_queries_.end()) {
-                    LOG(DEBUG) << "Received answer to unknown query, size=" << answer.data_.size();
-                  } else {
-                    LOG(DEBUG) << "Received answer to \"" << it->second.name << "\", size=" << answer.data_.size();
-                    it->second.promise.set_value(std::move(answer.data_));
-                    out_queries_.erase(it);
-                  }
-                }));
+                  finish_query(answer.query_id_, std::move(answer.data_));
+                },
+                [&](const ton_api::atcp_queryError& query_error) {
+                  finish_query(query_error.query_id_, td::Status::Error("query rejected"));
+                },
+                [&](ton_api::atcp_nop&) { LOG(DEBUG) << "Received adnl.nop"; }));
+    update_timeout();
   }
 }
 
 td::actor::Task<td::BufferSlice> AtcpConnection::read_message() {
-  td::BufferSlice size_str = co_await read_bytes(4);
-  td::uint32 size = td::as<td::uint32>(size_str.data());
+  td::BufferSlice size_str = co_await read_bytes(8);
+  td::uint64 size = td::as<td::uint64>(size_str.data());
+  td::uint64 current_mtu = mtu_;
+  if (!out_queries_max_answer_sizes_.empty()) {
+    current_mtu = std::max(current_mtu, *out_queries_max_answer_sizes_.rbegin());
+  }
+  if (size >= MAX_MESSAGE_HEADER_SIZE && size - MAX_MESSAGE_HEADER_SIZE > current_mtu) {
+    LOG(DEBUG) << "Dropping too long message : " << size << " > " << current_mtu + MAX_MESSAGE_HEADER_SIZE;
+    co_await skip_bytes(size);
+    co_return td::BufferSlice{};
+  }
   co_return co_await read_bytes(size);
 }
 
 td::actor::Task<td::BufferSlice> AtcpConnection::read_bytes(size_t size) {
+  co_await wait_read(size);
+  td::BufferSlice result{size};
+  size_t read = pipe_.input_buffer().advance(size, result.as_slice());
+  CHECK(read == size);
+  co_return result;
+}
+
+td::actor::Task<> AtcpConnection::skip_bytes(size_t size) {
+  while (size > 0) {
+    co_await wait_read(1);
+    size_t x = std::min(size, pipe_.left_unread());
+    pipe_.input_buffer().advance(x);
+    size -= x;
+  }
+  co_return td::Unit{};
+}
+
+td::actor::Task<> AtcpConnection::wait_read(size_t size) {
   co_await pipe_.flush_read();
   while (pipe_.left_unread() < size) {
     CHECK(!fd_read_waiter_);
@@ -135,15 +177,13 @@ td::actor::Task<td::BufferSlice> AtcpConnection::read_bytes(size_t size) {
     fd_read_waiter_size_ = size;
     co_await std::move(task);
   }
-  td::BufferSlice result{size};
-  size_t read = pipe_.input_buffer().advance(size, result.as_slice());
-  CHECK(read == size);
-  co_return result;
+  co_return td::Unit{};
 }
 
 void AtcpConnection::send_message(td::BufferSlice data) {
   LOG(DEBUG) << "Send message, size=" << data.size();
   send_message_internal(create_serialize_tl_object<ton_api::atcp_customMessage>(std::move(data)));
+  update_timeout();
 }
 
 void AtcpConnection::send_query(std::string name, td::Promise<td::BufferSlice> promise, td::Timestamp timeout,
@@ -151,35 +191,67 @@ void AtcpConnection::send_query(std::string name, td::Promise<td::BufferSlice> p
   LOG(DEBUG) << "Send query \"" << name << "\", size=" << data.size();
   td::Bits256 query_id;
   td::Random::secure_bytes(query_id.as_slice());
-  out_queries_[query_id] = {.name = std::move(name), .promise = std::move(promise)};
-  send_message_internal(create_serialize_tl_object<ton_api::atcp_query>(query_id, std::move(data)));
+  auto [_, inserted] = out_queries_.emplace(
+      query_id, OutQuery{.name = std::move(name), .max_answer_size = max_answer_size, .promise = std::move(promise)});
+  CHECK(inserted);
+  out_queries_max_answer_sizes_.insert(max_answer_size);
+  send_message_internal(create_serialize_tl_object<ton_api::atcp_query>(
+      query_id, max_answer_size, timeout ? (int)timeout.at_unix() + 1 : 0, std::move(data)));
   if (timeout) {
-    delay_action([SelfId = actor_id(this),
-                  query_id]() { td::actor::send_closure(SelfId, &AtcpConnection::on_query_timeout, query_id); },
-                 timeout);
+    delay_action(
+        [SelfId = actor_id(this), query_id]() {
+          td::actor::send_closure(SelfId, &AtcpConnection::finish_query, query_id,
+                                  td::Status::Error(ErrorCode::timeout, "timeout"));
+        },
+        timeout);
   }
+  update_timeout();
 }
 
-void AtcpConnection::on_query_timeout(td::Bits256 query_id) {
+void AtcpConnection::send_query_answer(td::Bits256 query_id, td::uint64 max_answer_size, UnixTime timeout,
+                                       td::Result<td::BufferSlice> R) {
+  if (timeout && td::Clocks::system() > (double)timeout) {
+    LOG(DEBUG) << "Inbound query timeout";
+    return;
+  }
+  if (R.is_error()) {
+    LOG(DEBUG) << "Send query reject : " << R.move_as_error();
+    send_message_internal(create_serialize_tl_object<ton_api::atcp_queryError>(query_id));
+  } else if (R.ok().size() <= max_answer_size) {
+    LOG(DEBUG) << "Send query answer, size=" << R.ok().size();
+    send_message_internal(create_serialize_tl_object<ton_api::atcp_answer>(query_id, R.move_as_ok()));
+  } else {
+    LOG(DEBUG) << "Send query reject : answer too big (" << R.ok().size() << " > " << max_answer_size << ")";
+    send_message_internal(create_serialize_tl_object<ton_api::atcp_queryError>(query_id));
+  }
+  update_timeout();
+}
+
+void AtcpConnection::finish_query(td::Bits256 query_id, td::Result<td::BufferSlice> R) {
   auto it = out_queries_.find(query_id);
-  if (it != out_queries_.end()) {
-    LOG(DEBUG) << "Query \"" << it->second.name << "\" timeout";
-    it->second.promise.set_error(td::Status::Error(timeout, "timeout"));
-    out_queries_.erase(it);
+  if (it == out_queries_.end()) {
+    return;
   }
-}
-
-void AtcpConnection::send_query_answer(td::Bits256 query_id, td::BufferSlice data) {
-  LOG(DEBUG) << "Send query answer, size=" << data.size();
-  send_message_internal(create_serialize_tl_object<ton_api::atcp_answer>(query_id, std::move(data)));
+  if (R.is_error()) {
+    LOG(DEBUG) << "Query \"" << it->second.name << "\" : " << R.error();
+  } else if (R.ok().size() > it->second.max_answer_size) {
+    LOG(DEBUG) << "Query \"" << it->second.name << "\" : answer too big (" << R.ok().size() << " > "
+               << it->second.max_answer_size << ")";
+    R = td::Status::Error("query answer is too big");
+  } else {
+    LOG(DEBUG) << "Query \"" << it->second.name << "\" : received answer, size=" << R.ok().size();
+  }
+  it->second.promise.set_result(std::move(R));
+  out_queries_max_answer_sizes_.erase(out_queries_max_answer_sizes_.find(it->second.max_answer_size));
+  out_queries_.erase(it);
 }
 
 void AtcpConnection::send_message_internal(td::BufferSlice data) {
-  td::uint32 size = td::narrow_cast<td::uint32>(data.size());
-  td::BufferSlice str{4 + data.size()};
+  td::uint64 size = data.size();
+  td::BufferSlice str{8 + data.size()};
   td::MutableSlice s = str.as_slice();
-  s.copy_from(td::Slice(reinterpret_cast<const td::uint8*>(&size), 4));
-  s.remove_prefix(4);
+  s.copy_from(td::Slice(reinterpret_cast<const td::uint8*>(&size), 8));
+  s.remove_prefix(8);
   s.copy_from(data.as_slice());
   pipe_.output_buffer().append(std::move(str));
   yield();  // run loop()
@@ -203,6 +275,35 @@ void AtcpConnection::loop() {
   }
 }
 
+void AtcpConnection::alarm() {
+  if (init_timeout_ && init_timeout_.is_in_past()) {
+    abort(td::Status::Error(timeout, "connection init timeout"));
+    return;
+  }
+  if (send_nop_at_) {
+    LOG(DEBUG) << "Send atcp.nop";
+    send_message_internal(create_serialize_tl_object<ton_api::atcp_nop>());
+    send_nop_at_ = {};
+    update_timeout();
+  }
+  if (prepare_close_at_ && prepare_close_at_.is_in_past()) {
+    LOG(INFO) << "Closing connection by timeout in " << CLOSE_TIMEOUT << " seconds";
+    prepare_close_at_ = {};
+    closing_soon_ = true;
+    close_at_ = td::Timestamp::in(CLOSE_TIMEOUT);
+    td::actor::send_closure(atcp_, &Atcp::connection_status_changed, connection_id_, local_id_, peer_id_, true);
+  }
+  if (close_at_ && close_at_.is_in_past()) {
+    close_at_ = {};
+    abort(td::Status::Error(timeout, "connection timeout"));
+    return;
+  }
+  alarm_timestamp().relax(init_timeout_);
+  alarm_timestamp().relax(send_nop_at_);
+  alarm_timestamp().relax(prepare_close_at_);
+  alarm_timestamp().relax(close_at_);
+}
+
 void AtcpConnection::abort(td::Status S) {
   S.ensure_error();
   if (inited_) {
@@ -214,6 +315,21 @@ void AtcpConnection::abort(td::Status S) {
     init_promise_.set_error(std::move(S));
   }
   stop();
+}
+
+void AtcpConnection::update_timeout() {
+  if (closing_soon_) {
+    LOG(INFO) << "Abort closing connection by timeout";
+    close_at_ = {};
+    closing_soon_ = false;
+    td::actor::send_closure(atcp_, &Atcp::connection_status_changed, connection_id_, local_id_, peer_id_, false);
+  }
+  alarm_timestamp().relax(prepare_close_at_ = td::Timestamp::in(PREPARE_CLOSE_TIMEOUT));
+  if (out_queries_.empty()) {
+    send_nop_at_ = {};
+  } else {
+    send_nop_at_ = td::Timestamp::in(SEND_NOP_PERIOD);
+  }
 }
 
 }  // namespace ton::atcp
