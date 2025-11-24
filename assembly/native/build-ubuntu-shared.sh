@@ -56,7 +56,8 @@ cmake -GNinja -DTON_USE_JEMALLOC=ON .. \
 -DCMAKE_BUILD_TYPE=Release \
 -DOPENSSL_ROOT_DIR=$opensslPath \
 -DOPENSSL_INCLUDE_DIR=$opensslPath/include \
--DOPENSSL_CRYPTO_LIBRARY=$opensslPath/libcrypto.so
+-DOPENSSL_CRYPTO_LIBRARY=$opensslPath/libcrypto.so \
+-DCMAKE_INSTALL_PREFIX="$(pwd)/install"
 
 
 test $? -eq 0 || { echo "Can't configure ton"; exit 1; }

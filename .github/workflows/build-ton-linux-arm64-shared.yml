@@ -63,5 +63,10 @@ jobs:
 
     - name: Run Tests
       run: |
-        cd build        
+        cd build
         ctest --output-on-failure --timeout 1800
+
+    - name: Run tonlib integration test
+      run: |
+        ninja -C build install
+        ./test/tonlib/integration/test_integration.sh

@@ -83,7 +83,8 @@ cmake -GNinja -DCMAKE_BUILD_TYPE=Release .. \
 -DCMAKE_SYSROOT=$(xcrun --show-sdk-path) \
 -DLZ4_FOUND=1 \
 -DLZ4_LIBRARIES=$lz4Path/lib/liblz4.a \
--DLZ4_INCLUDE_DIRS=$lz4Path/lib
+-DLZ4_INCLUDE_DIRS=$lz4Path/lib \
+-DCMAKE_INSTALL_PREFIX="$(pwd)/install"
 
 test $? -eq 0 || { echo "Can't configure ton"; exit 1; }
 
