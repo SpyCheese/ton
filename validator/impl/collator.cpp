@@ -1920,11 +1920,6 @@ bool Collator::import_new_shard_top_blocks() {
                  << chain_len;
       continue;
     }
-    if (sh_bd->generated_at() >= now_) {
-      LOG(DEBUG) << "ShardTopBlockDescr for " << sh_bd->block_id().to_str() << " skipped: it claims to be generated at "
-                 << sh_bd->generated_at() << " while it is still " << now_;
-      continue;
-    }
     Ref<block::McShardHash> descr = sh_bd->get_top_descr(chain_len);
     CHECK(descr.not_null());
     CHECK(descr->top_block_id() == sh_bd->block_id());
@@ -2179,7 +2174,7 @@ bool Collator::init_utime() {
   }
 
   auto prev = std::max<td::uint32>(config_->utime, prev_now_);
-  now_ = std::max<td::uint32>(prev + 1, (unsigned)std::time(nullptr));
+  now_ = std::max<td::uint32>(prev, (unsigned)std::time(nullptr));
   if (now_ > now_upper_limit_) {
     return fatal_error(
         "error initializing unix time for the new block: failed to observe end of fsm_split time interval for this "
