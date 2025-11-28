@@ -108,6 +108,14 @@ set(VALIDATOR_SOURCE
   manager-init.cpp
   manager.cpp
 
+  consensus/null/consensus.cpp
+  consensus/block-producer.cpp
+  consensus/block-validator.cpp
+  consensus/bridge.cpp
+  consensus/consensus-bus.cpp
+  consensus/consensus-types.cpp
+  consensus/private-overlay.cpp
+
   ${VALIDATOR_HEADERS}
 )
 
