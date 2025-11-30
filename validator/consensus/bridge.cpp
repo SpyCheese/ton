@@ -32,14 +32,14 @@ class BlockAccepter : public runtime::SpawnsWith<ConsensusBridgeBus>, public run
   template <>
   void handle(runtime::BusHandle<ConsensusBridgeBus>, std::shared_ptr<ConsensusBus::BlockFinalized const> block) {
     auto block_data = create_block(block->id, block->block.clone()).move_as_ok();
-    run_accept_block_query(
-        block->id, block_data, block->parents, owning_bus()->validator_set, block->finalization_cert.sign_signatures,
-        block->finalization_cert.approve_signatures, fullnode::FullNode::broadcast_mode_public, true,
-        owning_bus()->real_manager_for_external_code, td::lambda_promise([](td::Result<td::Unit> result) {
-          if (result.is_error()) {
-            LOG(ERROR) << "Failed to accept finalized block " << result.move_as_error();
-          }
-        }));
+    run_accept_block_query(block->id, block_data, block->parents, owning_bus()->validator_set,
+                           block->finalization_cert.sign_signatures, fullnode::FullNode::broadcast_mode_public, true,
+                           owning_bus()->real_manager_for_external_code,
+                           td::lambda_promise([](td::Result<td::Unit> result) {
+                             if (result.is_error()) {
+                               LOG(ERROR) << "Failed to accept finalized block " << result.move_as_error();
+                             }
+                           }));
   }
 };
 
