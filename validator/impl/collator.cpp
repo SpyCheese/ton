@@ -1920,6 +1920,11 @@ bool Collator::import_new_shard_top_blocks() {
                  << chain_len;
       continue;
     }
+    if (sh_bd->generated_at() > now_) {
+      LOG(DEBUG) << "ShardTopBlockDescr for " << sh_bd->block_id().to_str() << " skipped: it claims to be generated at "
+                 << sh_bd->generated_at() << " while it is still " << now_;
+      continue;
+    }
     Ref<block::McShardHash> descr = sh_bd->get_top_descr(chain_len);
     CHECK(descr.not_null());
     CHECK(descr->top_block_id() == sh_bd->block_id());

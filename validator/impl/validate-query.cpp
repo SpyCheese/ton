@@ -2079,6 +2079,11 @@ bool ValidateQuery::check_one_shard(const block::McShardHash& info, const block:
         return reject_query(PSTRING() << "ShardTopBlockDescr for " << sh_bd->block_id().to_str()
                                       << " is invalid: its chain length is " << chain_len << " (not in range 1..8)");
       }
+      if (sh_bd->generated_at() > now_) {
+        return reject_query(PSTRING() << "ShardTopBlockDescr for " << sh_bd->block_id().to_str()
+                                      << " is invalid: it claims to be generated at " << sh_bd->generated_at()
+                                      << " while it is still " << now_);
+      }
       Ref<block::McShardHash> descr = sh_bd->get_top_descr(chain_len);
       CHECK(descr.not_null());
       CHECK(descr->top_block_id() == sh_bd->block_id());
@@ -2442,7 +2447,7 @@ bool ValidateQuery::check_utime_lt() {
     return reject_query(PSTRING() << "block has creation time " << now_
                                   << " less than or equal to that of the previous state (" << ps_.utime_ << ")");
   }
-  if (now_ <= config_->utime) {
+  if (now_ < config_->utime) {
     return reject_query(PSTRING() << "block has creation time " << now_
                                   << " less than or equal to that of the reference masterchain state ("
                                   << config_->utime << ")");
