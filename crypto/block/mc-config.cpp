@@ -360,6 +360,26 @@ ton::ValidatorSessionConfig Config::get_consensus_config() const {
   return c;
 }
 
+td::optional<ton::NewConsensusConfig> Config::get_new_consensus_config(ton::WorkchainId wc) const {
+  auto c1 = get_config_param(30);
+  if (c1.is_null()) {
+    return {};
+  }
+  gen::NewConsensusConfigAll::Record rec;
+  if (!gen::unpack_cell(c1, rec)) {
+    return {};
+  }
+  auto c2 = (wc == ton::masterchainId ? rec.mc : rec.shard)->prefetch_ref();
+  gen::NewConsensusConfig::Record config;
+  if (c2.is_null() || !gen::unpack_cell(c2, config)) {
+    return {};
+  }
+  auto consensus_config = get_consensus_config();
+  return ton::NewConsensusConfig{.target_rate_ms = config.target_rate_ms,
+                                 .max_block_size = consensus_config.max_block_size,
+                                 .max_collated_data_size = consensus_config.max_collated_data_size};
+}
+
 bool Config::foreach_config_param(std::function<bool(int, Ref<vm::Cell>)> scan_func) const {
   if (!config_dict) {
     return false;

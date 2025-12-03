@@ -50,12 +50,13 @@ struct BridgeCreationParams {
   ShardIdFull shard;
   td::actor::ActorId<ValidatorManager> manager;
   td::actor::ActorId<keyring::Keyring> keyring;
+  td::Ref<ValidatorManagerOptions> validator_opts;
 
   td::Ref<ValidatorSet> validator_set;
   PublicKeyHash local_id;
 
   td::actor::ActorId<CollationManager> collation_manager;
-  validatorsession::ValidatorSessionOptions config;
+  NewConsensusConfig config;
   BlockIdExt min_masterchain_block_id = {};
 
   ValidatorSessionId session_id;
@@ -129,6 +130,7 @@ class BridgeImpl final : public IValidatorGroup {
     bus->manager = manager_facade_.get();
     bus->real_manager_for_external_code = params_.manager;
     bus->keyring = params_.keyring;
+    bus->validator_opts = params_.validator_opts;
 
     bus->validator_set = std::move(params_.validator_set);
     bus->local_id = std::move(params_.local_id);
@@ -160,20 +162,21 @@ class BridgeImpl final : public IValidatorGroup {
 }  // namespace
 
 td::actor::ActorOwn<IValidatorGroup> IValidatorGroup::create_bridge(
-    td::Slice name, ShardIdFull shard, PublicKeyHash local_id, ValidatorSessionId session_id,
-    td::Ref<ValidatorSet> validator_set, BlockSeqno last_key_block_seqno,
-    validatorsession::ValidatorSessionOptions config, td::actor::ActorId<keyring::Keyring> keyring,
+    ShardIdFull shard, PublicKeyHash local_id, ValidatorSessionId session_id, td::Ref<ValidatorSet> validator_set,
+    BlockSeqno last_key_block_seqno, NewConsensusConfig config, td::actor::ActorId<keyring::Keyring> keyring,
     td::actor::ActorId<adnl::Adnl> adnl, td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<rldp2::Rldp> rldp2,
     td::actor::ActorId<overlay::Overlays> overlays, std::string db_root,
     td::actor::ActorId<ValidatorManager> validator_manager, td::actor::ActorId<CollationManager> collation_manager,
     bool create_session, bool allow_unsafe_self_blocks_resync, td::Ref<ValidatorManagerOptions> opts,
     bool monitoring_shard) {
+  std::string name = PSTRING() << "valgroup" << shard.to_str();
   BridgeCreationParams params{
-      .name = std::string(name.begin(), name.end()),
+      .name = name,
       .is_create_session_called = create_session,
       .shard = shard,
       .manager = validator_manager,
       .keyring = keyring,
+      .validator_opts = opts,
       .validator_set = std::move(validator_set),
       .local_id = std::move(local_id),
       .collation_manager = collation_manager,

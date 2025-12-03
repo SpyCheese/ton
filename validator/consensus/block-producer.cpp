@@ -1,4 +1,5 @@
 #include "td/actor/coro_task.h"
+#include "td/actor/coro_utils.h"
 #include "td/utils/CancellationToken.h"
 
 #include "consensus-bus.h"
@@ -42,13 +43,11 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
  private:
   Task<td::Unit> create_block_candidate(std::shared_ptr<ConsensusBus::CandidateRequested const> request) {
     auto& bus = *owning_bus();
-    auto [awaiter, promise] = StartedTask<GeneratedCandidate>::make_bridge();
-    td::actor::send_closure(bus.collation_manager, &CollationManager::collate_block, bus.shard,
-                            bus.min_masterchain_block_id, request->parents, local_id_full_, BlockCandidatePriority{},
-                            bus.validator_set, max_answer_size_, cancellation_source.get_cancellation_token(),
-                            std::move(promise), bus.config.proto_version);
+    auto candidate = co_await td::actor::ask(bus.collation_manager, &CollationManager::collate_block, bus.shard,
+                                             bus.min_masterchain_block_id, request->parents, local_id_full_,
+                                             BlockCandidatePriority{}, bus.validator_set, max_answer_size_,
+                                             cancellation_source.get_cancellation_token());
 
-    auto candidate = co_await std::move(awaiter);
     std::optional collator = candidate.collator_node_id;
     if (candidate.self_collated) {
       collator = std::nullopt;

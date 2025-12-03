@@ -20,7 +20,7 @@ struct ProtocolMessage {
   static constexpr size_t max_length = 1024;
 
   ProtocolMessage(td::BufferSlice data) : data(std::move(data)) {
-    CHECK(data.size() < max_length);
+    CHECK(this->data.size() <= max_length);
   }
 
   td::BufferSlice data;
@@ -97,6 +97,7 @@ class ConsensusBus : public runtime::Bus {
   td::actor::ActorId<ManagerFacade> manager;
   td::actor::ActorId<ValidatorManager> real_manager_for_external_code;
   td::actor::ActorId<keyring::Keyring> keyring;
+  td::Ref<ValidatorManagerOptions> validator_opts;
 
   // Validator set
   td::Ref<ValidatorSet> validator_set;
@@ -104,7 +105,7 @@ class ConsensusBus : public runtime::Bus {
 
   // Collation / validation config
   td::actor::ActorId<CollationManager> collation_manager;
-  validatorsession::ValidatorSessionOptions config;
+  NewConsensusConfig config;
   BlockIdExt min_masterchain_block_id;
 
   // Transport stack
