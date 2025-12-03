@@ -417,7 +417,8 @@ void AcceptBlockQuery::got_block_handle(BlockHandle handle) {
       handle_->inited_split_after() && handle_->inited_merge_before() && handle_->inited_prev() &&
       handle_->inited_logical_time() && handle_->inited_state_root_hash() &&
       (is_masterchain() ? handle_->inited_proof() && handle_->is_applied() && handle_->inited_is_key_block()
-                        : handle_->inited_proof_link()) && send_broadcast_mode_ == 0) {
+                        : handle_->inited_proof_link()) &&
+      send_broadcast_mode_ == 0) {
     finish_query();
     return;
   }

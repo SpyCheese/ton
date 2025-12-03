@@ -66,7 +66,7 @@ if [ "$with_tests" = true ]; then
 ninja storage-daemon storage-daemon-cli fift func tolk tonlib tonlibjson tonlib-cli \
       validator-engine lite-client validator-engine-console blockchain-explorer \
       generate-random-id json2tlo dht-server http-proxy rldp-http-proxy dht-ping-servers dht-resolve \
-      adnl-proxy create-state emulator proxy-liteserver all-tests
+      adnl-proxy create-state emulator proxy-liteserver all-tests install
       test $? -eq 0 || { echo "Can't compile ton"; exit 1; }
 else
 ninja storage-daemon storage-daemon-cli fift func tolk tonlib tonlibjson tonlib-cli \
