@@ -1170,3 +1170,10 @@ consensus.candidateIdData slot:int blockId:tonNode.BlockIdExt collated_file_hash
 
 nullConsensus.signature slot:int signature:bytes = nullConsensus.Message;
 nullConsensus.handshake = nullConsensus.Message;
+
+simplexConsensus.notarizeVote slot:int block:tonNode.blockIdExt = simplexConsensus.UnsignedVote;
+simplexConsensus.finalizeVote slot:int block:tonNode.blockIdExt signature_for_mc:bytes = simplexConsensus.UnsignedVote;
+simplexConsensus.skipVote slotBegin:int slotEnd:int = simplexConsensus.UnsignedVote;
+simplexConsensus.notarizeFallbackVote slot:int block:tonNode.blockIdExt = simplexConsensus.UnsignedVote;
+simplexConsensus.skipFallbackVote slotBegin:int slotEnd:int = simplexConsensus.UnsignedVote;
+simplexConsensus.vote unsignedVote:simplexConsensus.UnsignedVote signature:bytes = simplexConsensus.Vote;
