@@ -419,3 +419,70 @@ TEST(Runtime, Lifetime) {
 
 }  // namespace
 }  // namespace ton::runtime::test_runtime_lifetime
+
+namespace ton::runtime::test_requests {
+namespace {
+
+struct MainBus : Bus {
+  MainBus() = default;
+
+  ~MainBus() {
+    td::actor::SchedulerContext::get().stop();
+  }
+
+  struct MultiplyBy25Request {
+    using ReturnType = int;
+
+    int value;
+  };
+
+  using Events = td::TypeList<MultiplyBy25Request>;
+};
+
+bool g_response_received = false;
+
+class Provider : public SpawnsWith<MainBus>, public ConnectsTo<MainBus> {
+ public:
+  TON_RUNTIME_DEFINE_EVENT_HANDLER();
+
+  template <>
+  td::actor::Task<int> handle(BusHandle<MainBus> bus, std::shared_ptr<MainBus::MultiplyBy25Request> request) {
+    co_await td::actor::coro_sleep(td::Timestamp::in(0.001));
+    stop();
+    co_return request->value * 25;
+  }
+};
+
+class Consumer : public SpawnsWith<MainBus>, public ConnectsTo<MainBus> {
+ public:
+  TON_RUNTIME_DEFINE_EVENT_HANDLER();
+
+  void start_up() override {
+    run().start().detach();
+  }
+
+ private:
+  td::actor::Task<td::Unit> run() {
+    int result = co_await owning_bus().publish<MainBus::MultiplyBy25Request>(2);
+    EXPECT_EQ(result, 50);
+    g_response_received = true;
+    stop();
+    co_return td::Unit{};
+  }
+};
+
+TEST(Runtime, Requests) {
+  td::actor::Scheduler scheduler({1});
+
+  Runtime runtime;
+  runtime.register_actor<Provider>("Provider");
+  runtime.register_actor<Consumer>("Consumer");
+
+  scheduler.run_in_context([&] { runtime.start(std::make_shared<MainBus>()); });
+  scheduler.run();
+
+  EXPECT(g_response_received);
+}
+
+}  // namespace
+}  // namespace ton::runtime::test_requests
