@@ -16,16 +16,15 @@ class ConsensusBus : public runtime::Bus {
  public:
   struct StopRequested {};
 
-  struct BlockFinalized {
+  struct SlotFinalized {
     CandidateRef candidate;
-    ParentRef parent;
-    td::Ref<BlockSignatureSet> signatures;
+    std::optional<td::Ref<BlockSignatureSet>> finalization_cert;
 
     std::string contents_to_string() const;
   };
 
   struct OurLeaderWindowStarted {
-    ParentRef base;
+    ParentId base;
     td::uint32 start_slot;
     td::uint32 end_slot;
 
@@ -39,23 +38,25 @@ class ConsensusBus : public runtime::Bus {
   };
 
   struct CandidateGenerated {
-    CandidateRef candidate;
-    std::optional<td::Bits256> collator_id;
+    RawCandidateRef candidate;
+    std::optional<adnl::AdnlNodeIdShort> collator_id;
 
     std::string contents_to_string() const;
   };
 
+  // The only guarantee is that the candidate has a valid signature from `candidate->leader`.
   struct CandidateReceived {
-    CandidateRef candidate;
+    RawCandidateRef candidate;
 
     std::string contents_to_string() const;
   };
 
+  // Checks that if candidate contains a block, then BlockCandidate is a valid block built on top of
+  // the parent.
   struct ValidationRequest {
     using ReturnType = td::Unit;
 
     CandidateRef candidate;
-    ParentRef parent;
 
     std::string contents_to_string() const;
   };
@@ -80,11 +81,13 @@ class ConsensusBus : public runtime::Bus {
     std::string contents_to_string() const;
   };
 
-  using Events = td::TypeList<StopRequested, BlockFinalized, OurLeaderWindowStarted, OurLeaderWindowAborted,
+  using Events = td::TypeList<StopRequested, SlotFinalized, OurLeaderWindowStarted, OurLeaderWindowAborted,
                               CandidateGenerated, CandidateReceived, ValidationRequest, IncomingProtocolMessage,
                               OutgoingProtocolMessage, BlockFinalizedInMasterchain>;
 
   ConsensusBus() = default;
+
+  std::vector<BlockIdExt> convert_id_to_blocks(ParentId parent) const;
 
   ValidatorSessionId session_id;
 

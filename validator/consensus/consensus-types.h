@@ -57,42 +57,103 @@ struct ProtocolMessage {
   td::BufferSlice data;
 };
 
+struct RawCandidateId {
+  static RawCandidateId create(td::uint32 slot, const std::optional<BlockCandidate>& candidate,
+                               std::optional<RawCandidateId> parent);
+
+  bool operator==(const RawCandidateId& other) const = default;
+
+  td::uint32 slot{0};
+  Bits256 hash{};
+};
+
+inline td::StringBuilder& operator<<(td::StringBuilder& stream, const RawCandidateId& id) {
+  return stream << "{" << id.slot << ", " << id.hash << ", ?}";
+}
+
+using RawParentId = std::optional<RawCandidateId>;
+
 struct CandidateId {
-  static CandidateId create(td::uint32 slot, const BlockCandidate& candidate, std::optional<CandidateId> parent);
+  CandidateId() = default;
 
-  bool operator==(const CandidateId& other) const = default;
+  CandidateId(RawCandidateId id, BlockIdExt block) : slot(id.slot), hash(id.hash), block(block) {
+  }
 
-  td::uint32 slot;
-  Bits256 hash;
+  operator RawCandidateId() const {
+    return RawCandidateId{slot, hash};
+  }
+
+  td::uint32 slot{0};
+  Bits256 hash{};
+  BlockIdExt block;
 };
 
 inline td::StringBuilder& operator<<(td::StringBuilder& stream, const CandidateId& id) {
-  return stream << "{" << id.slot << ", " << id.hash << "}";
+  return stream << "{" << id.slot << ", " << id.hash << ", " << id.block.to_str() << "}";
 }
 
-struct Candidate : td::CntObject {
-  static td::Result<td::Ref<Candidate>> deserialize(td::Slice data, const PeerValidator& leader,
-                                                    const ConsensusBus& bus);
+using ParentId = std::optional<CandidateId>;
 
-  Candidate(CandidateId id, std::optional<CandidateId> parent_id, PeerValidatorId leader, BlockCandidate&& block,
-            td::BufferSlice&& signature)
+struct RawCandidate : td::CntObject {
+  static td::Result<td::Ref<RawCandidate>> deserialize(td::Slice data, const PeerValidator& leader,
+                                                       const ConsensusBus& bus);
+
+  RawCandidate(RawCandidateId id, RawParentId parent_id, PeerValidatorId leader, std::optional<BlockCandidate> block,
+               td::BufferSlice signature)
       : id(id)
       , parent_id(std::move(parent_id))
       , leader(leader)
       , block(std::move(block))
       , signature(std::move(signature)) {
+    CHECK(this->block.has_value() || this->parent_id.has_value());
+  }
+
+  CandidateId resolve_id(ParentId parent) const {
+    if (block.has_value()) {
+      return CandidateId{id, block->id};
+    } else {
+      CHECK(parent.has_value());
+      return CandidateId{id, parent->block};
+    }
   }
 
   td::BufferSlice serialize() const;
 
-  CandidateId id;
-  std::optional<CandidateId> parent_id;
+  RawCandidateId id;
+  RawParentId parent_id;
   PeerValidatorId leader;
-  BlockCandidate block;
+  std::optional<BlockCandidate> block;
   td::BufferSlice signature;
 };
 
+using RawCandidateRef = td::Ref<RawCandidate>;
+
+struct Candidate : td::CntObject {
+  Candidate(CandidateId id, ParentId parent_id, RawCandidateRef raw)
+      : id(id)
+      , parent_id(parent_id)
+      , leader(raw->leader)
+      , block(raw->block)
+      , signature(raw->signature)
+      , raw(std::move(raw)) {
+    CHECK(this->raw->id == id);
+    CHECK(parent_id == this->raw->parent_id);
+    if (block.has_value()) {
+      CHECK(block->id == id.block);
+    } else {
+      CHECK(parent_id->block == id.block);
+    }
+  }
+
+  CandidateId id;
+  ParentId parent_id;
+  PeerValidatorId leader;
+  const std::optional<BlockCandidate>& block;
+  const td::BufferSlice& signature;
+
+  RawCandidateRef raw;
+};
+
 using CandidateRef = td::Ref<Candidate>;
-using ParentRef = std::optional<td::Ref<Candidate>>;
 
 }  // namespace ton::validator

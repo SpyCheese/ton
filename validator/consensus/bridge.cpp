@@ -4,7 +4,6 @@
 #include "validator/full-node.h"
 #include "validator/validator-group.hpp"
 
-#include "candidate-parent.h"
 #include "runtime.h"
 
 namespace ton::validator {
@@ -29,21 +28,38 @@ class BlockAccepter : public runtime::SpawnsWith<ConsensusBridgeBus>, public run
   }
 
   template <>
-  void handle(runtime::BusHandle<ConsensusBridgeBus>, std::shared_ptr<const ConsensusBus::BlockFinalized> event) {
-    const auto& candidate = event->candidate;
+  void handle(runtime::BusHandle<ConsensusBridgeBus>, std::shared_ptr<const ConsensusBus::SlotFinalized> last_slot) {
+    finalize_burst.push_back(last_slot);
+    if (!last_slot->finalization_cert) {
+      return;
+    }
 
-    auto block_data = create_block(candidate->block.id, candidate->block.data.clone()).move_as_ok();
-    auto block_parents = CandidateParent{*owning_bus(), event->parent}.parent_blocks();
+    for (const auto& slot : finalize_burst) {
+      auto& candidate = slot->candidate;
+      if (candidate->block.has_value()) {
+        auto& block = *candidate->block;
 
-    run_accept_block_query(
-        candidate->block.id, block_data, block_parents, owning_bus()->validator_set_for_external_code,
-        event->signatures, fullnode::FullNode::broadcast_mode_public, true,
-        owning_bus()->real_manager_for_external_code, td::lambda_promise([](td::Result<td::Unit> result) {
-          if (result.is_error()) {
-            LOG(ERROR) << "Failed to accept finalized block " << result.move_as_error();
-          }
-        }));
+        td::Ref<BlockSignatureSet> signatures = {};
+        if (candidate->id.block == last_slot->candidate->id.block) {
+          signatures = *last_slot->finalization_cert;
+        }
+        auto block_data = create_block(block.id, block.data.clone()).move_as_ok();
+        auto block_parents = owning_bus()->convert_id_to_blocks(candidate->parent_id);
+
+        run_accept_block_query(
+            block.id, block_data, block_parents, owning_bus()->validator_set_for_external_code, signatures,
+            fullnode::FullNode::broadcast_mode_public, true, owning_bus()->real_manager_for_external_code,
+            td::lambda_promise([](td::Result<td::Unit> result) {
+              LOG_CHECK(!result.is_error()) << "Failed to accept finalized block " << result.move_as_error();
+            }));
+      }
+    }
+
+    finalize_burst.clear();
   }
+
+ private:
+  std::vector<std::shared_ptr<const ConsensusBus::SlotFinalized>> finalize_burst;
 };
 
 struct BridgeCreationParams {

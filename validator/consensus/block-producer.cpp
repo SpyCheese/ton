@@ -2,12 +2,48 @@
 #include "td/actor/coro_utils.h"
 #include "td/utils/CancellationToken.h"
 
-#include "candidate-parent.h"
 #include "consensus-bus.h"
 
 namespace ton::validator {
 
 namespace {
+
+class CandidateParent {
+ public:
+  CandidateParent(const ConsensusBus& bus, const ParentId& parent) {
+    parent_blocks_ = bus.convert_id_to_blocks(parent);
+    seqno_ = parent_blocks_.size() == 1 ? parent_blocks_[0].seqno()
+                                        : std::max(parent_blocks_[0].seqno(), parent_blocks_[1].seqno());
+    parent_id_ = parent;
+  }
+
+  CandidateParent(const CandidateId& id) {
+    parent_blocks_ = {id.block};
+    seqno_ = id.block.seqno();
+    parent_id_ = id;
+  }
+
+  const std::vector<BlockIdExt>& parent_blocks() const {
+    return parent_blocks_;
+  }
+
+  int seqno() const {
+    return seqno_;
+  }
+
+  int next_seqno() const {
+    return seqno_ + 1;
+  }
+
+  ParentId id() const {
+    return parent_id_;
+  }
+
+ private:
+  std::vector<BlockIdExt> parent_blocks_;
+  int seqno_;
+  ParentId parent_id_;
+};
 
 class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runtime::ConnectsTo<ConsensusBus> {
  public:
@@ -16,6 +52,8 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
   void start_up() {
     auto& bus = *owning_bus();
     max_answer_size_ = bus.config.max_block_size + bus.config.max_collated_data_size + 1024;
+
+    last_mc_finalized_seqno_ = last_consensus_finalized_seqno_ = CandidateParent{bus, std::nullopt}.seqno();
   }
 
   template <>
@@ -23,6 +61,13 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
     current_leader_window_ = std::nullopt;
     cancellation_source_.cancel();
     stop();
+  }
+
+  template <>
+  void handle(runtime::BusHandle<ConsensusBus>, std::shared_ptr<const ConsensusBus::SlotFinalized> event) {
+    if (event->finalization_cert.has_value()) {
+      last_consensus_finalized_seqno_ = event->candidate->id.block.seqno();
+    }
   }
 
   template <>
@@ -44,12 +89,17 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
   void handle(runtime::BusHandle<ConsensusBus>,
               std::shared_ptr<const ConsensusBus::BlockFinalizedInMasterchain> event) {
     last_mc_finalized_seqno_ = event->block.seqno();
-    if (mc_finalized_promise_) {
-      mc_finalized_promise_.set_value(td::Unit{});
-    }
   }
 
  private:
+  bool should_generate_empty_block(BlockSeqno new_seqno) {
+    if (owning_bus()->shard.is_masterchain()) {
+      return last_consensus_finalized_seqno_ + 1 < new_seqno;
+    } else {
+      return last_mc_finalized_seqno_ + 8 < new_seqno;
+    }
+  }
+
   td::actor::Task<> generate_candidates(std::shared_ptr<const ConsensusBus::OurLeaderWindowStarted> event) {
     auto& bus = *owning_bus();
 
@@ -69,47 +119,55 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
 
       BlockSeqno new_seqno = parent.next_seqno();
 
-      // FIXME: Generate an empty block instead to move consensus forward.
-      while (current_leader_window_ == window && last_mc_finalized_seqno_ + 8 < new_seqno) {
-        auto [awaiter, promise] = td::actor::StartedTask<td::Unit>::make_bridge();
-        mc_finalized_promise_ = std::move(promise);
-        LOG(WARNING) << "Masterchain is too slow! Waiting for it to finalize block with seqno at least "
-                     << new_seqno - 8 << " (current finalized: " << last_mc_finalized_seqno_ << ")";
-        co_await std::move(awaiter);
+      RawCandidateId raw_candidate_id;
+      std::optional<BlockCandidate> block;
+      std::optional<adnl::AdnlNodeIdShort> collator;
+
+      if (should_generate_empty_block(new_seqno)) {
+        LOG(WARNING) << "Generating an empty block for slot " << slot << "! new_seqno=" << new_seqno
+                     << ", last_consensus_finalized_seqno_=" << last_consensus_finalized_seqno_
+                     << ", last_mc_finalized_seqno_=" << last_mc_finalized_seqno_;
+        CHECK(parent.id().has_value());  // first generated block in an epoch cannot be empty
+
+        raw_candidate_id = RawCandidateId::create(slot, std::nullopt, parent.id());
+      } else {
+        // Before doing anything substantial, check the leader window.
+        if (current_leader_window_ != window) {
+          break;
+        }
+
+        // FIXME: What to do if collate_block suddenly fails?
+        auto block_candidate = co_await td::actor::ask(
+            bus.collation_manager, &CollationManager::collate_block, bus.shard, bus.min_masterchain_block_id,
+            parent.parent_blocks(), Ed25519_PublicKey{bus.local_id.key.ed25519_value().raw()}, BlockCandidatePriority{},
+            bus.validator_set_for_external_code, max_answer_size_, cancellation_source_.get_cancellation_token());
+
+        block = std::move(block_candidate.candidate);
+        if (!block_candidate.collator_node_id.is_zero()) {
+          collator = adnl::AdnlNodeIdShort{block_candidate.collator_node_id};
+        }
+
+        raw_candidate_id = RawCandidateId::create(slot, block, parent.id());
       }
-      if (current_leader_window_ != window) {
-        break;
-      }
 
-      // FIXME: What to do if collate_block fails? Now the consensus will just eventually switch to
-      //        the next leader.
-      auto block_candidate = co_await td::actor::ask(
-          bus.collation_manager, &CollationManager::collate_block, bus.shard, bus.min_masterchain_block_id,
-          parent.parent_blocks(), Ed25519_PublicKey{bus.local_id.key.ed25519_value().raw()}, BlockCandidatePriority{},
-          bus.validator_set_for_external_code, max_answer_size_, cancellation_source_.get_cancellation_token());
-
-      std::optional collator = block_candidate.collator_node_id;
-      if (block_candidate.self_collated) {
-        collator = std::nullopt;
-      }
-
-      auto candidate_id = CandidateId::create(slot, block_candidate.candidate, parent.candidate_id());
-
-      auto candidate_id_to_sign =
-          create_serialize_tl_object<ton_api::consensus_ordinaryCandidateParent>(candidate_id.slot, candidate_id.hash);
+      auto candidate_id_to_sign = create_serialize_tl_object<ton_api::consensus_ordinaryCandidateParent>(
+          raw_candidate_id.slot, raw_candidate_id.hash);
       auto data_to_sign =
           create_serialize_tl_object<ton_api::consensus_dataToSign>(bus.session_id, std::move(candidate_id_to_sign));
       auto signature = co_await td::actor::ask(bus.keyring, &keyring::Keyring::sign_message, bus.local_id.short_id,
                                                std::move(data_to_sign));
 
-      auto candidate = td::make_ref<Candidate>(candidate_id, parent.candidate_id(), bus.local_id.idx,
-                                               std::move(block_candidate.candidate), std::move(signature));
+      auto raw_candidate = td::make_ref<RawCandidate>(raw_candidate_id, parent.id(), bus.local_id.idx, std::move(block),
+                                                      std::move(signature));
 
-      owning_bus().publish<ConsensusBus::CandidateGenerated>(candidate, collator);
-      owning_bus().publish<ConsensusBus::CandidateReceived>(candidate);
+      if (current_leader_window_ != window) {
+        break;
+      }
+      owning_bus().publish<ConsensusBus::CandidateGenerated>(raw_candidate, collator);
+      owning_bus().publish<ConsensusBus::CandidateReceived>(raw_candidate);
 
-      parent = candidate;
       ++slot;
+      parent = raw_candidate->resolve_id(parent.id());
       target_time = td::Timestamp::in(bus.config.target_rate_ms / 1000., target_time);
     }
 
@@ -121,8 +179,8 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
 
   td::uint64 max_answer_size_;
 
+  BlockSeqno last_consensus_finalized_seqno_ = 0;
   BlockSeqno last_mc_finalized_seqno_ = 0;
-  td::Promise<td::Unit> mc_finalized_promise_;
 };
 
 }  // namespace

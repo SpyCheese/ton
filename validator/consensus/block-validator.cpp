@@ -1,7 +1,6 @@
 #include "td/actor/coro_utils.h"
 #include "validator/fabric.h"
 
-#include "candidate-parent.h"
 #include "consensus-bus.h"
 
 namespace ton::validator {
@@ -21,15 +20,19 @@ class BlockValidatorImpl : public runtime::SpawnsWith<ConsensusBus>, public runt
   td::actor::Task<> handle(runtime::BusHandle<ConsensusBus>, std::shared_ptr<ConsensusBus::ValidationRequest> event) {
     auto& bus = *owning_bus();
 
+    if (!event->candidate->block) {
+      co_return td::Unit{};
+    }
+
     ValidateParams validate_params{
         .shard = bus.shard,
         .min_masterchain_block_id = bus.min_masterchain_block_id,
-        .prev = CandidateParent{bus, event->parent}.parent_blocks(),
+        .prev = bus.convert_id_to_blocks(event->candidate->parent_id),
         .validator_set = bus.validator_set_for_external_code,
         .local_validator_id = bus.local_id.short_id,
     };
     auto [awaiter, promise] = td::actor::StartedTask<ValidateCandidateResult>::make_bridge();
-    run_validate_query(event->candidate->block.clone(), validate_params, bus.real_manager_for_external_code,
+    run_validate_query(event->candidate->block->clone(), validate_params, bus.real_manager_for_external_code,
                        td::Timestamp::in(60), std::move(promise));
     auto maybe_candidate_reject = co_await std::move(awaiter);
 
@@ -37,8 +40,7 @@ class BlockValidatorImpl : public runtime::SpawnsWith<ConsensusBus>, public runt
       auto error = td::Status::Error(0, maybe_candidate_reject.get<CandidateReject>().reason);
 
       if (event->candidate->leader == bus.local_id.idx) {
-        LOG(ERROR) << "BUG! Candidate " << event->candidate->id << " (block: " << event->candidate->block.id.to_str()
-                   << ") is self-rejected: " << error;
+        LOG(ERROR) << "BUG! Candidate " << event->candidate->id << " is self-rejected: " << error;
       }
 
       co_return error;

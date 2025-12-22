@@ -1,5 +1,4 @@
 #include "td/actor/coro_utils.h"
-#include "validator/consensus/candidate-parent.h"
 #include "validator/fabric.h"
 
 #include "consensus-bus.h"
@@ -9,6 +8,7 @@ namespace ton::validator {
 namespace {
 
 struct SlotState {
+  std::optional<RawCandidateRef> raw_candidate;
   std::optional<CandidateRef> candidate;
 
   std::vector<BlockSignature> signatures;
@@ -87,10 +87,10 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
     }
   }
 
-  td::actor::Task<> on_new_candidate(CandidateRef candidate) {
+  td::actor::Task<> on_new_candidate(RawCandidateRef candidate) {
     auto& slot = block_states_[candidate->id.slot];
-    CHECK(!slot.candidate.has_value());
-    slot.candidate = candidate;
+    CHECK(!slot.raw_candidate.has_value());
+    slot.raw_candidate = candidate;
 
     co_await try_validate_blocks();
     try_finalize_blocks();
@@ -116,19 +116,22 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
       }
 
       auto& state = it->second;
-      if (!state.candidate.has_value()) {
+      if (!state.raw_candidate.has_value()) {
         break;
       }
+      const auto& raw_candidate = *state.raw_candidate;
+
+      CHECK(raw_candidate->parent_id == parent_for_validation_);
+
+      auto id = raw_candidate->resolve_id(parent_for_validation_);
+      state.candidate = td::make_ref<Candidate>(id, parent_for_validation_, raw_candidate);
       const auto& candidate = *state.candidate;
 
-      CHECK(candidate->parent_id == (CandidateParent{bus, parent_for_validation_}.candidate_id()));
-
-      auto validation_result =
-          co_await owning_bus().publish<ConsensusBus::ValidationRequest>(candidate, parent_for_validation_).wrap();
+      auto validation_result = co_await owning_bus().publish<ConsensusBus::ValidationRequest>(candidate).wrap();
       validation_result.ensure();
 
-      auto signature_data = create_serialize_tl_object<ton_api::ton_blockId>(candidate->block.id.root_hash,
-                                                                             candidate->block.id.file_hash);
+      auto signature_data = create_serialize_tl_object<ton_api::ton_blockId>(candidate->id.block.root_hash,
+                                                                             candidate->id.block.file_hash);
       auto signature = co_await td::actor::ask(bus.keyring, &keyring::Keyring::sign_message, bus.local_id.short_id,
                                                std::move(signature_data));
       state.signatures.push_back({bus.local_id.short_id.bits256_value(), signature.clone()});
@@ -136,7 +139,7 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
       send_message({}, create_tl_object<ton_api::nullConsensus_signature>(candidate->id.slot, std::move(signature)));
 
       ++next_slot_to_validate_;
-      parent_for_validation_ = candidate;
+      parent_for_validation_ = id;
     }
 
     co_return td::Unit{};
@@ -151,11 +154,10 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
 
       auto& state = it->second;
 
-      owning_bus().publish<ConsensusBus::BlockFinalized>(*state.candidate, parent_for_finalization_,
-                                                         create_signature_set(std::move(state.signatures)));
+      owning_bus().publish<ConsensusBus::SlotFinalized>(*state.candidate,
+                                                        create_signature_set(std::move(state.signatures)));
 
       ++next_slot_to_finalize_;
-      parent_for_finalization_ = state.candidate;
       block_states_.erase(it);
     }
   }
@@ -169,10 +171,9 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
   std::map<td::uint32, SlotState> block_states_;
 
   bool try_validate_blocks_running_ = false;
-  ParentRef parent_for_validation_;
+  ParentId parent_for_validation_;
   td::uint32 next_slot_to_validate_ = 0;
 
-  ParentRef parent_for_finalization_;
   td::uint32 next_slot_to_finalize_ = 0;
 };
 
