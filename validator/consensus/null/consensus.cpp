@@ -94,7 +94,13 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
   }
 
   void handle_message(PeerValidatorId source, ton_api::consensus_null_signature& signature) {
-    SlotState& state = block_states_[signature.slot_];
+    auto slot = static_cast<td::uint32>(signature.slot_);
+
+    if (next_slot_to_finalize_ > slot) {
+      return;
+    }
+
+    SlotState& state = block_states_[slot];
     state.add_signature(owning_bus()->validator_set[source.value()], std::move(signature.signature_));
     try_finalize_blocks();
   }
