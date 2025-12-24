@@ -4,7 +4,6 @@
 #include "keys/keys.hpp"
 #include "overlay/overlays.h"
 #include "ton/ton-types.h"
-#include "validator/collation-manager.hpp"
 
 #include "consensus-types.h"
 #include "manager-facade.h"
@@ -93,21 +92,22 @@ class ConsensusBus : public runtime::Bus {
 
   ShardIdFull shard;
   td::actor::ActorId<ManagerFacade> manager;
-  td::actor::ActorId<ValidatorManager> real_manager_for_external_code;
   td::actor::ActorId<keyring::Keyring> keyring;
   td::Ref<ValidatorManagerOptions> validator_opts;
 
   std::vector<PeerValidator> validator_set;
   PeerValidator local_id;
-  td::Ref<ValidatorSet> validator_set_for_external_code;
 
-  td::actor::ActorId<CollationManager> collation_manager;
   NewConsensusConfig config;
   BlockIdExt min_masterchain_block_id;
 
   td::actor::ActorId<overlay::Overlays> overlays;
 
   std::vector<BlockIdExt> first_block_parents;
+};
+
+struct BlockAccepter {
+  static void register_in(runtime::Runtime&);
 };
 
 struct BlockProducer {

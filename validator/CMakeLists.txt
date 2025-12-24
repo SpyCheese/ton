@@ -109,6 +109,7 @@ set(VALIDATOR_SOURCE
   manager.cpp
 
   consensus/null/consensus.cpp
+  consensus/block-accepter.cpp
   consensus/block-producer.cpp
   consensus/block-validator.cpp
   consensus/bridge.cpp

@@ -137,9 +137,9 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
 
         // FIXME: What to do if collate_block suddenly fails?
         auto block_candidate = co_await td::actor::ask(
-            bus.collation_manager, &CollationManager::collate_block, bus.shard, bus.min_masterchain_block_id,
-            parent.parent_blocks(), Ed25519_PublicKey{bus.local_id.key.ed25519_value().raw()}, BlockCandidatePriority{},
-            bus.validator_set_for_external_code, max_answer_size_, cancellation_source_.get_cancellation_token());
+            bus.manager, &ManagerFacade::collate_block, bus.shard, bus.min_masterchain_block_id, parent.parent_blocks(),
+            Ed25519_PublicKey{bus.local_id.key.ed25519_value().raw()}, BlockCandidatePriority{}, max_answer_size_,
+            cancellation_source_.get_cancellation_token());
 
         block = std::move(block_candidate.candidate);
         if (!block_candidate.collator_node_id.is_zero()) {

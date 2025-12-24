@@ -29,13 +29,12 @@ class BlockValidatorImpl : public runtime::SpawnsWith<ConsensusBus>, public runt
         .shard = bus.shard,
         .min_masterchain_block_id = bus.min_masterchain_block_id,
         .prev = bus.convert_id_to_blocks(event->candidate->parent_id),
-        .validator_set = bus.validator_set_for_external_code,
         .local_validator_id = bus.local_id.short_id,
     };
-    auto [awaiter, promise] = td::actor::StartedTask<ValidateCandidateResult>::make_bridge();
-    run_validate_query(candidate.clone(), validate_params, bus.real_manager_for_external_code, td::Timestamp::in(60),
-                       std::move(promise));
-    auto maybe_candidate_reject = co_await std::move(awaiter);
+
+    auto maybe_candidate_reject =
+        co_await td::actor::ask(bus.manager, &ManagerFacade::validate_block_candidate, candidate.clone(),
+                                std::move(validate_params), td::Timestamp::in(60.0));
 
     if (maybe_candidate_reject.has<CandidateReject>()) {
       auto error = td::Status::Error(0, maybe_candidate_reject.get<CandidateReject>().reason);

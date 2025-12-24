@@ -12,9 +12,25 @@ struct SlotState {
   std::optional<CandidateRef> candidate;
 
   std::vector<BlockSignature> signatures;
+  ValidatorWeight total_signed_weight = 0;
+  std::vector<bool> signed_by;
 
-  bool is_ready(size_t validator_count) {
-    return candidate.has_value() && signatures.size() == validator_count;
+  bool validated = false, finalized = false;
+
+  void add_signature(const PeerValidator& validator, td::BufferSlice signature) {
+    if (finalized) {
+      return;
+    }
+    auto idx = (size_t)validator.idx.value();
+    if (idx >= signed_by.size()) {
+      signed_by.resize(idx + 1);
+    }
+    if (signed_by[idx]) {
+      return;
+    }
+    signed_by[idx] = true;
+    signatures.emplace_back(validator.short_id.bits256_value(), std::move(signature));
+    total_signed_weight += validator.weight;
   }
 };
 
@@ -26,6 +42,11 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
     auto& bus = *owning_bus();
 
     validator_count_ = bus.validator_set.size();
+    ValidatorWeight total_weight = 0;
+    for (const auto& validator : bus.validator_set) {
+      total_weight += validator.weight;
+    }
+    weight_threshold_ = (total_weight * 2) / 3 + 1;
 
     leader_ = bus.validator_set[0].idx;
     is_leader_ = bus.local_id.idx == leader_;
@@ -73,10 +94,8 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
   }
 
   void handle_message(PeerValidatorId source, ton_api::consensus_null_signature& signature) {
-    auto& state = block_states_[signature.slot_];
-
-    auto node_id = owning_bus()->validator_set[source.value()].short_id;
-    state.signatures.push_back({node_id.bits256_value(), std::move(signature.signature_)});
+    SlotState& state = block_states_[signature.slot_];
+    state.add_signature(owning_bus()->validator_set[source.value()], std::move(signature.signature_));
     try_finalize_blocks();
   }
 
@@ -88,9 +107,9 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
   }
 
   td::actor::Task<> on_new_candidate(RawCandidateRef candidate) {
-    auto& slot = block_states_[candidate->id.slot];
-    CHECK(!slot.raw_candidate.has_value());
-    slot.raw_candidate = candidate;
+    SlotState& state = block_states_[candidate->id.slot];
+    CHECK(!state.raw_candidate.has_value());
+    state.raw_candidate = candidate;
 
     co_await try_validate_blocks();
     try_finalize_blocks();
@@ -114,8 +133,8 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
       if (it == block_states_.end()) {
         break;
       }
-
-      auto& state = it->second;
+      SlotState& state = it->second;
+      CHECK(!state.validated);
       if (!state.raw_candidate.has_value()) {
         break;
       }
@@ -123,8 +142,8 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
 
       CHECK(raw_candidate->parent_id == parent_for_validation_);
 
-      state.candidate = td::make_ref<Candidate>(parent_for_validation_, raw_candidate);
-      const auto& candidate = *state.candidate;
+      CandidateRef candidate = td::make_ref<Candidate>(parent_for_validation_, raw_candidate);
+      state.candidate = candidate;
 
       auto validation_result = co_await owning_bus().publish<ConsensusBus::ValidationRequest>(candidate).wrap();
       validation_result.ensure();
@@ -133,12 +152,17 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
                                                                              candidate->id.block.file_hash);
       auto signature = co_await td::actor::ask(bus.keyring, &keyring::Keyring::sign_message, bus.local_id.short_id,
                                                std::move(signature_data));
-      state.signatures.push_back({bus.local_id.short_id.bits256_value(), signature.clone()});
+
+      state.add_signature(bus.local_id, signature.clone());
+      state.validated = true;
 
       send_message({}, create_tl_object<ton_api::consensus_null_signature>(candidate->id.slot, std::move(signature)));
 
       ++next_slot_to_validate_;
       parent_for_validation_ = raw_candidate->id;
+      if (state.finalized) {
+        block_states_.erase(it);
+      }
     }
 
     co_return td::Unit{};
@@ -147,32 +171,36 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
   void try_finalize_blocks() {
     while (true) {
       auto it = block_states_.find(next_slot_to_finalize_);
-      if (it == block_states_.end() || !it->second.is_ready(validator_count_)) {
+      if (it == block_states_.end()) {
         break;
       }
-
-      auto& state = it->second;
-
+      SlotState& state = it->second;
+      CHECK(!state.finalized);
+      if (state.total_signed_weight < weight_threshold_ || !state.candidate.has_value()) {
+        break;
+      }
       owning_bus().publish<ConsensusBus::SlotFinalized>(*state.candidate,
                                                         create_signature_set(std::move(state.signatures)));
-
       ++next_slot_to_finalize_;
-      block_states_.erase(it);
+      state.finalized = true;
+      if (state.validated) {
+        block_states_.erase(it);
+      }
     }
   }
 
   std::set<PeerValidatorId> seen_handshakes_;
 
-  size_t validator_count_;
+  size_t validator_count_ = 0;
+  ValidatorWeight weight_threshold_ = 0;
   PeerValidatorId leader_;
-  bool is_leader_;
+  bool is_leader_ = false;
 
   std::map<td::uint32, SlotState> block_states_;
 
   bool try_validate_blocks_running_ = false;
   ParentId parent_for_validation_;
   td::uint32 next_slot_to_validate_ = 0;
-
   td::uint32 next_slot_to_finalize_ = 0;
 };
 

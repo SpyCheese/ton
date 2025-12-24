@@ -1,27 +1,26 @@
 #pragma once
 
-#include "interfaces/validator-manager.h"
-#include "td/actor/actor.h"
+#include "validator/fabric.h"
 
 namespace ton::validator {
 
 class ManagerFacade : public td::actor::Actor {
  public:
-  ManagerFacade(td::actor::ActorId<ValidatorManager> manager) : manager_(manager) {
-  }
+  virtual td::actor::Task<GeneratedCandidate> collate_block(ShardIdFull shard, BlockIdExt min_masterchain_block_id,
+                                                            std::vector<BlockIdExt> prev, Ed25519_PublicKey creator,
+                                                            BlockCandidatePriority priority, td::uint64 max_answer_size,
+                                                            td::CancellationToken cancellation_token) = 0;
 
-  void set_block_candidate(BlockIdExt id, BlockCandidate candidate, CatchainSeqno cc_seqno,
-                           td::uint32 validator_set_hash, td::Promise<td::Unit> promise) {
-    td::actor::send_closure(manager_, &ValidatorManager::set_block_candidate, id, std::move(candidate), cc_seqno,
-                            validator_set_hash, std::move(promise));
-  }
+  virtual td::actor::Task<ValidateCandidateResult> validate_block_candidate(BlockCandidate candidate,
+                                                                            ValidateParams params,
+                                                                            td::Timestamp timeout) = 0;
 
-  void log_validator_session_stats(validatorsession::ValidatorSessionStats stats) {
-    td::actor::send_closure(manager_, &ValidatorManager::log_validator_session_stats, std::move(stats));
-  }
+  virtual td::actor::Task<> accept_block(BlockIdExt id, td::Ref<BlockData> data, std::vector<BlockIdExt> prev,
+                                         td::Ref<BlockSignatureSet> signatures, int send_broadcast_mode,
+                                         bool apply) = 0;
 
- private:
-  td::actor::ActorId<ValidatorManager> manager_;
+  virtual void log_validator_session_stats(validatorsession::ValidatorSessionStats stats) {
+  }
 };
 
 }  // namespace ton::validator

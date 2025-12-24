@@ -10,55 +10,48 @@ namespace ton::validator {
 
 namespace {
 
-class ConsensusBridgeBus : public NullConsensusBus {
+class ManagerFacadeImpl : public ManagerFacade {
  public:
-  using Parent = NullConsensusBus;
-  using Events = td::TypeList<>;
-
-  ConsensusBridgeBus() = default;
-};
-
-class BlockAccepter : public runtime::SpawnsWith<ConsensusBridgeBus>, public runtime::ConnectsTo<ConsensusBridgeBus> {
- public:
-  TON_RUNTIME_DEFINE_EVENT_HANDLER();
-
-  template <>
-  void handle(runtime::BusHandle<ConsensusBridgeBus>, std::shared_ptr<const ConsensusBus::StopRequested>) {
-    stop();
+  ManagerFacadeImpl(td::actor::ActorId<ValidatorManager> manager,
+                    td::actor::ActorId<CollationManager> collation_manager, td::Ref<ValidatorSet> validator_set)
+      : manager_(manager), collation_manager_(collation_manager), validator_set_(std::move(validator_set)) {
   }
 
-  template <>
-  void handle(runtime::BusHandle<ConsensusBridgeBus>, std::shared_ptr<const ConsensusBus::SlotFinalized> last_slot) {
-    finalize_burst.push_back(last_slot);
-    if (!last_slot->finalization_cert) {
-      return;
-    }
+  td::actor::Task<GeneratedCandidate> collate_block(ShardIdFull shard, BlockIdExt min_masterchain_block_id,
+                                                    std::vector<BlockIdExt> prev, Ed25519_PublicKey creator,
+                                                    BlockCandidatePriority priority, td::uint64 max_answer_size,
+                                                    td::CancellationToken cancellation_token) override {
+    co_return co_await td::actor::ask(collation_manager_, &CollationManager::collate_block, shard,
+                                      min_masterchain_block_id, std::move(prev), creator, priority, validator_set_,
+                                      max_answer_size, cancellation_token);
+  }
 
-    for (const auto& slot : finalize_burst) {
-      auto& candidate = slot->candidate;
-      if (auto* block = std::get_if<BlockCandidate>(&candidate->block)) {
-        td::Ref<BlockSignatureSet> signatures = {};
-        if (candidate->id.block == last_slot->candidate->id.block) {
-          signatures = *last_slot->finalization_cert;
-        }
-        CHECK(candidate->id.block == block->id);
-        auto block_data = create_block(block->id, block->data.clone()).move_as_ok();
-        auto block_parents = owning_bus()->convert_id_to_blocks(candidate->parent_id);
+  td::actor::Task<ValidateCandidateResult> validate_block_candidate(BlockCandidate candidate, ValidateParams params,
+                                                                    td::Timestamp timeout) override {
+    params.validator_set = validator_set_;
+    auto [task, promise] = td::actor::StartedTask<ValidateCandidateResult>::make_bridge();
+    run_validate_query(std::move(candidate), std::move(params), manager_, timeout, std::move(promise));
+    co_return co_await std::move(task);
+  }
 
-        run_accept_block_query(
-            block->id, block_data, block_parents, owning_bus()->validator_set_for_external_code, signatures,
-            fullnode::FullNode::broadcast_mode_public, true, owning_bus()->real_manager_for_external_code,
-            td::lambda_promise([](td::Result<td::Unit> result) {
-              LOG_CHECK(!result.is_error()) << "Failed to accept finalized block " << result.move_as_error();
-            }));
-      }
-    }
+  td::actor::Task<> accept_block(BlockIdExt id, td::Ref<BlockData> data, std::vector<BlockIdExt> prev,
+                                 td::Ref<BlockSignatureSet> signatures, int send_broadcast_mode, bool apply) override {
+    auto [task, promise] = td::actor::StartedTask<>::make_bridge();
+    run_accept_block_query(id, std::move(data), std::move(prev), validator_set_, std::move(signatures),
+                           send_broadcast_mode, apply, manager_, std::move(promise));
+    auto result = co_await std::move(task).wrap();
+    LOG_CHECK(!result.is_error()) << "Failed to accept finalized block " << result.move_as_error();
+    co_return td::Unit{};
+  }
 
-    finalize_burst.clear();
+  void log_validator_session_stats(validatorsession::ValidatorSessionStats stats) override {
+    td::actor::send_closure(manager_, &ValidatorManager::log_validator_session_stats, std::move(stats));
   }
 
  private:
-  std::vector<std::shared_ptr<const ConsensusBus::SlotFinalized>> finalize_burst;
+  td::actor::ActorId<ValidatorManager> manager_;
+  td::actor::ActorId<CollationManager> collation_manager_;
+  td::Ref<ValidatorSet> validator_set_;
 };
 
 struct BridgeCreationParams {
@@ -133,24 +126,23 @@ class BridgeImpl final : public IValidatorGroup {
     }
 
     runtime::Runtime runtime;
-    runtime.register_actor<BlockAccepter>("BlockAccepter");
+    BlockAccepter::register_in(runtime);
     BlockProducer::register_in(runtime);
     BlockValidator::register_in(runtime);
     PrivateOverlay::register_in(runtime);
     NullConsensus::register_in(runtime);
     // StatsCollector::register_in(runtime);
 
-    manager_facade_ = td::actor::create_actor<ManagerFacade>(params_.name + ".ManagerFacade", params_.manager);
+    manager_facade_ = td::actor::create_actor<ManagerFacadeImpl>(params_.name + ".ManagerFacade", params_.manager,
+                                                                 params_.collation_manager, params_.validator_set);
 
-    auto bus = std::make_shared<ConsensusBridgeBus>();
+    auto bus = std::make_shared<NullConsensusBus>();
 
     bus->shard = params_.shard;
     bus->manager = manager_facade_.get();
-    bus->real_manager_for_external_code = params_.manager;
     bus->keyring = params_.keyring;
     bus->validator_opts = params_.validator_opts;
 
-    bus->validator_set_for_external_code = params_.validator_set;
     bool found = false;
     int idx = 0;
     for (const auto& el : params_.validator_set->export_vector()) {
@@ -174,7 +166,6 @@ class BridgeImpl final : public IValidatorGroup {
     }
     CHECK(found);
 
-    bus->collation_manager = params_.collation_manager;
     bus->config = std::move(params_.config);
     bus->min_masterchain_block_id = params_.min_masterchain_block_id;
 
@@ -195,7 +186,7 @@ class BridgeImpl final : public IValidatorGroup {
   BridgeCreationParams params_;
   td::actor::ActorOwn<ManagerFacade> manager_facade_;
 
-  runtime::BusHandle<ConsensusBridgeBus> bus_;
+  runtime::BusHandle<NullConsensusBus> bus_;
 };
 
 }  // namespace
