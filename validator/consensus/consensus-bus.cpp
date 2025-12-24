@@ -25,18 +25,13 @@ std::string peer_validator_id_to_string(PeerValidatorId id) {
   return PSTRING() << "validator " << id.value();
 }
 
-std::string candidate_to_string(const RawCandidateRef& candidate) {
-  return PSTRING() << "RawCandidate{id=" << candidate->id << ", parent=" << parent_id_to_string(candidate->parent_id)
-                   << ", leader=" << peer_validator_id_to_string(candidate->leader)
-                   << ", block=" << (candidate->block ? block_candidate_to_string(*candidate->block) : "empty block")
-                   << "}";
-}
+std::string candidate_to_string(const td::OneOf<RawCandidateRef, CandidateRef> auto& candidate) {
+  auto block_fn = [](const BlockCandidate& block) { return block_candidate_to_string(block); };
+  auto empty_fn = [](const BlockIdExt& id) { return PSTRING() << id.to_str() << " (referenced)"; };
 
-std::string candidate_to_string(const CandidateRef& candidate) {
   return PSTRING() << "Candidate{id=" << candidate->id << ", parent=" << parent_id_to_string(candidate->parent_id)
                    << ", leader=" << peer_validator_id_to_string(candidate->leader)
-                   << ", block=" << (candidate->block ? block_candidate_to_string(*candidate->block) : "empty block")
-                   << "}";
+                   << ", block=" << std::visit(td::overloaded(block_fn, empty_fn), candidate->block) << "}";
 }
 
 std::string finalization_cert_to_string(const std::optional<td::Ref<BlockSignatureSet>>& cert) {

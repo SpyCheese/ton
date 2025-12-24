@@ -33,9 +33,9 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
     if (bus.validator_set.size() == 1) {
       try_start_generation();
     } else if (is_leader_) {
-      send_message({}, create_tl_object<ton_api::nullConsensus_handshake>());
+      send_message({}, create_tl_object<ton_api::consensus_null_handshake>());
     } else {
-      send_message(leader_, create_tl_object<ton_api::nullConsensus_handshake>());
+      send_message(leader_, create_tl_object<ton_api::consensus_null_handshake>());
     }
   }
 
@@ -52,7 +52,7 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
   template <>
   void handle(runtime::BusHandle<NullConsensusBus>,
               std::shared_ptr<const ConsensusBus::IncomingProtocolMessage> event) {
-    auto message = fetch_tl_object<ton_api::nullConsensus_Message>(event->message.data, true).move_as_ok();
+    auto message = fetch_tl_object<ton_api::consensus_null_Message>(event->message.data, true).move_as_ok();
 
     ton_api::downcast_call(*message, [&](auto& message) { handle_message(event->source, message); });
   }
@@ -62,17 +62,17 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
     owning_bus().publish<ConsensusBus::OutgoingProtocolMessage>(recipient, std::move(message));
   }
 
-  void handle_message(PeerValidatorId source, ton_api::nullConsensus_handshake& handshake) {
+  void handle_message(PeerValidatorId source, ton_api::consensus_null_handshake& handshake) {
     if (is_leader_) {
       if (seen_handshakes_.insert(source).second) {
         try_start_generation();
       }
     } else {
-      send_message(leader_, create_tl_object<ton_api::nullConsensus_handshake>());
+      send_message(leader_, create_tl_object<ton_api::consensus_null_handshake>());
     }
   }
 
-  void handle_message(PeerValidatorId source, ton_api::nullConsensus_signature& signature) {
+  void handle_message(PeerValidatorId source, ton_api::consensus_null_signature& signature) {
     auto& state = block_states_[signature.slot_];
 
     auto node_id = owning_bus()->validator_set[source.value()].short_id;
@@ -123,8 +123,7 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
 
       CHECK(raw_candidate->parent_id == parent_for_validation_);
 
-      auto id = raw_candidate->resolve_id(parent_for_validation_);
-      state.candidate = td::make_ref<Candidate>(id, parent_for_validation_, raw_candidate);
+      state.candidate = td::make_ref<Candidate>(parent_for_validation_, raw_candidate);
       const auto& candidate = *state.candidate;
 
       auto validation_result = co_await owning_bus().publish<ConsensusBus::ValidationRequest>(candidate).wrap();
@@ -136,10 +135,10 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
                                                std::move(signature_data));
       state.signatures.push_back({bus.local_id.short_id.bits256_value(), signature.clone()});
 
-      send_message({}, create_tl_object<ton_api::nullConsensus_signature>(candidate->id.slot, std::move(signature)));
+      send_message({}, create_tl_object<ton_api::consensus_null_signature>(candidate->id.slot, std::move(signature)));
 
       ++next_slot_to_validate_;
-      parent_for_validation_ = id;
+      parent_for_validation_ = raw_candidate->id;
     }
 
     co_return td::Unit{};

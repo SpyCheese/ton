@@ -20,9 +20,10 @@ class BlockValidatorImpl : public runtime::SpawnsWith<ConsensusBus>, public runt
   td::actor::Task<> handle(runtime::BusHandle<ConsensusBus>, std::shared_ptr<ConsensusBus::ValidationRequest> event) {
     auto& bus = *owning_bus();
 
-    if (!event->candidate->block) {
+    if (std::holds_alternative<BlockIdExt>(event->candidate->block)) {
       co_return td::Unit{};
     }
+    const auto& candidate = std::get<BlockCandidate>(event->candidate->block);
 
     ValidateParams validate_params{
         .shard = bus.shard,
@@ -32,8 +33,8 @@ class BlockValidatorImpl : public runtime::SpawnsWith<ConsensusBus>, public runt
         .local_validator_id = bus.local_id.short_id,
     };
     auto [awaiter, promise] = td::actor::StartedTask<ValidateCandidateResult>::make_bridge();
-    run_validate_query(event->candidate->block->clone(), validate_params, bus.real_manager_for_external_code,
-                       td::Timestamp::in(60), std::move(promise));
+    run_validate_query(candidate.clone(), validate_params, bus.real_manager_for_external_code, td::Timestamp::in(60),
+                       std::move(promise));
     auto maybe_candidate_reject = co_await std::move(awaiter);
 
     if (maybe_candidate_reject.has<CandidateReject>()) {

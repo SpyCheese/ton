@@ -1160,20 +1160,23 @@ storage.daemon.removeStorageProvider = storage.daemon.Success;
 proxyLiteserver.config port:int id:PublicKey = proxyLiteserver.Config;
 engineConsoleClient.config address:string server_public_key:PublicKey client_private_key:PrivateKey = engineConsoleClient.Config;
 
+consensus.overlayId session_id:int256 nodes:(vector int256) = consensus.OverlayId;
 consensus.dataToSign session_id:int256 data:bytes = consensus.DataToSign;
 
-consensus.overlayId session_id:int256 nodes:(vector int256) = consensus.OverlayId;
-consensus.ordinaryCandidateParent slot:int hash:int256 = consensus.CandidateParent;
-consensus.noCandidateParents = consensus.CandidateParent;
-consensus.candidate slot:int candidate:bytes parent:consensus.CandidateParent signature:bytes = consensus.Candidate;
-consensus.candidateIdData slot:int blockId:tonNode.BlockIdExt collated_file_hash:int256 parent:consensus.CandidateParent = consensus.CandidateIdData;
+consensus.candidateId slot:int hash:int256 = consensus.CandidateId;
+consensus.candidateParent id:consensus.CandidateId = consensus.CandidateParent;
+consensus.candidateWithoutParents = consensus.CandidateParent;
 
-nullConsensus.signature slot:int signature:bytes = nullConsensus.Message;
-nullConsensus.handshake = nullConsensus.Message;
+consensus.candidateHashDataOrdinary block:tonNode.blockIdExt collated_file_hash:int256 parent:consensus.CandidateParent = consensus.CandidateHashData;
+consensus.candidateHashDataEmpty block:tonNode.blockIdExt parent:consensus.candidateId = consensus.CandidateHashData;
 
-simplexConsensus.notarizeVote slot:int block:tonNode.blockIdExt = simplexConsensus.UnsignedVote;
-simplexConsensus.finalizeVote slot:int block:tonNode.blockIdExt signature_for_mc:bytes = simplexConsensus.UnsignedVote;
-simplexConsensus.skipVote slotBegin:int slotEnd:int = simplexConsensus.UnsignedVote;
-simplexConsensus.notarizeFallbackVote slot:int block:tonNode.blockIdExt = simplexConsensus.UnsignedVote;
-simplexConsensus.skipFallbackVote slotBegin:int slotEnd:int = simplexConsensus.UnsignedVote;
-simplexConsensus.vote unsignedVote:simplexConsensus.UnsignedVote signature:bytes = simplexConsensus.Vote;
+consensus.block slot:int parent:consensus.CandidateParent candidate:bytes signature:bytes = consensus.CandidateData;
+consensus.empty slot:int parent:consensus.CandidateId block:tonNode.blockIdExt signature:bytes = consensus.CandidateData;
+
+consensus.null.signature slot:int signature:bytes = consensus.null.Message;
+consensus.null.handshake = consensus.null.Message;
+
+consensus.simplex.notarizeVote id:consensus.CandidateId = consensus.simplex.UnsignedVote;
+consensus.simplex.finalizeVote id:consensus.CandidateId = consensus.simplex.UnsignedVote;
+consensus.simplex.skipVote slot:int = consensus.simplex.UnsignedVote;
+consensus.simplex.vote unsignedVote:consensus.simplex.UnsignedVote signature:bytes = consensus.simplex.Vote;

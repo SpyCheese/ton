@@ -1,5 +1,7 @@
 #pragma once
 
+#include <variant>
+
 #include "adnl/adnl-node-id.hpp"
 #include "keys/keys.hpp"
 #include "ton/ton-types.h"
@@ -58,9 +60,9 @@ struct ProtocolMessage {
 };
 
 struct RawCandidateId {
-  static RawCandidateId create(td::uint32 slot, const std::optional<BlockCandidate>& candidate,
-                               std::optional<RawCandidateId> parent);
+  static RawCandidateId from_tl(const tl_object_ptr<ton_api::consensus_candidateId>& tl_parent);
 
+  tl_object_ptr<ton_api::consensus_candidateId> to_tl() const;
   bool operator==(const RawCandidateId& other) const = default;
 
   td::uint32 slot{0};
@@ -74,9 +76,15 @@ inline td::StringBuilder& operator<<(td::StringBuilder& stream, const RawCandida
 using RawParentId = std::optional<RawCandidateId>;
 
 struct CandidateId {
+  static CandidateId create(td::uint32 slot, const std::variant<BlockIdExt, BlockCandidate>& block, RawParentId parent);
+
   CandidateId() = default;
 
   CandidateId(RawCandidateId id, BlockIdExt block) : slot(id.slot), hash(id.hash), block(block) {
+  }
+
+  RawCandidateId as_raw() {
+    return RawCandidateId{slot, hash};
   }
 
   operator RawCandidateId() const {
@@ -98,57 +106,46 @@ struct RawCandidate : td::CntObject {
   static td::Result<td::Ref<RawCandidate>> deserialize(td::Slice data, const PeerValidator& leader,
                                                        const ConsensusBus& bus);
 
-  RawCandidate(RawCandidateId id, RawParentId parent_id, PeerValidatorId leader, std::optional<BlockCandidate> block,
-               td::BufferSlice signature)
+  RawCandidate(CandidateId id, RawParentId parent_id, PeerValidatorId leader,
+               std::variant<BlockIdExt, BlockCandidate> block, td::BufferSlice signature)
       : id(id)
       , parent_id(std::move(parent_id))
       , leader(leader)
       , block(std::move(block))
       , signature(std::move(signature)) {
-    CHECK(this->block.has_value() || this->parent_id.has_value());
-  }
-
-  CandidateId resolve_id(ParentId parent) const {
-    if (block.has_value()) {
-      return CandidateId{id, block->id};
-    } else {
-      CHECK(parent.has_value());
-      return CandidateId{id, parent->block};
-    }
+    CHECK(std::holds_alternative<BlockCandidate>(this->block) || this->parent_id.has_value());
   }
 
   td::BufferSlice serialize() const;
 
-  RawCandidateId id;
+  CandidateId id;
   RawParentId parent_id;
   PeerValidatorId leader;
-  std::optional<BlockCandidate> block;
+  std::variant<BlockIdExt, BlockCandidate> block;
   td::BufferSlice signature;
 };
 
 using RawCandidateRef = td::Ref<RawCandidate>;
 
 struct Candidate : td::CntObject {
-  Candidate(CandidateId id, ParentId parent_id, RawCandidateRef raw)
-      : id(id)
+  Candidate(ParentId parent_id, RawCandidateRef raw)
+      : id(raw->id)
       , parent_id(parent_id)
       , leader(raw->leader)
       , block(raw->block)
       , signature(raw->signature)
       , raw(std::move(raw)) {
-    CHECK(this->raw->id == id);
     CHECK(parent_id == this->raw->parent_id);
-    if (block.has_value()) {
-      CHECK(block->id == id.block);
-    } else {
-      CHECK(parent_id->block == id.block);
+
+    if (auto* id = std::get_if<BlockIdExt>(&block)) {
+      CHECK(parent_id->block == *id);
     }
   }
 
   CandidateId id;
   ParentId parent_id;
   PeerValidatorId leader;
-  const std::optional<BlockCandidate>& block;
+  const std::variant<BlockIdExt, BlockCandidate>& block;
   const td::BufferSlice& signature;
 
   RawCandidateRef raw;

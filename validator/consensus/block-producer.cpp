@@ -119,8 +119,7 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
 
       BlockSeqno new_seqno = parent.next_seqno();
 
-      RawCandidateId raw_candidate_id;
-      std::optional<BlockCandidate> block;
+      std::variant<BlockIdExt, BlockCandidate> block;
       std::optional<adnl::AdnlNodeIdShort> collator;
 
       if (should_generate_empty_block(new_seqno)) {
@@ -129,7 +128,7 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
                      << ", last_mc_finalized_seqno_=" << last_mc_finalized_seqno_;
         CHECK(parent.id().has_value());  // first generated block in an epoch cannot be empty
 
-        raw_candidate_id = RawCandidateId::create(slot, std::nullopt, parent.id());
+        block = parent.id()->block;
       } else {
         // Before doing anything substantial, check the leader window.
         if (current_leader_window_ != window) {
@@ -146,28 +145,26 @@ class BlockProducerImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
         if (!block_candidate.collator_node_id.is_zero()) {
           collator = adnl::AdnlNodeIdShort{block_candidate.collator_node_id};
         }
-
-        raw_candidate_id = RawCandidateId::create(slot, block, parent.id());
       }
 
-      auto candidate_id_to_sign = create_serialize_tl_object<ton_api::consensus_ordinaryCandidateParent>(
-          raw_candidate_id.slot, raw_candidate_id.hash);
+      auto id = CandidateId::create(slot, block, parent.id());
+      auto id_to_sign = serialize_tl_object(id.as_raw().to_tl(), true);
       auto data_to_sign =
-          create_serialize_tl_object<ton_api::consensus_dataToSign>(bus.session_id, std::move(candidate_id_to_sign));
+          create_serialize_tl_object<ton_api::consensus_dataToSign>(bus.session_id, std::move(id_to_sign));
       auto signature = co_await td::actor::ask(bus.keyring, &keyring::Keyring::sign_message, bus.local_id.short_id,
                                                std::move(data_to_sign));
 
-      auto raw_candidate = td::make_ref<RawCandidate>(raw_candidate_id, parent.id(), bus.local_id.idx, std::move(block),
-                                                      std::move(signature));
+      auto candidate =
+          td::make_ref<RawCandidate>(id, parent.id(), bus.local_id.idx, std::move(block), std::move(signature));
 
       if (current_leader_window_ != window) {
         break;
       }
-      owning_bus().publish<ConsensusBus::CandidateGenerated>(raw_candidate, collator);
-      owning_bus().publish<ConsensusBus::CandidateReceived>(raw_candidate);
+      owning_bus().publish<ConsensusBus::CandidateGenerated>(candidate, collator);
+      owning_bus().publish<ConsensusBus::CandidateReceived>(candidate);
 
       ++slot;
-      parent = raw_candidate->resolve_id(parent.id());
+      parent = id;
       target_time = td::Timestamp::in(bus.config.target_rate_ms / 1000., target_time);
     }
 
