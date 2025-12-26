@@ -100,8 +100,8 @@ struct ConflictingVotesMisbehaviorProof {
   SerializedVote vote1;
   SerializedVote vote2;
 
-  static ConflictingVotesMisbehaviorProof create(td::IsSpecializationOf<Signed> const auto &vote1,
-                                                 td::IsSpecializationOf<Signed> const auto &vote2) {
+  static ConflictingVotesMisbehaviorProof create(const td::IsSpecializationOf<Signed> auto &vote1,
+                                                 const td::IsSpecializationOf<Signed> auto &vote2) {
     return {vote1.to_tl(), vote2.to_tl()};
   }
 };

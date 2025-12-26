@@ -34,11 +34,11 @@ std::string candidate_to_string(const td::OneOf<RawCandidateRef, CandidateRef> a
                    << ", block=" << std::visit(td::overloaded(block_fn, empty_fn), candidate->block) << "}";
 }
 
-std::string finalization_cert_to_string(const std::optional<td::Ref<BlockSignatureSet>>& cert) {
+std::string finalization_cert_to_string(const std::optional<td::Ref<block::BlockSignatureSet>>& cert) {
   if (!cert) {
     return "finalized by ancestor";
   }
-  return PSTRING() << "<BlockSignatureSet of size " << (*cert)->size() << ">";
+  return PSTRING() << "<BlockSignatureSet of size " << (*cert)->get_size() << ">";
 }
 
 std::string message_to_string(td::Slice message) {

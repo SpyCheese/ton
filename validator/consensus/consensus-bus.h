@@ -17,7 +17,7 @@ class ConsensusBus : public runtime::Bus {
 
   struct SlotFinalized {
     CandidateRef candidate;
-    std::optional<td::Ref<BlockSignatureSet>> finalization_cert;
+    std::optional<td::Ref<block::BlockSignatureSet>> finalization_cert;
 
     std::string contents_to_string() const;
   };
@@ -96,6 +96,8 @@ class ConsensusBus : public runtime::Bus {
   td::Ref<ValidatorManagerOptions> validator_opts;
 
   std::vector<PeerValidator> validator_set;
+  ton::CatchainSeqno cc_seqno;
+  td::uint32 validator_set_hash;
   PeerValidator local_id;
 
   NewConsensusConfig config;

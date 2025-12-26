@@ -185,8 +185,10 @@ class NullConsensusImpl : public runtime::SpawnsWith<NullConsensusBus>, public r
       if (state.total_signed_weight < weight_threshold_ || !state.candidate.has_value()) {
         break;
       }
-      owning_bus().publish<ConsensusBus::SlotFinalized>(*state.candidate,
-                                                        create_signature_set(std::move(state.signatures)));
+      auto& bus = owning_bus();
+      bus.publish<ConsensusBus::SlotFinalized>(
+          *state.candidate, block::BlockSignatureSet::create_ordinary(std::move(state.signatures), bus->cc_seqno,
+                                                                      bus->validator_set_hash));
       ++next_slot_to_finalize_;
       state.finalized = true;
       if (state.validated) {

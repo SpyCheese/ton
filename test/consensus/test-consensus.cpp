@@ -17,12 +17,12 @@
 #include "adnl/adnl-test-loopback-implementation.h"
 #include "adnl/utils.hpp"
 #include "block/block.h"
+#include "block/validator-set.h"
 #include "catchain/catchain.h"
 #include "common/errorlog.h"
 #include "consensus/consensus-bus.h"
 #include "consensus/null/consensus-bus.h"
 #include "consensus/runtime.h"
-#include "impl/validator-set.hpp"
 #include "overlay/overlays.h"
 #include "td/actor/coro_utils.h"
 #include "td/utils/OptionParser.h"
@@ -186,7 +186,8 @@ class TestManagerFacade : public ManagerFacade {
   }
 
   td::actor::Task<> accept_block(BlockIdExt id, td::Ref<BlockData> data, std::vector<BlockIdExt> prev,
-                                 td::Ref<BlockSignatureSet> signatures, int send_broadcast_mode, bool apply) override;
+                                 td::Ref<block::BlockSignatureSet> signatures, int send_broadcast_mode,
+                                 bool apply) override;
 
  private:
   size_t node_idx_;
@@ -206,9 +207,9 @@ class TestConsensus : public td::actor::Actor {
   }
 
   td::actor::Task<> on_block_accepted(size_t node_idx, size_t instance_idx, BlockIdExt block_id,
-                                      td::Ref<BlockSignatureSet> signatures) {
+                                      td::Ref<block::BlockSignatureSet> signatures) {
     CHECK(signatures.not_null());
-    validator_set_->check_signatures(block_id.root_hash, block_id.file_hash, signatures).ensure();
+    signatures->check_signatures(validator_set_, block_id).ensure();
     BlockSeqno seqno = block_id.seqno();
     if (accepted_blocks_.contains(seqno)) {
       LOG_CHECK(accepted_blocks_[seqno] == block_id) << "Accepted different blocks for seqno " << seqno;
@@ -256,7 +257,7 @@ class TestConsensus : public td::actor::Actor {
                                          .adnl_id = node.adnl_id,
                                          .weight = node.weight});
     }
-    validator_set_ = td::Ref<ValidatorSetQ>{true, CC_SEQNO, SHARD, std::move(validator_descrs)};
+    validator_set_ = td::Ref<block::ValidatorSet>{true, CC_SEQNO, SHARD, std::move(validator_descrs)};
 
     test_overlay = td::actor::create_actor<TestOverlay>("test-overlay");
 
@@ -337,7 +338,7 @@ class TestConsensus : public td::actor::Actor {
   };
   std::vector<Node> nodes_;
   size_t n_nodes_ = 8;
-  td::Ref<ValidatorSet> validator_set_;
+  td::Ref<block::ValidatorSet> validator_set_;
 
   td::actor::ActorOwn<keyring::Keyring> keyring_;
 
@@ -345,7 +346,7 @@ class TestConsensus : public td::actor::Actor {
 };
 
 td::actor::Task<> TestManagerFacade::accept_block(BlockIdExt id, td::Ref<BlockData> data, std::vector<BlockIdExt> prev,
-                                                  td::Ref<BlockSignatureSet> signatures, int send_broadcast_mode,
+                                                  td::Ref<block::BlockSignatureSet> signatures, int send_broadcast_mode,
                                                   bool apply) {
   CHECK(id.shard_full() == SHARD);
   LOG(WARNING) << "Accept block #" << id.seqno() << " (" << (signatures.is_null() ? "no" : "with") << " signatures)";

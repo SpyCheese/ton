@@ -24,7 +24,7 @@ class BlockAccepterImpl : public runtime::SpawnsWith<ConsensusBus>, public runti
     for (const auto& slot : finalize_burst) {
       auto& candidate = slot->candidate;
       if (auto* block = std::get_if<BlockCandidate>(&candidate->block)) {
-        td::Ref<BlockSignatureSet> signatures = {};
+        td::Ref<block::BlockSignatureSet> signatures = {};
         if (candidate->id.block == last_slot->candidate->id.block) {
           signatures = *last_slot->finalization_cert;
         }

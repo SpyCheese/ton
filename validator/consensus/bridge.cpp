@@ -13,7 +13,7 @@ namespace {
 class ManagerFacadeImpl : public ManagerFacade {
  public:
   ManagerFacadeImpl(td::actor::ActorId<ValidatorManager> manager,
-                    td::actor::ActorId<CollationManager> collation_manager, td::Ref<ValidatorSet> validator_set)
+                    td::actor::ActorId<CollationManager> collation_manager, td::Ref<block::ValidatorSet> validator_set)
       : manager_(manager), collation_manager_(collation_manager), validator_set_(std::move(validator_set)) {
   }
 
@@ -35,7 +35,8 @@ class ManagerFacadeImpl : public ManagerFacade {
   }
 
   td::actor::Task<> accept_block(BlockIdExt id, td::Ref<BlockData> data, std::vector<BlockIdExt> prev,
-                                 td::Ref<BlockSignatureSet> signatures, int send_broadcast_mode, bool apply) override {
+                                 td::Ref<block::BlockSignatureSet> signatures, int send_broadcast_mode,
+                                 bool apply) override {
     auto [task, promise] = td::actor::StartedTask<>::make_bridge();
     run_accept_block_query(id, std::move(data), std::move(prev), validator_set_, std::move(signatures),
                            send_broadcast_mode, apply, manager_, std::move(promise));
@@ -51,7 +52,7 @@ class ManagerFacadeImpl : public ManagerFacade {
  private:
   td::actor::ActorId<ValidatorManager> manager_;
   td::actor::ActorId<CollationManager> collation_manager_;
-  td::Ref<ValidatorSet> validator_set_;
+  td::Ref<block::ValidatorSet> validator_set_;
 };
 
 struct BridgeCreationParams {
@@ -63,7 +64,7 @@ struct BridgeCreationParams {
   td::actor::ActorId<keyring::Keyring> keyring;
   td::Ref<ValidatorManagerOptions> validator_opts;
 
-  td::Ref<ValidatorSet> validator_set;
+  td::Ref<block::ValidatorSet> validator_set;
   PublicKeyHash local_id;
 
   td::actor::ActorId<CollationManager> collation_manager;
@@ -164,6 +165,8 @@ class BridgeImpl final : public IValidatorGroup {
 
       ++idx;
     }
+    bus->cc_seqno = params_.validator_set->get_catchain_seqno();
+    bus->validator_set_hash = params_.validator_set->get_validator_set_hash();
     CHECK(found);
 
     bus->config = std::move(params_.config);
@@ -193,7 +196,7 @@ class BridgeImpl final : public IValidatorGroup {
 
 td::actor::ActorOwn<IValidatorGroup> IValidatorGroup::create_bridge(
     td::Slice name, ShardIdFull shard, PublicKeyHash local_id, ValidatorSessionId session_id,
-    td::Ref<ValidatorSet> validator_set, BlockSeqno last_key_block_seqno, NewConsensusConfig config,
+    td::Ref<block::ValidatorSet> validator_set, BlockSeqno last_key_block_seqno, NewConsensusConfig config,
     td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
     td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<rldp2::Rldp> rldp2,
     td::actor::ActorId<overlay::Overlays> overlays, std::string db_root,
