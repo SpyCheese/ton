@@ -289,6 +289,8 @@ class TestConsensus : public td::actor::Actor {
         bus->min_masterchain_block_id = MIN_MC_BLOCK_ID;
         bus->session_id = SESSION_ID;
         bus->first_block_parents = {FIRST_PARENT};
+        bus->cc_seqno = CC_SEQNO;
+        bus->validator_set_hash = validator_set_->get_validator_set_hash();
         inst.bus = runtime.start(std::move(bus), PSTRING() << "consensus." << idx << "." << i);
         node.instances.push_back(std::move(inst));
       }
