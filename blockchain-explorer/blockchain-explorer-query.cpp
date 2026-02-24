@@ -14,13 +14,13 @@
     You should have received a copy of the GNU General Public License
     along with TON Blockchain.  If not, see <http://www.gnu.org/licenses/>.
 
-    In addition, as a special exception, the copyright holders give permission 
-    to link the code of portions of this program with the OpenSSL library. 
-    You must obey the GNU General Public License in all respects for all 
-    of the code used other than OpenSSL. If you modify file(s) with this 
-    exception, you may extend this exception to your version of the file(s), 
-    but you are not obligated to do so. If you do not wish to do so, delete this 
-    exception statement from your version. If you delete this exception statement 
+    In addition, as a special exception, the copyright holders give permission
+    to link the code of portions of this program with the OpenSSL library.
+    You must obey the GNU General Public License in all respects for all
+    of the code used other than OpenSSL. If you modify file(s) with this
+    exception, you may extend this exception to your version of the file(s),
+    but you are not obligated to do so. If you do not wish to do so, delete this
+    exception statement from your version. If you delete this exception statement
     from all source files in the program, then also delete it here.
     along with TON Blockchain.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -41,6 +41,7 @@
 #include "vm/cellops.h"
 #include "vm/cells/MerkleProof.h"
 #include "vm/cp0.h"
+#include "vm/memo.h"
 #include "vm/vm.h"
 
 #include "blockchain-explorer-http.hpp"
@@ -1299,6 +1300,8 @@ HttpQueryRunMethod::HttpQueryRunMethod(std::map<std::string, std::string> opts, 
   }
   it = opts.find("params");
   if (it != opts.end()) {
+    vm::FakeVmStateLimits fstate(1000);
+    vm::VmStateInterface::Guard guard(&fstate);
     auto R3 = vm::parse_stack_entries(it->second);
     if (R3.is_error()) {
       error_ = R3.move_as_error();
@@ -1365,6 +1368,8 @@ void HttpQueryRunMethod::got_result(td::BufferSlice data) {
         return A.finish();
       }
       auto cs = vm::load_cell_slice(r_cell.move_as_ok());
+      vm::FakeVmStateLimits fstate(1000);
+      vm::VmStateInterface::Guard guard(&fstate);
       td::Ref<vm::Stack> stack;
       if (!(vm::Stack::deserialize_to(cs, stack, 0) && cs.empty_ext())) {
         A.abort("VM result boc cannot be deserialized");
