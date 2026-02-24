@@ -1,4 +1,4 @@
-/* 
+/*
     This file is part of TON Blockchain source code.
 
     TON Blockchain is free software; you can redistribute it and/or
@@ -14,13 +14,13 @@
     You should have received a copy of the GNU General Public License
     along with TON Blockchain.  If not, see <http://www.gnu.org/licenses/>.
 
-    In addition, as a special exception, the copyright holders give permission 
-    to link the code of portions of this program with the OpenSSL library. 
-    You must obey the GNU General Public License in all respects for all 
-    of the code used other than OpenSSL. If you modify file(s) with this 
-    exception, you may extend this exception to your version of the file(s), 
-    but you are not obligated to do so. If you do not wish to do so, delete this 
-    exception statement from your version. If you delete this exception statement 
+    In addition, as a special exception, the copyright holders give permission
+    to link the code of portions of this program with the OpenSSL library.
+    You must obey the GNU General Public License in all respects for all
+    of the code used other than OpenSSL. If you modify file(s) with this
+    exception, you may extend this exception to your version of the file(s),
+    but you are not obligated to do so. If you do not wish to do so, delete this
+    exception statement from your version. If you delete this exception statement
     from all source files in the program, then also delete it here.
 
     Copyright 2017-2020 Telegram Systems LLP
@@ -378,7 +378,7 @@ class ActorExecutorBenchmark : public td::Benchmark {
     //{
     //ActorExecutor executor(*actor, dispatcher, ActorExecutor::Options());
     //executor.send(
-    //ActorMessageCreator::lambda([&] { static_cast<TestActor &>(ActorExecuteContext::get()->actor()).close(); }));
+    //ActorMessageCreator::lambda([&] { static_cast<TestActor &>(ActorExecuteContext::get().actor()).close(); }));
     //}
     dispatcher.queue.clear();
   }
@@ -435,7 +435,7 @@ class ActorSignalQuery : public td::Benchmark {
     Scheduler scheduler{{threads_count}};
 
     scheduler.run_in_context([&] {
-      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get()->stop(); });
+      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get().stop(); });
 
       create_actor<Master>(ActorOptions().with_name(PSLICE() << "Master"), watcher, n).release();
     });
@@ -492,7 +492,7 @@ class ActorQuery : public td::Benchmark {
     Scheduler scheduler({threads_count});
 
     scheduler.run_in_context([&] {
-      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get()->stop(); });
+      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get().stop(); });
 
       create_actor<Master>(ActorOptions().with_name(PSLICE() << "Master"), watcher, n).release();
     });
@@ -548,7 +548,7 @@ class ActorDummyQuery : public td::Benchmark {
     Scheduler scheduler({threads_count});
 
     scheduler.run_in_context([&] {
-      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get()->stop(); });
+      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get().stop(); });
 
       create_actor<Master>(ActorOptions().with_name(PSLICE() << "Master"), watcher, n).release();
     });
@@ -607,7 +607,7 @@ class ActorTaskQuery : public td::Benchmark {
     Scheduler scheduler({threads_count});
 
     scheduler.run_in_context([&] {
-      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get()->stop(); });
+      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get().stop(); });
 
       create_actor<Master>(ActorOptions().with_name(PSLICE() << "Master"), watcher, n).release();
     });
@@ -626,7 +626,7 @@ class BlockSha256Actors {
     Scheduler scheduler({threads_count});
 
     scheduler.run_in_context([&] {
-      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get()->stop(); });
+      auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get().stop(); });
       class Worker : public td::actor::Actor {
        public:
         Worker(std::shared_ptr<td::Destructor> watcher, td::Promise<> promise)
@@ -1428,13 +1428,13 @@ class ChainedSpawn : public td::Benchmark {
     auto sch = td::thread([&] { scheduler.run(); });
 
     Sem sem;
-    scheduler.run_in_context_external([&] {
+    scheduler.run_in_context([&] {
       for (int i = 0; i < n; i++) {
         td::actor::create_actor<Task>(td::actor::ActorOptions().with_name("Task").with_poll(use_io_), 1000, &sem)
             .release();
         sem.wait();
       }
-      td::actor::SchedulerContext::get()->stop();
+      td::actor::SchedulerContext::get().stop();
     });
 
     sch.join();
@@ -1475,13 +1475,13 @@ class ChainedSpawnInplace : public td::Benchmark {
     auto sch = td::thread([&] { scheduler.run(); });
 
     Sem sem;
-    scheduler.run_in_context_external([&] {
+    scheduler.run_in_context([&] {
       for (int i = 0; i < n; i++) {
         td::actor::create_actor<Task>(td::actor::ActorOptions().with_name("Task").with_poll(use_io_), 1000, &sem)
             .release();
         sem.wait();
       }
-      td::actor::SchedulerContext::get()->stop();
+      td::actor::SchedulerContext::get().stop();
     });
 
     sch.join();
@@ -1526,7 +1526,7 @@ class PingPong : public td::Benchmark {
     auto sch = td::thread([&] { scheduler.run(); });
 
     Sem sem;
-    scheduler.run_in_context_external([&] {
+    scheduler.run_in_context([&] {
       for (int i = 0; i < n; i++) {
         auto a = td::actor::create_actor<Task>(td::actor::ActorOptions().with_name("Task").with_poll(use_io_), &sem)
                      .release();
@@ -1537,7 +1537,7 @@ class PingPong : public td::Benchmark {
         send_closure(a, &Task::ping, 1000);
         sem.wait(2);
       }
-      td::actor::SchedulerContext::get()->stop();
+      td::actor::SchedulerContext::get().stop();
     });
 
     sch.join();
@@ -1571,7 +1571,7 @@ class SpawnMany : public td::Benchmark {
     td::actor::Scheduler scheduler{{8}};
     Sem sem;
     auto sch = td::thread([&] { scheduler.run(); });
-    scheduler.run_in_context_external([&] {
+    scheduler.run_in_context([&] {
       for (int i = 0; i < n; i++) {
         int spawn_cnt = 10000;
         for (int j = 0; j < spawn_cnt; j++) {
@@ -1579,7 +1579,7 @@ class SpawnMany : public td::Benchmark {
         }
         sem.wait(spawn_cnt);
       }
-      td::actor::SchedulerContext::get()->stop();
+      td::actor::SchedulerContext::get().stop();
     });
     sch.join();
   }
@@ -1622,7 +1622,7 @@ class YieldMany : public td::Benchmark {
     auto sch = td::thread([&] { scheduler.run(); });
     unsigned tasks = tasks_per_cpu * cpu_n;
     Sem sem;
-    scheduler.run_in_context_external([&] {
+    scheduler.run_in_context([&] {
       for (int i = 0; i < n; i++) {
         for (unsigned j = 0; j < tasks; j++) {
           td::actor::create_actor<Task>(td::actor::ActorOptions().with_name("Task").with_poll(use_io_), num_yield, &sem)
@@ -1632,7 +1632,7 @@ class YieldMany : public td::Benchmark {
       }
     });
 
-    scheduler.run_in_context_external([&] { td::actor::SchedulerContext::get()->stop(); });
+    scheduler.run_in_context([&] { td::actor::SchedulerContext::get().stop(); });
     sch.join();
   }
 

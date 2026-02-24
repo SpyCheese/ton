@@ -1,9 +1,12 @@
-## 2025.11 Update
+## 2026.02 Update
 
-1. [TVM version v12](./doc/GlobalVersions.md) update: [forbid unused high bits in extra_flags](https://github.com/ton-blockchain/TEPs/pull/503/commits/d949d70d5a69026d273cbbc07653d12c4373117a), [bounce extra_flags equal to initial message extra_flags](https://github.com/ton-blockchain/TEPs/pull/503/commits/d33ff342d69de04f1c33d11360dcf06b63a6c21e), [new TVM opcodes](https://github.com/ton-blockchain/ton/commit/ecd8fbb833c408eb34ec1aa4516e9e4344b54a22).
-2. Abseil upgrade
-3. Improvements in node synchronisation
-4. Fixing rare ArchiveManager issues
-5. Various improvements in logging, builds, DHT node behavior, private net launching, failure handlers.
+1. Preparation for upcoming network speed up: disabled by default but ready to deploy new broadcast and consensus
+2. Consequent external message allowed: liteservers now accept external messages with seqno higher than seqno in last commited state iff it knows previous uncommited external message
+3. Improved non-final LS interface which allows faster candidate indexing
+4. Fixed memory leak which causes OOM on LSes
+5. Improved block compression
+6. More stable custom overlays
+7. Fixed a few performance and stability issues
+8. Added Tontester framework
 
-Besides the work of the core team, this update is based on the efforts of the @Lapo4kaKek and [Vahagn x.com/vah_13](https://x.com/vah_13).
+Besides the work of the core team, this update also includes contributions from Vahagn @vah13, InfiniteSec team [https://x.com/infsec_io](x.com/infsec_io) and Christos from [Cantina and Spearbit](cantina.xyz).

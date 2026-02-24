@@ -25,11 +25,14 @@
 #include "adnl/adnl.h"
 #include "dht/dht.h"
 #include "overlay/overlays.h"
+#include "quic/quic-sender.h"
 #include "rldp/rldp.h"
 #include "rldp2/rldp.h"
 #include "td/actor/actor.h"
 #include "ton/ton-types.h"
 #include "validator/validator.h"
+
+#include "types.h"
 
 namespace ton {
 
@@ -38,6 +41,7 @@ namespace validator {
 namespace fullnode {
 
 constexpr int VERBOSITY_NAME(FULL_NODE_WARNING) = verbosity_WARNING;
+constexpr int VERBOSITY_NAME(FULL_NODE_BENCHMARK) = verbosity_WARNING;
 constexpr int VERBOSITY_NAME(FULL_NODE_NOTICE) = verbosity_INFO;
 constexpr int VERBOSITY_NAME(FULL_NODE_INFO) = verbosity_DEBUG;
 constexpr int VERBOSITY_NAME(FULL_NODE_DEBUG) = verbosity_DEBUG;
@@ -47,8 +51,7 @@ struct FullNodeConfig {
   FullNodeConfig() = default;
   FullNodeConfig(const tl_object_ptr<ton_api::engine_validator_fullNodeConfig>& obj);
   tl_object_ptr<ton_api::engine_validator_fullNodeConfig> tl() const;
-  bool operator==(const FullNodeConfig& rhs) const;
-  bool operator!=(const FullNodeConfig& rhs) const;
+  bool operator==(const FullNodeConfig& rhs) const = default;
 
   bool ext_messages_broadcast_disabled_ = false;
 };
@@ -57,7 +60,10 @@ struct FullNodeOptions {
   FullNodeConfig config_;
   double public_broadcast_speed_multiplier_ = 1.0;
   double private_broadcast_speed_multiplier_ = 1.0;
+  double fast_sync_broadcast_speed_multiplier_ = 1.0;
   double initial_sync_delay_ = 60.0;
+  double ratelimit_window_size_ = 0;
+  size_t ratelimit_global_ = 0, ratelimit_heavy_ = 0, ratelimit_medium_ = 0;
 };
 
 struct CustomOverlayParams {
@@ -95,9 +101,11 @@ class FullNode : public td::actor::Actor {
   virtual void add_custom_overlay(CustomOverlayParams params, td::Promise<td::Unit> promise) = 0;
   virtual void del_custom_overlay(std::string name, td::Promise<td::Unit> promise) = 0;
 
-  virtual void process_block_broadcast(BlockBroadcast broadcast) = 0;
+  virtual void process_block_broadcast(BlockBroadcast broadcast, bool signatures_checked = false) = 0;
   virtual void process_block_candidate_broadcast(BlockIdExt block_id, CatchainSeqno cc_seqno,
                                                  td::uint32 validator_set_hash, td::BufferSlice data) = 0;
+  virtual void process_shard_block_info_broadcast(BlockIdExt block_id, CatchainSeqno cc_seqno,
+                                                  td::BufferSlice data) = 0;
   virtual void get_out_msg_queue_query_token(td::Promise<std::unique_ptr<ActionToken>> promise) = 0;
 
   virtual void set_validator_telemetry_filename(std::string value) = 0;
@@ -121,7 +129,8 @@ class FullNode : public td::actor::Actor {
   static td::actor::ActorOwn<FullNode> create(
       ton::PublicKeyHash local_id, adnl::AdnlNodeIdShort adnl_id, FileHash zero_state_file_hash, FullNodeOptions opts,
       td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
-      td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<rldp2::Rldp> rldp2, td::actor::ActorId<dht::Dht> dht,
+      td::actor::ActorId<rldp::Rldp> rldp, td::actor::ActorId<rldp2::Rldp> rldp2,
+      td::actor::ActorId<quic::QuicSender> quic, td::actor::ActorId<dht::Dht> dht,
       td::actor::ActorId<overlay::Overlays> overlays, td::actor::ActorId<ValidatorManagerInterface> validator_manager,
       td::actor::ActorId<adnl::AdnlExtClient> client, std::string db_root, td::Promise<td::Unit> started_promise);
 };

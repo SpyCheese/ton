@@ -1,3 +1,35 @@
+## 2026.02 Update
+
+1. Preparation for upcoming network speed up: disabled by default but ready to deploy new broadcast and consensus
+2. Consequent external message allowed: liteservers now accept external messages with seqno higher than seqno in last commited state iff it knows previous uncommited external message
+3. Improved non-final LS interface which allows faster candidate indexing
+4. Fixed memory leak which causes OOM on LSes
+5. Improved block compression
+6. More stable custom overlays
+7. Fixed a few performance and stability issues
+8. Added Tontester framework
+
+Besides the work of the core team, this update also includes contributions from Vahagn @vah13, InfiniteSec team [https://x.com/infsec_io](x.com/infsec_io) and Christos from [Cantina and Spearbit](cantina.xyz).
+## 2025.12 Update
+
+1. `celldb-v2` enabled by default.
+2. Fast state serializer (sharded serialization) enabled by default.
+3. Using `_` instead of `:` in package filenames for better compatibility with Windows and network protocols.
+4. Introduced parallelism in the validator engine.
+5. Added Python-based testing framework.
+6. Various fixes in emulator, node, TVM, `Asm.fif`.
+7. Introduced improved network traffic compression.
+8. BLST updated.
+
+Internal code changes:
+
+1. Introduced support for coroutines in actors.
+2. Enabled `clang-format` 21.
+3. Removed the virtualization level concept.
+4. Minor code style and cleanliness improvements.
+
+Besides the work of the core team, this update also includes contributions from Tonstudio team members: @pyAndr3w (`Asm.fif`), @Gusarich (TVM fixes in `arithops`), @Kaladin13 (node fixes).
+
 ## 2025.11 Update
 
 1. [TVM version v12](./doc/GlobalVersions.md) update: [forbid unused high bits in extra_flags](https://github.com/ton-blockchain/TEPs/pull/503/commits/d949d70d5a69026d273cbbc07653d12c4373117a), [bounce extra_flags equal to initial message extra_flags](https://github.com/ton-blockchain/TEPs/pull/503/commits/d33ff342d69de04f1c33d11360dcf06b63a6c21e), [new TVM opcodes](https://github.com/ton-blockchain/ton/commit/ecd8fbb833c408eb34ec1aa4516e9e4344b54a22).
@@ -107,7 +139,7 @@ Besides the work of the core team, this update is based on the efforts of @krigg
 
 ## 2024.08 Update
 
-1. Introduction of dispatch queues, message envelopes with transaction chain metadata, and explicitly stored msg_queue size, which will be activated by `Config8.version >= 8` and new `Config8.capabilities` bits: `capStoreOutMsgQueueSize`, `capMsgMetadata`, `capDeferMessages`. 
+1. Introduction of dispatch queues, message envelopes with transaction chain metadata, and explicitly stored msg_queue size, which will be activated by `Config8.version >= 8` and new `Config8.capabilities` bits: `capStoreOutMsgQueueSize`, `capMsgMetadata`, `capDeferMessages`.
 2. A number of changes to transaction executor which will activated for `Config8.version >= 8`:
     - Check mode on invalid `action_send_msg`. Ignore action if `IGNORE_ERROR` (+2) bit is set, bounce if `BOUNCE_ON_FAIL` (+16) bit is set.
     - Slightly change random seed generation to fix mix of `addr_rewrite` and `addr`.
@@ -126,7 +158,7 @@ Besides the work of the core team, this update is based on the efforts of @krigg
 
 1. Make Jemalloc default allocator
 2. Add candidate broadcasting and caching
-3. Limit per address speed for external messages broadcast by reasonably large number 
+3. Limit per address speed for external messages broadcast by reasonably large number
 4. Overlay improvements: fix dropping peers in small custom overlays, fix wrong certificate on missed keyblocks
 5. Extended statistics and logs for celldb usage, session stats, persistent state serialization
 6. Tonlib and explorer fixes
@@ -233,7 +265,7 @@ Besides the work of the core team, this update is based on the efforts of @aleks
 
 ## 2023.04 Update
 1. CPU load optimization: previous DHT reconnect policy was too aggressive
-2. Network throughput improvements: granular control on external message broadcast, optimize celldb GC, adjust state serialization and block downloading timings, rldp2 for states and archives 
+2. Network throughput improvements: granular control on external message broadcast, optimize celldb GC, adjust state serialization and block downloading timings, rldp2 for states and archives
 3. Update for Fift (namespaces) and Fift libraries (list of improvements: https://github.com/ton-blockchain/ton/issues/631)
 4. Better handling of incorrect inputs in funC: fix UB and prevent crashes on some inputs, improve optimizing int consts and unused variables in FunC, fix analyzing repeat loop. FunC version is increase to 0.4.3.
 5. `listBlockTransactionsExt` in liteserver added
