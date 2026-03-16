@@ -155,6 +155,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual bool check_collator_node_whitelist(adnl::AdnlNodeIdShort id) const = 0;
   virtual td::Ref<ShardBlockVerifierConfig> get_shard_block_verifier_config() const = 0;
   virtual std::string get_db_event_fifo_path() const = 0;
+  virtual td::optional<std::pair<BlockSeqno, BlockSeqno>> get_repair_archive_db() const = 0;
 
   virtual void set_zero_block_id(BlockIdExt block_id) = 0;
   virtual void set_init_block_id(BlockIdExt block_id) = 0;
@@ -197,6 +198,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual void set_shard_block_verifier_config(td::Ref<ShardBlockVerifierConfig> config) = 0;
   virtual void set_parallel_validation(bool value) = 0;
   virtual void set_db_event_fifo_path(std::string value) = 0;
+  virtual void set_repair_archive_db(td::optional<std::pair<BlockSeqno, BlockSeqno>> value) = 0;
 
   static td::Ref<ValidatorManagerOptions> create(BlockIdExt zero_block_id, BlockIdExt init_block_id,
                                                  bool allow_blockchain_init = false, double sync_blocks_before = 3600,

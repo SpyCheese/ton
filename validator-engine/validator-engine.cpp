@@ -1646,6 +1646,7 @@ td::Status ValidatorEngine::load_global_config() {
     validator_options_.write().set_collator_node_whitelisted_validator(id, true);
   }
   validator_options_.write().set_collator_node_whitelist_enabled(config_.collator_node_whiltelist_enabled);
+  validator_options_.write().set_repair_archive_db(repair_archive_db_);
 
   return td::Status::OK();
 }
@@ -5628,6 +5629,23 @@ int main(int argc, char *argv[]) {
         acts.push_back([&, l = l >= 0 ? std::optional<size_t>{l} : std::optional<size_t>{std::nullopt}] {
           td::actor::send_closure(x, &ValidatorEngine::set_quic_options,
                                   ton::quic::QuicServer::Options{.flood_control = l});
+        });
+        return td::Status::OK();
+      });
+  p.add_checked_option(
+      '\0', "repair-archive-db",
+      "rebuild archive indices for given seqno range (e.g. --repair-archive-db 1000000:2000000)", [&](td::Slice arg) {
+        size_t pos = arg.find(':');
+        if (pos == td::Slice::npos) {
+          return td::Status::Error("invalid repair-archive-db range");
+        }
+        TRY_RESULT(from, td::to_integer_safe<ton::BlockSeqno>(arg.substr(0, pos)));
+        TRY_RESULT(to, td::to_integer_safe<ton::BlockSeqno>(arg.substr(pos + 1)));
+        if (from > to) {
+          return td::Status::Error("invalid repair-archive-db range");
+        }
+        acts.push_back([&, from, to] {
+          td::actor::send_closure(x, &ValidatorEngine::set_repair_archive_db, std::make_pair(from, to));
         });
         return td::Status::OK();
       });

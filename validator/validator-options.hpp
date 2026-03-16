@@ -182,6 +182,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   std::string get_db_event_fifo_path() const override {
     return db_event_fifo_path_;
   }
+  td::optional<std::pair<BlockSeqno, BlockSeqno>> get_repair_archive_db() const override {
+    return repair_archive_db_;
+  }
 
   void set_zero_block_id(BlockIdExt block_id) override {
     zero_block_id_ = block_id;
@@ -313,6 +316,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_db_event_fifo_path(std::string value) override {
     db_event_fifo_path_ = std::move(value);
   }
+  void set_repair_archive_db(td::optional<std::pair<BlockSeqno, BlockSeqno>> value) override {
+    repair_archive_db_ = value;
+  }
 
   ValidatorManagerOptionsImpl* make_copy() const override {
     return new ValidatorManagerOptionsImpl(*this);
@@ -374,6 +380,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   td::Ref<ShardBlockVerifierConfig> shard_block_verifier_config_{true};
   bool parallel_validation = false;
   std::string db_event_fifo_path_;
+  td::optional<std::pair<BlockSeqno, BlockSeqno>> repair_archive_db_;
 };
 
 }  // namespace validator

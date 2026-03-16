@@ -1020,6 +1020,9 @@ void ArchiveManager::start_up() {
   if (!opts_->get_disable_rocksdb_stats()) {
     alarm_timestamp() = td::Timestamp::in(60.0);
   }
+  if (auto range = opts_->get_repair_archive_db()) {
+    repair_db(range.value().first, range.value().second).start().detach();
+  }
 }
 
 void ArchiveManager::alarm() {
@@ -1105,6 +1108,26 @@ void ArchiveManager::run_gc_temp_cont(PackageId id, td::Ref<MasterchainState> sh
     }
   }
   delete_package(id, [](td::Result<>) {});
+}
+
+td::actor::Task<> ArchiveManager::repair_db(BlockSeqno seqno_from, BlockSeqno seqno_to) {
+  LOG(ERROR) << "Requested repair db from " << seqno_from << " to " << seqno_to;
+  for (auto it = files_.begin(); it != files_.end(); ++it) {
+    auto &[id, s] = *it;
+    if (s.deleted) {
+      continue;
+    }
+    if (id.id > seqno_to) {
+      break;
+    }
+    auto it2 = std::next(it);
+    if (it2 != files_.end() && it2->first.id <= seqno_from) {
+      continue;
+    }
+    (co_await td::actor::ask(s.file, &ArchiveSlice::repair_ltdb).wrap()).ensure();
+  }
+  LOG(ERROR) << "Repair db from " << seqno_from << " to " << seqno_to << " : DONE";
+  co_return {};
 }
 
 void ArchiveManager::persistent_state_gc(std::pair<BlockSeqno, FileHash> last) {

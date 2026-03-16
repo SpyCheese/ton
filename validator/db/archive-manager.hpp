@@ -246,6 +246,7 @@ class ArchiveManager : public td::actor::Actor {
 
   void run_gc_temp_cont(PackageId id, td::Ref<MasterchainState> shard_client_state,
                         std::map<ShardIdFull, BlockSeqno> max_seqnos);
+  td::actor::Task<> repair_db(BlockSeqno seqno_from, BlockSeqno seqno_to);
 
   static constexpr td::uint32 TEMP_PACKAGES_PERIOD = 3600;
   static constexpr td::uint32 TEMP_PACKAGES_TTL = 3600;

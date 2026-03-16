@@ -141,6 +141,8 @@ class ArchiveSlice : public td::actor::Actor {
   void iterate_block_handles(std::function<void(const BlockHandleInterface &)> f);
   void get_temp_max_seqnos(td::Promise<std::map<ShardIdFull, BlockSeqno>> promise);
 
+  td::actor::Task<> repair_ltdb();
+
  private:
   void before_query();
   void do_close();

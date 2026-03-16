@@ -813,22 +813,26 @@ void ArchiveSlice::close_files() {
   }
 }
 
+static td::Status iterate_by_prefix(td::KeyValue &kv, td::uint32 prefix,
+                                    std::function<td::Status(td::Slice, td::Slice)> f) {
+  td::uint32 range_start = prefix;
+  td::uint32 range_end = prefix + 1;
+  return kv.for_each_in_range(td::Slice{(char *)&range_start, 4}, td::Slice{(char *)&range_end, 4}, std::move(f));
+}
+
 void ArchiveSlice::iterate_block_handles(std::function<void(const BlockHandleInterface &)> f) {
   before_query();
-  td::uint32 range_start = ton_api::db_blockdb_key_value::ID;
-  td::uint32 range_end = ton_api::db_blockdb_key_value::ID + 1;
-  kv_->for_each_in_range(td::Slice{(char *)&range_start, 4}, td::Slice{(char *)&range_end, 4},
-                         [&](td::Slice key, td::Slice value) -> td::Status {
-                           auto r_key = fetch_tl_object<ton_api::db_blockdb_key_value>(key, true);
-                           if (r_key.is_error()) {
-                             return td::Status::OK();
-                           }
-                           auto r_handle = create_block_handle(value);
-                           if (r_handle.is_ok()) {
-                             f(*r_handle.ok());
-                           }
-                           return td::Status::OK();
-                         });
+  iterate_by_prefix(*kv_, ton_api::db_blockdb_key_value::ID, [&](td::Slice key, td::Slice value) -> td::Status {
+    auto r_key = fetch_tl_object<ton_api::db_blockdb_key_value>(key, true);
+    if (r_key.is_error()) {
+      return td::Status::OK();
+    }
+    auto r_handle = create_block_handle(value);
+    if (r_handle.is_ok()) {
+      f(*r_handle.ok());
+    }
+    return td::Status::OK();
+  });
 }
 
 void ArchiveSlice::get_temp_max_seqnos(td::Promise<std::map<ShardIdFull, BlockSeqno>> promise) {
@@ -839,16 +843,13 @@ void ArchiveSlice::get_temp_max_seqnos(td::Promise<std::map<ShardIdFull, BlockSe
   before_query();
   if (!temp_max_seqnos_ready_) {
     temp_max_seqnos_ready_ = true;
-    td::uint32 range_start = ton_api::db_blockdb_key_value::ID;
-    td::uint32 range_end = ton_api::db_blockdb_key_value::ID + 1;
-    kv_->for_each_in_range(td::Slice{(char *)&range_start, 4}, td::Slice{(char *)&range_end, 4},
-                           [this](td::Slice key, td::Slice) -> td::Status {
-                             auto r_key = fetch_tl_object<ton_api::db_blockdb_key_value>(key, true);
-                             if (r_key.is_ok()) {
-                               update_temp_max_seqno(create_block_id(r_key.ok()->id_).id);
-                             }
-                             return td::Status::OK();
-                           });
+    iterate_by_prefix(*kv_, ton_api::db_blockdb_key_value::ID, [this](td::Slice key, td::Slice) -> td::Status {
+      auto r_key = fetch_tl_object<ton_api::db_blockdb_key_value>(key, true);
+      if (r_key.is_ok()) {
+        update_temp_max_seqno(create_block_id(r_key.ok()->id_).id);
+      }
+      return td::Status::OK();
+    });
     for (auto &pack : packages_) {
       pack.package->iterate([this](std::string name, td::BufferSlice, td::uint64) -> bool {
         auto F = FileReference::create(name);
@@ -860,6 +861,96 @@ void ArchiveSlice::get_temp_max_seqnos(td::Promise<std::map<ShardIdFull, BlockSe
     }
   }
   promise.set_result(temp_max_seqnos_);
+}
+
+td::actor::Task<> ArchiveSlice::repair_ltdb() {
+  CHECK(!temp_);
+  CHECK(!key_blocks_only_);
+  before_query();
+  std::string value;
+  if (kv_->get("repaired_db", value).ensure().move_as_ok() == td::KeyValueReader::GetStatus::Ok && value == "1") {
+    LOG(ERROR) << "Repair db: already done";
+    co_return {};
+  }
+  LOG(ERROR) << "Repair db";
+  std::vector<BlockHandle> handles;
+  iterate_by_prefix(*kv_, ton_api::db_blockdb_key_value::ID, [&](td::Slice key, td::Slice value) -> td::Status {
+    fetch_tl_object<ton_api::db_blockdb_key_value>(key, true).ensure();
+    BlockHandle handle = create_block_handle(value).ensure().move_as_ok();
+    CHECK(handle->inited_logical_time());
+    CHECK(handle->inited_unix_time());
+    handles.push_back(std::move(handle));
+    return td::Status::OK();
+  }).ensure();
+  LOG(ERROR) << "Repair db: " << handles.size() << " blocks";
+  std::sort(handles.begin(), handles.end(), [](const BlockHandle &a, const BlockHandle &b) {
+    if (a->id().is_masterchain() != b->id().is_masterchain()) {
+      return a->id().is_masterchain() > b->id().is_masterchain();
+    }
+    return a->logical_time() < b->logical_time();
+  });
+
+  std::vector<td::BufferSlice> to_delete;
+  for (td::uint32 prefix : {
+           ton_api::db_lt_el_key::ID,
+           ton_api::db_lt_desc_key::ID,
+           ton_api::db_lt_shard_key::ID,
+           ton_api::db_lt_status_key::ID,
+       }) {
+    iterate_by_prefix(*kv_, prefix, [&](td::Slice key, td::Slice) -> td::Status {
+      to_delete.emplace_back(key);
+      return td::Status::OK();
+    }).ensure();
+  }
+
+  begin_transaction();
+  for (const auto &key : to_delete) {
+    kv_->erase(key).ensure();
+  }
+
+  for (const BlockHandle &handle : handles) {
+    auto key = get_db_key_lt_desc(handle->id().shard_full());
+    auto r = kv_->get(key.as_slice(), value).ensure().move_as_ok();
+    tl_object_ptr<ton_api::db_lt_desc_value> v;
+    bool add_shard = false;
+    if (r == td::KeyValue::GetStatus::Ok) {
+      v = fetch_tl_object<ton_api::db_lt_desc_value>(td::BufferSlice{value}, true).ensure().move_as_ok();
+    } else {
+      v = create_tl_object<ton_api::db_lt_desc_value>(1, 1, 0, 0, 0);
+      add_shard = true;
+    }
+    auto db_value = create_serialize_tl_object<ton_api::db_lt_el_value>(create_tl_block_id(handle->id()),
+                                                                        handle->logical_time(), handle->unix_time());
+    auto db_key = get_db_key_lt_el(handle->id().shard_full(), v->last_idx_++);
+    auto status_key = create_serialize_tl_object<ton_api::db_lt_status_key>();
+    v->last_seqno_ = handle->id().seqno();
+    v->last_lt_ = handle->logical_time();
+    v->last_ts_ = handle->unix_time();
+    td::uint32 idx = 0;
+    if (add_shard) {
+      auto g = kv_->get(status_key.as_slice(), value).ensure().move_as_ok();
+      if (g == td::KeyValue::GetStatus::NotFound) {
+        idx = 0;
+      } else {
+        auto f = fetch_tl_object<ton_api::db_lt_status_value>(value, true).ensure().move_as_ok();
+        idx = f->total_shards_;
+      }
+    }
+    kv_->set(key, serialize_tl_object(v, true)).ensure();
+    kv_->set(db_key, db_value.as_slice()).ensure();
+    if (add_shard) {
+      auto shard_key = create_serialize_tl_object<ton_api::db_lt_shard_key>(idx);
+      auto shard_value =
+          create_serialize_tl_object<ton_api::db_lt_shard_value>(handle->id().id.workchain, handle->id().id.shard);
+      kv_->set(status_key.as_slice(), create_serialize_tl_object<ton_api::db_lt_status_value>(idx + 1)).ensure();
+      kv_->set(shard_key.as_slice(), shard_value.as_slice()).ensure();
+    }
+  }
+
+  kv_->set("repaired_db", "1").ensure();
+  co_await commit_transaction_coro();
+  LOG(ERROR) << "Repair db: done";
+  co_return {};
 }
 
 void ArchiveSlice::update_temp_max_seqno(BlockId id) {
