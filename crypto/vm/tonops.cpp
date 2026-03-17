@@ -2032,8 +2032,9 @@ int parse_addr_workchain(CellSlice cs) {
   bool is_var = cs.fetch_ulong(1);
   if (cs.fetch_ulong(1) == 1) {  // Anycast
     unsigned depth;
-    cs.fetch_uint_leq(30, depth);
-    cs.skip_first(depth);
+    if (cs.fetch_uint_leq(30, depth)) {
+      cs.skip_first(depth);
+    }
   }
 
   if (is_var) {
@@ -2099,6 +2100,12 @@ int exec_send_message(VmState* st) {
     } else {
       // Legacy: extra_flags was previously ihr_fee
       user_ihr_fee = block::tlb::t_Grams.as_integer(info.extra_flags);
+    }
+    if (user_fwd_fee.is_null()) {
+      user_fwd_fee = td::zero_refint();
+    }
+    if (user_ihr_fee.is_null()) {
+      user_ihr_fee = td::zero_refint();
     }
   }
 

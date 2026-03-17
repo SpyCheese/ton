@@ -147,7 +147,7 @@ struct ShardIdFull {
 struct AccountIdPrefixFull {
   WorkchainId workchain;
   AccountIdPrefix account_id_prefix;
-  AccountIdPrefixFull() : workchain(workchainInvalid) {
+  AccountIdPrefixFull() : workchain(workchainInvalid), account_id_prefix(0) {
   }
   AccountIdPrefixFull(WorkchainId workchain, AccountIdPrefix prefix) : workchain(workchain), account_id_prefix(prefix) {
   }
@@ -450,16 +450,6 @@ struct OutMsgQueueProofBroadcast : public td::CntObject {
 };
 
 struct BlockCandidate {
-  BlockCandidate(Ed25519_PublicKey pubkey, BlockIdExt id, FileHash collated_file_hash, td::BufferSlice data,
-                 td::BufferSlice collated_data,
-                 std::vector<td::Ref<OutMsgQueueProofBroadcast>> out_msg_queue_broadcasts = {})
-      : pubkey(pubkey)
-      , id(id)
-      , collated_file_hash(collated_file_hash)
-      , data(std::move(data))
-      , collated_data(std::move(collated_data))
-      , out_msg_queue_proof_broadcasts(std::move(out_msg_queue_broadcasts)) {
-  }
   Ed25519_PublicKey pubkey;
   BlockIdExt id;
   FileHash collated_file_hash;
@@ -467,7 +457,7 @@ struct BlockCandidate {
   td::BufferSlice collated_data;
 
   // used only locally
-  std::vector<td::Ref<OutMsgQueueProofBroadcast>> out_msg_queue_proof_broadcasts;
+  std::vector<td::Ref<OutMsgQueueProofBroadcast>> out_msg_queue_proof_broadcasts = {};
 
   BlockCandidate clone() const {
     return BlockCandidate{

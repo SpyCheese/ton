@@ -151,7 +151,6 @@ class ValidateQuery : public td::actor::Actor {
   bool full_collated_data_{false};
   bool prev_key_block_exists_{false};
   bool debug_checks_{false};
-  bool outq_cleanup_partial_{false};
   bool parallel_accounts_validation_{false};
   bool parallel_accounts_validation_pending_{false};
   bool check_account_failed_{false};
@@ -254,6 +253,7 @@ class ValidateQuery : public td::actor::Actor {
 
   std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
   std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
+  std::set<StdSmcAddress> accounts_with_dispatch_queue_diff_;
   std::set<StdSmcAddress> account_expected_defer_all_messages_;
   td::uint64 old_out_msg_queue_size_ = 0, new_out_msg_queue_size_ = 0;
   bool out_msg_queue_size_known_ = false;

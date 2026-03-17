@@ -161,7 +161,7 @@ adnl.stats.localIdPackets ts_start:double ts_end:double
     decrypted_packets:(vector adnl.stats.ipPackets) dropped_packets:(vector adnl.stats.ipPackets) = adnl.stats.LocalIdPackets;
 adnl.stats.localId short_id:int256
     current_decrypt:(vector adnl.stats.ipPackets)
-    packets_recent:adnl.stats.localIdPackets packets_total:adnl.stats.localIdPackets
+    packets_recent:adnl.stats.localIdPackets
     peers:(vector adnl.stats.peerPair) = adnl.stats.LocalId;
 adnl.stats timestamp:double local_ids:(vector adnl.stats.localId) = adnl.Stats;
 
@@ -524,8 +524,6 @@ tonNode.getCapabilities = tonNode.Capabilities;
 tonNode.slave.sendExtMessage message:tonNode.externalMessage = tonNode.Success;
 
 tonNode.query = Object;
-
-tonNode.requestFastSyncOverlayMemberCertificate sign_by:int256 adnl_id:int256 slot:int = overlay.MemberCertificate;
 
 ---types---
 
@@ -1203,13 +1201,16 @@ consensus.simplex.certificate vote:consensus.simplex.UnsignedVote signatures:con
 consensus.simplex.candidateAndCert candidate:bytes notar:bytes = consensus.simplex.CandidateAndCert;
 
 consensus.simplex.db.key.vote vote_hash:int256 = consensus.simplex.db.key.Vote;
-consensus.simplex.db.vote data:bytes node_idx:int = consensus.simplex.db.Vote;
+consensus.simplex.db.ourVote vote:consensus.simplex.UnsignedVote seqno:long = consensus.simplex.db.Vote;
+consensus.simplex.db.cert cert:consensus.simplex.Certificate = consensus.simplex.db.Vote;
 
 consensus.simplex.db.key.poolState = consensus.simplex.db.key.PoolState;
 consensus.simplex.db.poolState first_nonannounced_window:int = consensus.simplex.db.PoolState;
 
 consensus.simplex.db.key.finalizedBlock candidateId:consensus.candidateId = consensus.simplex.db.key.FinalizedBlock;
 consensus.simplex.db.finalizedBlock block_id:tonNode.blockIdExt parent:consensus.CandidateParent is_final:Bool = consensus.simplex.db.FinalizedBlock;
+
+consensus.simplex.db.key.candidate candidateId:consensus.candidateId = consensus.simplex.db.key.Candidate;
 
 consensus.simplex.db.key.candidateResolver.candidateInfo candidateId:consensus.candidateId = consensus.simplex.db.key.candidateResolver.CandidateInfo;
 consensus.simplex.db.candidateResolver.candidateInfo leader_id:int candidate_hash_data:consensus.CandidateHashData signature:bytes = consensus.simplex.db.candidateResolver.CandidateInfo;

@@ -112,8 +112,10 @@ set(VALIDATOR_SOURCE
   consensus/simplex/candidate-resolver.cpp
   consensus/simplex/certificate.cpp
   consensus/simplex/consensus.cpp
+  consensus/simplex/db.cpp
   consensus/simplex/metric-collector.cpp
   consensus/simplex/pool.cpp
+  consensus/simplex/state-resolver.cpp
   consensus/simplex/stats.cpp
   consensus/simplex/votes.cpp
   consensus/block-accepter.cpp
@@ -184,14 +186,10 @@ set(FULL_NODE_SOURCE
   full-node-fast-sync-overlays.hpp
   full-node-fast-sync-overlays.cpp
 
-  net/download-block.hpp
-  net/download-block.cpp
   net/download-block-new.hpp
   net/download-block-new.cpp
   net/download-archive-slice.hpp
   net/download-archive-slice.cpp
-  net/download-next-block.hpp
-  net/download-next-block.cpp
   net/download-state.hpp
   net/download-state.cpp
   net/download-proof.hpp

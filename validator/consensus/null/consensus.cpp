@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: LGPL-2.0-or-later
  */
 
+#include "consensus/stats.h"
 #include "consensus/utils.h"
 #include "td/actor/SharedFuture.h"
 #include "td/actor/coro_utils.h"
@@ -38,11 +39,11 @@ struct SlotState {
   bool finalized = false;
 };
 
-class ConsensusImpl : public runtime::SpawnsWith<Bus>, public runtime::ConnectsTo<Bus> {
+class ConsensusImpl : public td::actor::SpawnsWith<Bus>, public td::actor::ConnectsTo<Bus> {
  public:
   TON_RUNTIME_DEFINE_EVENT_HANDLER();
 
-  void start_up() {
+  void start_up() override {
     auto [awaiter, promise] = td::actor::StartedTask<StartEvent>::make_bridge();
     genesis_promise_ = std::move(promise);
     genesis_ = std::move(awaiter);
@@ -62,6 +63,10 @@ class ConsensusImpl : public runtime::SpawnsWith<Bus>, public runtime::ConnectsT
     } else {
       send_message(leader_, create_tl_object<tl::handshake>());
     }
+  }
+
+  void tear_down() override {
+    genesis_promise_.set_error(td::Status::Error(ErrorCode::cancelled, "cancelled"));
   }
 
   template <>
@@ -135,6 +140,9 @@ class ConsensusImpl : public runtime::SpawnsWith<Bus>, public runtime::ConnectsT
     SlotState& state = get_or_create_slot_state(candidate->id.slot);
     CHECK(!state.candidate.has_value());
     state.candidate = candidate;
+    if (candidate->leader != owning_bus()->local_id.idx) {
+      owning_bus().publish<TraceEvent>(stats::CandidateReceived::create(candidate, false));
+    }
 
     co_await try_validate_blocks();
     try_finalize_blocks();
@@ -241,7 +249,7 @@ class ConsensusImpl : public runtime::SpawnsWith<Bus>, public runtime::ConnectsT
 
 }  // namespace
 
-void Consensus::register_in(runtime::Runtime& runtime) {
+void Consensus::register_in(td::actor::Runtime& runtime) {
   runtime.register_actor<ConsensusImpl>("NullConsensus");
 }
 
