@@ -108,7 +108,7 @@ class CachedCellDbReader : public vm::CellDbReader {
                  << bulk_reqs_ << " bulk reqs";
   }
 
-  void add_new_cells(td::Ref<vm::Cell> const& cell) {
+  void add_new_cells(const td::Ref<vm::Cell>& cell) {
     if (!cell->is_loaded()) {
       return;
     }
@@ -283,18 +283,18 @@ class SerializePersistentState : public td::actor::Actor {
     for (auto& [type, cell] : parts) {
       validator::FileReferenceShort file_id;
       type.visit(td::overloaded(
-          [&](validator::UnsplitStateType const&) {
+          [&](const validator::UnsplitStateType&) {
             if (in_mc_block_id.seqno() == 0) {
               file_id = validator::fileref::ZeroStateShort{block_id.id.workchain, block_id.file_hash};
             } else {
               file_id = validator::fileref::PersistentStateShort::create(block_id, in_mc_block_id);
             }
           },
-          [&](validator::SplitAccountStateType const& account_state) {
+          [&](const validator::SplitAccountStateType& account_state) {
             file_id = validator::fileref::SplitAccountState::create(block_id, in_mc_block_id,
                                                                     account_state.effective_shard_id);
           },
-          [&](validator::SplitPersistentStateType const&) {
+          [&](const validator::SplitPersistentStateType&) {
             file_id = validator::fileref::SplitPersistentState::create(block_id, in_mc_block_id);
           }));
       std::string file = PSTRING() << out_dir << "/" << file_id.filename_short();
