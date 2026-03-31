@@ -221,7 +221,7 @@ td::Status ConfigInfo::unpack() {
 td::Status Config::unpack_wrapped(Ref<vm::CellSlice> config_csr) {
   try {
     return unpack(std::move(config_csr));
-  } catch (vm::VmError err) {
+  } catch (vm::VmError& err) {
     return td::Status::Error(PSLICE() << "error unpacking masterchain configuration: " << err.get_msg());
   }
 }
@@ -229,7 +229,7 @@ td::Status Config::unpack_wrapped(Ref<vm::CellSlice> config_csr) {
 td::Status Config::unpack_wrapped() {
   try {
     return unpack();
-  } catch (vm::VmError err) {
+  } catch (vm::VmError& err) {
     return td::Status::Error(PSLICE() << "error unpacking masterchain configuration: " << err.get_msg());
   }
 }
@@ -361,6 +361,28 @@ ton::ValidatorSessionConfig Config::get_consensus_config() const {
   return c;
 }
 
+namespace {
+
+template <typename Base, td::uint32(Base::* where)>
+void store_uint32(Base& base, td::uint32 value) {
+  base.*where = value;
+}
+
+template <typename Base, std::chrono::milliseconds(Base::* where)>
+void store_milliseconds(Base& base, td::uint32 value) {
+  base.*where = std::chrono::milliseconds{value};
+}
+
+template <typename Base, double(Base::* where)>
+void store_double(Base& base, td::uint32 value) {
+  float fvalue;
+  static_assert(sizeof(float) == sizeof(td::uint32));
+  memcpy(&fvalue, &value, sizeof(float));
+  base.*where = fvalue;
+}
+
+}  // namespace
+
 td::optional<ton::NewConsensusConfig> Config::get_new_consensus_config(ton::WorkchainId wc) const {
   auto c1 = get_config_param(30);
   if (c1.is_null()) {
@@ -375,25 +397,54 @@ td::optional<ton::NewConsensusConfig> Config::get_new_consensus_config(ton::Work
     return {};
   }
   auto consensus_config = get_consensus_config();
-  gen::NewConsensusConfig::Record_null_consensus_config r1;
-  if (gen::unpack_cell(c2, r1)) {
-    return ton::NewConsensusConfig{.target_rate_ms = r1.target_rate_ms,
-                                   .max_block_size = consensus_config.max_block_size,
-                                   .max_collated_data_size = consensus_config.max_collated_data_size,
-                                   .use_quic = r1.use_quic,
-                                   .consensus = ton::NewConsensusConfig::NullConsensus{}};
-  }
-  gen::NewConsensusConfig::Record_simplex_config r2;
-  if (gen::unpack_cell(c2, r2)) {
+
+  if (gen::NewConsensusConfig::Record_simplex_config v1; gen::unpack_cell(c2, v1)) {
     return ton::NewConsensusConfig{
-        .target_rate_ms = r2.target_rate_ms,
         .max_block_size = consensus_config.max_block_size,
         .max_collated_data_size = consensus_config.max_collated_data_size,
-        .use_quic = r2.use_quic,
-        .consensus = ton::NewConsensusConfig::Simplex{.slots_per_leader_window = r2.slots_per_leader_window,
-                                                      .first_block_timeout_ms = r2.first_block_timeout_ms,
-                                                      .max_leader_window_desync = r2.max_leader_window_desync}};
+
+        .use_quic = v1.use_quic,
+        .slots_per_leader_window = v1.slots_per_leader_window,
+
+        .noncritical_params =
+            {
+                .target_rate{v1.target_rate_ms},
+                .first_block_timeout{v1.first_block_timeout_ms},
+                .max_leader_window_desync = v1.max_leader_window_desync,
+            },
+    };
+  } else if (gen::NewConsensusConfig::Record_simplex_config_v2 v2; gen::unpack_cell(c2, v2)) {
+    ton::NewConsensusConfig config{
+        .max_block_size = consensus_config.max_block_size,
+        .max_collated_data_size = consensus_config.max_collated_data_size,
+
+        .use_quic = v2.use_quic,
+        .slots_per_leader_window = v2.slots_per_leader_window,
+    };
+
+    using NoncriticalParams = ton::NewConsensusConfig::NoncriticalParams;
+
+    static constexpr auto mapping = std::to_array({
+#define READ_UINT32(idx, name, _) std::pair{idx, &store_uint32<NoncriticalParams, &NoncriticalParams::name>},
+#define READ_DOUBLE(idx, name, _) std::pair{idx, &store_double<NoncriticalParams, &NoncriticalParams::name>},
+#define READ_DURATION(idx, name, _) std::pair{idx, &store_milliseconds<NoncriticalParams, &NoncriticalParams::name>},
+        ENUMERATE_NONCRITICAL_PARAMS(READ_UINT32, READ_DOUBLE, READ_DURATION)
+#undef READ_UINT32
+#undef READ_DOUBLE
+#undef READ_DURATION
+    });
+
+    vm::DictionaryFixed params{v2.noncritical_params, 8};
+    for (const auto& [key, store_func] : mapping) {
+      if (auto param = params.lookup(td::BitArray<8>(key)); param.not_null()) {
+        auto val = td::narrow_cast<td::uint32>(param->prefetch_ulong(32));
+        store_func(config.noncritical_params, val);
+      }
+    }
+
+    return config;
   }
+
   return {};
 }
 
@@ -610,7 +661,7 @@ td::Result<std::shared_ptr<TotalValidatorSet>> Config::unpack_validator_set(Ref<
   vm::Dictionary dict{std::move(dict_root), 16};
   td::BitArray<16> key_buffer;
   auto last = dict.get_minmax_key(key_buffer.bits(), 16, true);
-  if (last.is_null() || (int)key_buffer.to_ulong() != rec.total - 1) {
+  if (last.is_null() || key_buffer.to_ulong() + 1 != rec.total) {
     return td::Status::Error(
         "maximal index in a validator set dictionary must be one less than the total number of validators");
   }
@@ -620,8 +671,8 @@ td::Result<std::shared_ptr<TotalValidatorSet>> Config::unpack_validator_set(Ref<
   td::Status error;
 
   auto validator_set_check_fn = [&](Ref<vm::CellSlice> descr_cs, td::ConstBitPtr key, int n) -> bool {
-    int i = static_cast<int>(key.get_uint(n));
-    CHECK(i >= 0 && i < rec.total && !seen_keys[i]);
+    auto i = key.get_uint(n);
+    CHECK(i < rec.total && !seen_keys[i]);
     seen_keys[i] = true;
 
     gen::ValidatorDescr::Record_validator_addr descr;
@@ -1324,7 +1375,7 @@ static int process_workchain_sibling_shard_hashes(Ref<vm::Cell>& branch, Ref<vm:
   int f = (int)cs.fetch_ulong(1);
   if (f == 1) {
     if ((shard.shard & 1) || cs.size_ext() != 0x20000) {
-      return false;
+      return -1;
     }
     auto left = cs.prefetch_ref(0), right = cs.prefetch_ref(1);
     auto orig_left = left;

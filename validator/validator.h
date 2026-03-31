@@ -105,6 +105,35 @@ struct ShardBlockVerifierConfig : public td::CntObject {
   td::Status unpack(const ton_api::engine_validator_shardBlockVerifierConfig& obj);
 };
 
+struct NoncriticalParamsOverride {
+  ShardIdFull shard;
+  td::uint32 from_seqno = 0;
+  td::uint32 to_seqno = 0;
+
+  struct Params {
+#define DEFINE_UINT32_FIELD(_, name, value) std::optional<td::uint32> name;
+#define DEFINE_DOUBLE_FIELD(_, name, value) std::optional<double> name;
+#define DEFINE_DURATION_FIELD(_, name, value) std::optional<std::chrono::milliseconds> name;
+    ENUMERATE_NONCRITICAL_PARAMS(DEFINE_UINT32_FIELD, DEFINE_DOUBLE_FIELD, DEFINE_DURATION_FIELD)
+#undef DEFINE_UINT32_FIELD
+#undef DEFINE_DOUBLE_FIELD
+#undef DEFINE_DURATION_FIELD
+  };
+
+  Params params;
+
+  NewConsensusConfig::NoncriticalParams apply(const NewConsensusConfig::NoncriticalParams& base) const {
+    auto result = base;
+#define APPLY_FIELD(_, name, value) \
+  if (params.name.has_value()) {    \
+    result.name = *params.name;     \
+  }
+    ENUMERATE_NONCRITICAL_PARAMS(APPLY_FIELD, APPLY_FIELD, APPLY_FIELD)
+#undef APPLY_FIELD
+    return result;
+  }
+};
+
 struct ValidatorManagerOptions : public td::CntObject {
  public:
   virtual BlockIdExt zero_block_id() const = 0;
@@ -143,6 +172,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual bool get_celldb_direct_io() const = 0;
   virtual bool get_celldb_preload_all() const = 0;
   virtual bool get_celldb_disable_bloom_filter() const = 0;
+  virtual bool get_unsynced_liteserver() const = 0;
   virtual td::optional<double> get_catchain_max_block_delay() const = 0;
   virtual td::optional<double> get_catchain_max_block_delay_slow() const = 0;
   virtual bool get_state_serializer_enabled() const = 0;
@@ -154,6 +184,8 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual bool check_collator_node_whitelist(adnl::AdnlNodeIdShort id) const = 0;
   virtual td::Ref<ShardBlockVerifierConfig> get_shard_block_verifier_config() const = 0;
   virtual std::string get_db_event_fifo_path() const = 0;
+  virtual NewConsensusConfig::NoncriticalParams get_noncritical_params(
+      ShardIdFull shard, td::uint32 cc_seqno, const NewConsensusConfig::NoncriticalParams& config) const = 0;
 
   virtual void set_zero_block_id(BlockIdExt block_id) = 0;
   virtual void set_init_block_id(BlockIdExt block_id) = 0;
@@ -183,6 +215,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual void set_celldb_in_memory(bool value) = 0;
   virtual void set_celldb_v2(bool value) = 0;
   virtual void set_celldb_disable_bloom_filter(bool value) = 0;
+  virtual void set_unsynced_liteserver(bool value) = 0;
   virtual void set_catchain_max_block_delay(double value) = 0;
   virtual void set_catchain_max_block_delay_slow(double value) = 0;
   virtual void set_state_serializer_enabled(bool value) = 0;
@@ -195,6 +228,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual void set_shard_block_verifier_config(td::Ref<ShardBlockVerifierConfig> config) = 0;
   virtual void set_parallel_validation(bool value) = 0;
   virtual void set_db_event_fifo_path(std::string value) = 0;
+  virtual void set_noncritical_params_overrides(std::vector<NoncriticalParamsOverride> value) = 0;
 
   static td::Ref<ValidatorManagerOptions> create(BlockIdExt zero_block_id, BlockIdExt init_block_id,
                                                  bool allow_blockchain_init = false, double sync_blocks_before = 3600,

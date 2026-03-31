@@ -1330,8 +1330,11 @@ void LiteQuery::finish_getAccountState(td::BufferSlice shard_proof) {
       return;
     }
     auto rconfig = config.move_as_ok();
-    acc_state_promise_.set_value(
-        std::make_tuple(std::move(acc_csr), sstate.gen_utime, sstate.gen_lt, std::move(rconfig)));
+    if (acc_state_promise_) {
+      acc_state_promise_.set_value(
+          std::make_tuple(std::move(acc_csr), sstate.gen_utime, sstate.gen_lt, std::move(rconfig)));
+      stop();
+    }
     return;
   }
 
@@ -2490,7 +2493,7 @@ void LiteQuery::finish_listBlockTransactions(int mode, int req_count) {
       try {
         value = acc_dict.extract_value(
             acc_dict.vm::DictionaryFixed::lookup_nearest_key(cur_addr.bits(), 256, !reverse, allow_same));
-      } catch (vm::VmError err) {
+      } catch (vm::VmError& err) {
         fatal_error("error while traversing account block dictionary: "s + err.get_msg());
         return;
       }
@@ -2515,7 +2518,7 @@ void LiteQuery::finish_listBlockTransactions(int mode, int req_count) {
         try {
           tvalue = trans_dict.extract_value_ref(
               trans_dict.vm::DictionaryFixed::lookup_nearest_key(cur_trans.bits(), 64, !reverse));
-        } catch (vm::VmError err) {
+        } catch (vm::VmError& err) {
           fatal_error("error while traversing transaction dictionary of an AccountBlock: "s + err.get_msg());
           return;
         }
@@ -2538,7 +2541,7 @@ void LiteQuery::finish_listBlockTransactions(int mode, int req_count) {
         ++count;
       }
     }
-  } catch (vm::VmError err) {
+  } catch (vm::VmError& err) {
     fatal_error("error while parsing AccountBlocks of block "s + base_blk_id_.to_str() + " : " + err.get_msg());
     return;
   }
@@ -2644,7 +2647,7 @@ void LiteQuery::finish_listBlockTransactionsExt(int mode, int req_count) {
       try {
         value = acc_dict.extract_value(
             acc_dict.vm::DictionaryFixed::lookup_nearest_key(cur_addr.bits(), 256, !reverse, allow_same));
-      } catch (vm::VmError err) {
+      } catch (vm::VmError& err) {
         fatal_error("error while traversing account block dictionary: "s + err.get_msg());
         return;
       }
@@ -2669,7 +2672,7 @@ void LiteQuery::finish_listBlockTransactionsExt(int mode, int req_count) {
         try {
           tvalue = trans_dict.extract_value_ref(
               trans_dict.vm::DictionaryFixed::lookup_nearest_key(cur_trans.bits(), 64, !reverse));
-        } catch (vm::VmError err) {
+        } catch (vm::VmError& err) {
           fatal_error("error while traversing transaction dictionary of an AccountBlock: "s + err.get_msg());
           return;
         }
@@ -2688,7 +2691,7 @@ void LiteQuery::finish_listBlockTransactionsExt(int mode, int req_count) {
         return;
       }
     }
-  } catch (vm::VmError err) {
+  } catch (vm::VmError& err) {
     fatal_error("error while parsing AccountBlocks of block "s + base_blk_id_.to_str() + " : " + err.get_msg());
     return;
   }
@@ -3372,7 +3375,7 @@ void LiteQuery::continue_getOutMsgQueueSizes(td::optional<ShardIdFull> shard, Re
                             [promise = ig.get_promise(), res, i, id = blocks[i]](td::Result<td::uint64> R) mutable {
                               TRY_RESULT_PROMISE(promise, value, std::move(R));
                               res->at(i) = create_tl_object<lite_api::liteServer_outMsgQueueSize>(
-                                  create_tl_lite_block_id(id), value);
+                                  create_tl_lite_block_id(id), static_cast<td::uint32>(value));
                               promise.set_value(td::Unit());
                             });
   }
@@ -3395,7 +3398,7 @@ void LiteQuery::perform_getBlockOutMsgQueueSize(int mode, BlockIdExt blkid) {
     fatal_error("invalid BlockIdExt");
     return;
   }
-  set_continuation([=]() -> void { finish_getBlockOutMsgQueueSize(); });
+  set_continuation([this]() -> void { finish_getBlockOutMsgQueueSize(); });
   request_block_data_state(blkid);
 }
 
@@ -3465,7 +3468,7 @@ void LiteQuery::perform_getDispatchQueueInfo(int mode, BlockIdExt blkid, StdSmcA
     fatal_error("invalid max_accounts");
     return;
   }
-  set_continuation([=]() -> void { finish_getDispatchQueueInfo(after_addr, max_accounts); });
+  set_continuation([=, this]() -> void { finish_getDispatchQueueInfo(after_addr, max_accounts); });
   request_block_data_state(blkid);
 }
 
@@ -3571,7 +3574,7 @@ void LiteQuery::perform_getDispatchQueueMessages(int mode, BlockIdExt blkid, Std
     fatal_error("invalid max_messages");
     return;
   }
-  set_continuation([=]() -> void { finish_getDispatchQueueMessages(addr, lt, max_messages); });
+  set_continuation([=, this]() -> void { finish_getDispatchQueueMessages(addr, lt, max_messages); });
   request_block_data_state(blkid);
 }
 

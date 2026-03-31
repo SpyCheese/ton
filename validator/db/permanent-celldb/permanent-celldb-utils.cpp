@@ -46,8 +46,11 @@ void calculate_permanent_celldb_update(const std::map<BlockIdExt, td::Ref<BlockD
       }
       td::Ref<vm::Cell> new_state_root = update_cs.prefetch_ref(1);
       td::HashMap<vm::CellHash, int> visited;
-      PermanentCellDbUpdate update{.block_id = block->block_id(),
-                                   .state_root_hash = new_state_root->get_hash(0).bits()};
+      PermanentCellDbUpdate update{
+          .block_id = block->block_id(),
+          .state_root_hash = new_state_root->get_hash(0).bits(),
+          .to_store = {},
+      };
       std::function<void(const td::Ref<vm::Cell>&, int)> dfs = [&](const td::Ref<vm::Cell>& cell, int merkle_depth) {
         int& vis = visited[cell->get_hash()];
         if (vis & (1 << merkle_depth)) {
@@ -55,7 +58,8 @@ void calculate_permanent_celldb_update(const std::map<BlockIdExt, td::Ref<BlockD
         }
         vis |= (1 << merkle_depth);
         vm::CellSlice cs{vm::NoVm(), cell};
-        if (cs.special_type() == vm::CellTraits::SpecialType::PrunnedBranch && cell->get_level() == merkle_depth + 1) {
+        if (cs.special_type() == vm::CellTraits::SpecialType::PrunnedBranch &&
+            cell->get_level() == static_cast<td::uint32>(merkle_depth + 1)) {
           return;
         }
         update.to_store.emplace_back(

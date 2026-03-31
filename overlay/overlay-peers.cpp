@@ -140,6 +140,7 @@ td::Status OverlayImpl::validate_peer_certificate(const adnl::AdnlNodeIdShort &n
     return R.move_as_error_prefix("failed to check member certificate: failed to create encryptor: ");
   }
   auto enc = R.move_as_ok();
+  TD_PERF_COUNTER(check_signature_overlay_member_certificate);
   auto S = enc->check_signature(cert.to_sign_data(node).as_slice(), cert.signature());
   if (S.is_error()) {
     return S.move_as_error_prefix("failed to check member certificate: bad signature: ");
@@ -418,7 +419,7 @@ void OverlayImpl::receive_pong(adnl::AdnlNodeIdShort peer, double elapsed) {
   on_ping_result(peer, true, elapsed);
 }
 
-void OverlayImpl::update_neighbours(td::uint32 nodes_to_change) {
+void OverlayImpl::update_neighbours(td::uint32 nodes_to_change, bool allow_delete) {
   if (peer_list_.peers_.size() == 0) {
     return;
   }
@@ -433,7 +434,7 @@ void OverlayImpl::update_neighbours(td::uint32 nodes_to_change) {
       continue;
     }
 
-    if (overlay_type_ != OverlayType::FixedMemberList &&
+    if (allow_delete && overlay_type_ != OverlayType::FixedMemberList &&
         X->get_version() <= td::Clocks::system() - Overlays::overlay_peer_ttl()) {
       if (X->is_permanent_member()) {
         del_from_neighbour_list(X);
@@ -444,7 +445,7 @@ void OverlayImpl::update_neighbours(td::uint32 nodes_to_change) {
       continue;
     }
 
-    if (overlay_type_ == OverlayType::CertificatedMembers && !X->is_permanent_member() &&
+    if (allow_delete && overlay_type_ == OverlayType::CertificatedMembers && !X->is_permanent_member() &&
         X->certificate()->is_expired()) {
       auto id = X->get_id();
       del_peer(id);
@@ -503,7 +504,7 @@ OverlayPeer *OverlayImpl::get_random_peer(bool only_alive) {
     }
     res = P;
   }
-  update_neighbours(0);
+  update_neighbours(0, false);
   return res;
 }
 
@@ -551,6 +552,10 @@ bool OverlayImpl::is_persistent_node(const adnl::AdnlNodeIdShort &id) {
     return false;
   }
   return P->is_permanent_member();
+}
+
+size_t OverlayImpl::persistent_node_count() {
+  return peer_list_.persistent_node_count_;
 }
 
 bool OverlayImpl::is_valid_peer(const adnl::AdnlNodeIdShort &src,
@@ -719,6 +724,7 @@ void OverlayImpl::update_root_member_list(std::vector<adnl::AdnlNodeIdShort> ids
       peer_list_.peers_.insert(std::move(id), std::move(peer));
     }
   }
+  peer_list_.persistent_node_count_ = ids.size();
 
   update_member_certificate(std::move(cert));
   update_neighbours(0);

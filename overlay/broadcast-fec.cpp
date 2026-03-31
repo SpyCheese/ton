@@ -140,7 +140,7 @@ class BroadcastFec : public td::ListNode {
   }
 
   bool received_part(td::uint32 seqno) const {
-    if (seqno + 64 < next_seqno_) {
+    if (next_seqno_ >= 64 && seqno < next_seqno_ - 64) {
       return true;
     }
     if (seqno >= next_seqno_) {
@@ -206,7 +206,7 @@ void BroadcastFec::broadcast_checked(OverlayImpl *overlay, td::Result<td::Unit> 
     td::actor::send_closure(actor_id(overlay), &OverlayImpl::update_peer_err_ctr, src_peer_id_, true);
     return;
   }
-  overlay->deliver_broadcast(src_.compute_short_id(), data_.clone());
+  overlay->deliver_broadcast(src_.compute_short_id(), data_.clone(), {});
   while (!parts_.empty()) {
     distribute_part(overlay, parts_.begin()->first);
   }
@@ -316,6 +316,7 @@ td::Status BroadcastFecPart::run_checks(OverlayImpl *overlay, BroadcastFec *bcas
     TRY_STATUS(bcast->is_eligible_sender(source_));
   }
   TRY_RESULT(encryptor, overlay->get_encryptor(source_));
+  TD_PERF_COUNTER(check_signature_overlay_broadcast_fec);
   TRY_STATUS(encryptor->check_signature(to_sign().as_slice(), signature_.as_slice()));
   return td::Status::OK();
 }
@@ -351,7 +352,7 @@ td::Status BroadcastFecPart::run(OverlayImpl *overlay, BroadcastFec &bcast) {
             });
         overlay->check_broadcast(bcast.src_.compute_short_id(), R.move_as_ok(), std::move(P));
       } else {
-        overlay->deliver_broadcast(bcast.src_.compute_short_id(), R.move_as_ok());
+        overlay->deliver_broadcast(bcast.src_.compute_short_id(), R.move_as_ok(), {});
       }
     }
   }
@@ -482,6 +483,12 @@ td::Status BroadcastsFec::process_broadcast(OverlayImpl *overlay, adnl::AdnlNode
   PublicKey source(broadcast->src_);
   auto part_data_hash = sha256_bits256(broadcast->data_.as_slice());
   TRY_RESULT(fec_type, fec::FecType::create(std::move(broadcast->fec_)));
+  if (fec_type.size() != (td::uint32)broadcast->data_size_) {
+    return td::Status::Error("data size mismatch");
+  }
+  if ((size_t)broadcast->seqno_ >= fec_type.symbols_count() * 2 + 4) {
+    return td::Status::Error("too big seqno");
+  }
   auto broadcast_hash = compute_broadcast_id(source.compute_short_id(), fec_type, broadcast->data_hash_,
                                              broadcast->data_size_, broadcast->flags_);
   auto part_hash = compute_broadcast_part_id(broadcast_hash, part_data_hash, broadcast->seqno_);

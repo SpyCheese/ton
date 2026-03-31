@@ -1,6 +1,17 @@
 name: Lint
 
-on: [push, pull_request, workflow_dispatch, workflow_call]
+on:
+  pull_request:
+    branches: [master, testnet]
+    types: [opened, reopened, synchronize, ready_for_review]
+  push:
+    branches: [master, testnet]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -44,12 +55,20 @@ jobs:
 
     - name: Check spaces at EOL
       run: |
-        ! git grep --cached -Il '\s$'
+        ! git grep --cached -Il '\s$' -- :/ \
+          ':(exclude)crypto/smartcont/tolk-stdlib/' \
+          ':(exclude)tolk/' \
+          ':(exclude)tolk-tester/' \
+          ':(exclude)third-party/'
 
     - name: Check C++ formatting
       run: |
         # TODO: Run clang-format only on changed files.
-        clang-format-21 -i $(git ls-files '*.h' '*.hpp' '*.cpp' ':!^tolk/')
+        clang-format-21 -i $(git ls-files '*.h' '*.hpp' '*.cpp' \
+          ':(exclude)crypto/smartcont/tolk-stdlib/' \
+          ':(exclude)tolk/' \
+          ':(exclude)tolk-tester/' \
+          ':(exclude)third-party/')
         git diff --exit-code
 
     - name: Prepare Python environment
@@ -61,5 +80,5 @@ jobs:
     - name: Lint Python
       run: |
         uv run ruff check
-        uv run ruff format
+        uv run ruff format --check
         uv run basedpyright

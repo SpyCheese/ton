@@ -153,8 +153,7 @@ class ValidatorManagerImpl : public ValidatorManager {
                               td::Promise<td::Ref<vm::DataCell>> promise) override;
   void set_block_state_from_data(BlockHandle handle, td::Ref<BlockData> block,
                                  td::Promise<td::Ref<ShardState>> promise) override;
-  void set_block_state_from_data_preliminary(std::vector<td::Ref<BlockData>> blocks,
-                                             td::Promise<td::Unit> promise) override;
+  void set_block_state_from_data_bulk(std::vector<td::Ref<BlockData>> blocks, td::Promise<td::Unit> promise) override;
   void get_cell_db_reader(td::Promise<std::shared_ptr<vm::CellDbReader>> promise) override;
   void store_persistent_state_file(BlockIdExt block_id, BlockIdExt masterchain_block_id, PersistentStateType type,
                                    td::BufferSlice state, td::Promise<td::Unit> promise) override;
@@ -195,7 +194,7 @@ class ValidatorManagerImpl : public ValidatorManager {
                                    td::Promise<td::Ref<block::BlockSignatureSet>> promise) override;
 
   void set_block_candidate(BlockIdExt id, BlockCandidate candidate, CatchainSeqno cc_seqno,
-                           td::uint32 validator_set_hash, td::Promise<td::Unit> promise) override;
+                           td::uint32 validator_set_hash, bool cache_only, td::Promise<td::Unit> promise) override;
   void send_block_candidate_broadcast(BlockIdExt id, CatchainSeqno cc_seqno, td::uint32 validator_set_hash,
                                       td::BufferSlice data, int mode) override;
 

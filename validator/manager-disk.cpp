@@ -157,7 +157,7 @@ void ValidatorManagerImpl::sync_complete(td::Promise<td::Unit> promise) {
                                   .prev = prev,
                                   .creator = created_by,
                                   .validator_set = val_set},
-                    actor_id(this), td::Timestamp::in(10.0), {}, std::move(P));
+                    actor_id(this), {}, std::move(P));
 }
 
 void ValidatorManagerImpl::validate_fake(BlockCandidate candidate, std::vector<BlockIdExt> prev, BlockIdExt last,
@@ -731,9 +731,9 @@ void ValidatorManagerImpl::set_block_state_from_data(BlockHandle handle, td::Ref
   td::actor::send_closure(db_, &Db::store_block_state_from_data, handle, block, std::move(promise));
 }
 
-void ValidatorManagerImpl::set_block_state_from_data_preliminary(std::vector<td::Ref<BlockData>> blocks,
-                                                                 td::Promise<td::Unit> promise) {
-  td::actor::send_closure(db_, &Db::store_block_state_from_data_preliminary, std::move(blocks), std::move(promise));
+void ValidatorManagerImpl::set_block_state_from_data_bulk(std::vector<td::Ref<BlockData>> blocks,
+                                                          td::Promise<td::Unit> promise) {
+  td::actor::send_closure(db_, &Db::store_block_state_from_data_bulk, std::move(blocks), std::move(promise));
 }
 
 void ValidatorManagerImpl::get_cell_db_reader(td::Promise<std::shared_ptr<vm::CellDbReader>> promise) {
@@ -834,7 +834,12 @@ void ValidatorManagerImpl::set_next_block(BlockIdExt block_id, BlockIdExt next, 
 }
 
 void ValidatorManagerImpl::set_block_candidate(BlockIdExt id, BlockCandidate candidate, CatchainSeqno cc_seqno,
-                                               td::uint32 validator_set_hash, td::Promise<td::Unit> promise) {
+                                               td::uint32 validator_set_hash, bool cache_only,
+                                               td::Promise<td::Unit> promise) {
+  if (cache_only) {
+    promise.set_value(td::Unit{});
+    return;
+  }
   td::actor::send_closure(db_, &Db::store_block_candidate, std::move(candidate), std::move(promise));
 }
 

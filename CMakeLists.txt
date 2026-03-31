@@ -108,10 +108,6 @@ if ((ARCHITECTURE MATCHES "arm64") AND (CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND
 endif()
 #END M1 support
 
-if (CLANG AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "20")
-  add_compile_options(--warning-suppression-mappings=${CMAKE_CURRENT_SOURCE_DIR}/suppression_mappings.txt)
-endif()
-
 option(TON_WERROR_BUILD "Use -Werror" OFF)
 
 # If we want to check -Werror build in CI, we want to use it for third party projects as well but we
@@ -127,7 +123,7 @@ include(BuildSodium)
 include(BuildLZ4)
 
 if (USE_EMSCRIPTEN OR EMSCRIPTEN)
-  set(SODIUM_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3pp_emscripten/libsodium CACHE PATH "Sodium root directory" FORCE)
+  set(SODIUM_ROOT_DIR ${CMAKE_BINARY_DIR}/3pp_emscripten/libsodium CACHE PATH "Sodium root directory" FORCE)
   if (EXISTS ${SODIUM_ROOT_DIR}/lib/libsodium.a)
     set(SODIUM_LIBRARY_PATH ${SODIUM_ROOT_DIR}/lib/libsodium.a)
     set(SODIUM_INCLUDE_PATH ${SODIUM_ROOT_DIR}/include)
@@ -217,15 +213,6 @@ endfunction()
 crc32_scope()
 set(CRC32C_FOUND 1)
 
-option(USE_COROUTINES "experimental support of coroutines" OFF)
-if (USE_COROUTINES)
-  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(TD_HAVE_COROUTINES 1)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcoroutines-ts")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-  endif()
-endif()
-
 option(USE_LIBRAPTORQ "use libraptorq for tests" OFF)
 if (USE_LIBRAPTORQ)
   set(USE_LZ4 OFF CACHE BOOL "use lz4")
@@ -241,7 +228,7 @@ if (USE_QUIC)
   # Set OpenSSL paths to use our custom-built OpenSSL with QUIC support
   # Use CACHE variables to override find_package(OpenSSL) behavior
   if (USE_EMSCRIPTEN OR EMSCRIPTEN)
-    set(OPENSSL_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3pp_emscripten/openssl_em CACHE PATH "OpenSSL root directory" FORCE)
+    set(OPENSSL_ROOT_DIR ${CMAKE_BINARY_DIR}/3pp_emscripten/openssl_em CACHE PATH "OpenSSL root directory" FORCE)
     set(OPENSSL_INCLUDE_DIR ${OPENSSL_ROOT_DIR}/include CACHE PATH "OpenSSL include directory" FORCE)
     set(OPENSSL_CRYPTO_LIBRARY ${OPENSSL_ROOT_DIR}/libcrypto.a CACHE FILEPATH "OpenSSL crypto library" FORCE)
     set(OPENSSL_SSL_LIBRARY ${OPENSSL_ROOT_DIR}/libssl.a CACHE FILEPATH "OpenSSL SSL library" FORCE)
@@ -543,12 +530,15 @@ function(ton_test TEST_NAME)
   add_dependencies(all-tests ${TEST_NAME})
 endfunction()
 
+enable_testing()
+
 set(TDUTILS_MIME_TYPE OFF CACHE BOOL "Generate mime type conversion")
 add_subdirectory(tdutils)
 if (TARGET lz4 AND TARGET tdutils)
   add_dependencies(tdutils lz4)
 endif()
 add_subdirectory(memprof)
+add_subdirectory(metrics)
 add_subdirectory(tdactor)
 add_subdirectory(tdnet)
 if (TON_USE_ROCKSDB)
@@ -687,7 +677,7 @@ target_link_libraries(test-rldp adnl adnltest dht rldp tl_api)
 add_executable(test-rldp2 test/test-rldp2.cpp)
 target_link_libraries(test-rldp2 adnl adnltest dht rldp2 tl_api)
 add_executable(bench-rldp test/net/bench-rldp.cpp)
-target_link_libraries(bench-rldp adnl adnltest dht rldp rldp2 tl_api quic)
+target_link_libraries(bench-rldp adnl adnltest dht rldp rldp2 tl_api quic metrics)
 add_executable(test-quic-sender test/net/test-quic-sender.cpp)
 target_link_libraries(test-quic-sender adnl dht tl_api quic)
 add_executable(test-validator-session-state test/test-validator-session-state.cpp)
@@ -727,7 +717,6 @@ target_link_libraries(all_tests INTERFACE tdutils tdactor tdnet tdfec ton_db ton
 endif()
 #END internal
 
-enable_testing()
 set(TEST_OPTIONS "--regression ${CMAKE_CURRENT_SOURCE_DIR}/test/regression-tests.ans --filter -Bench")
 separate_arguments(TEST_OPTIONS)
 ton_test(test-ed25519)

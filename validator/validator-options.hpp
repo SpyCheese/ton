@@ -146,6 +146,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   bool get_celldb_disable_bloom_filter() const override {
     return celldb_disable_bloom_filter_;
   }
+  bool get_unsynced_liteserver() const override {
+    return unsynced_liteserver_;
+  }
   td::optional<double> get_catchain_max_block_delay() const override {
     return catchain_max_block_delay_;
   }
@@ -178,6 +181,15 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   }
   std::string get_db_event_fifo_path() const override {
     return db_event_fifo_path_;
+  }
+  NewConsensusConfig::NoncriticalParams get_noncritical_params(
+      ShardIdFull shard, td::uint32 cc_seqno, const NewConsensusConfig::NoncriticalParams& config) const override {
+    for (auto& o : noncritical_params_overrides_) {
+      if (cc_seqno >= o.from_seqno && cc_seqno <= o.to_seqno && shard_is_ancestor(o.shard, shard)) {
+        return o.apply(config);
+      }
+    }
+    return config;
   }
 
   void set_zero_block_id(BlockIdExt block_id) override {
@@ -266,6 +278,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_celldb_disable_bloom_filter(bool value) override {
     celldb_disable_bloom_filter_ = value;
   }
+  void set_unsynced_liteserver(bool value) override {
+    unsynced_liteserver_ = value;
+  }
   void set_catchain_max_block_delay(double value) override {
     catchain_max_block_delay_ = value;
   }
@@ -306,6 +321,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   }
   void set_db_event_fifo_path(std::string value) override {
     db_event_fifo_path_ = std::move(value);
+  }
+  void set_noncritical_params_overrides(std::vector<NoncriticalParamsOverride> value) override {
+    noncritical_params_overrides_ = std::move(value);
   }
 
   ValidatorManagerOptionsImpl* make_copy() const override {
@@ -356,6 +374,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   bool celldb_in_memory_ = false;
   bool celldb_v2_ = false;
   bool celldb_disable_bloom_filter_ = false;
+  bool unsynced_liteserver_ = false;
   td::optional<double> catchain_max_block_delay_, catchain_max_block_delay_slow_;
   bool state_serializer_enabled_ = true;
   td::Ref<CollatorOptions> collator_options_{true};
@@ -367,6 +386,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   td::Ref<ShardBlockVerifierConfig> shard_block_verifier_config_{true};
   bool parallel_validation = false;
   std::string db_event_fifo_path_;
+  std::vector<NoncriticalParamsOverride> noncritical_params_overrides_;
 };
 
 }  // namespace validator

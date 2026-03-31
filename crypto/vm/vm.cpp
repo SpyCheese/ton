@@ -699,7 +699,7 @@ Ref<vm::Cell> lookup_library_in(td::ConstBitPtr key, vm::Dictionary& dict) {
       return root;
     }
     return {};
-  } catch (vm::VmError) {
+  } catch (vm::VmError&) {
     return {};
   }
 }

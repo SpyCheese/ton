@@ -4,9 +4,12 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <tuple>
 #include <variant>
 
+#include "adnl/adnl-node-id.hpp"
 #include "td/actor/ActorOwn.h"
 #include "td/actor/core/Actor.h"
 #include "td/utils/Heap.h"
@@ -43,11 +46,12 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
     bool enable_gro = true;
     bool enable_mmsg = true;
     CongestionControlAlgo cc_algo = CongestionControlAlgo::Bbr;
-    std::optional<td::uint64> inbound_stream_max_size = std::nullopt;
+    std::optional<size_t> flood_control = DEFAULT_FLOOD_CONTROL;
+    std::optional<size_t> max_streams_bidi = std::nullopt;
   };
   class Callback {
    public:
-    virtual void on_connected(QuicConnectionId cid, td::SecureString peer_public_key, bool is_outbound) = 0;
+    virtual td::Status on_connected(QuicConnectionId cid, td::SecureString peer_public_key, bool is_outbound) = 0;
     virtual td::Status on_stream(QuicConnectionId cid, QuicStreamID sid, td::BufferSlice data, bool is_end) = 0;
     virtual void on_closed(QuicConnectionId cid) = 0;
     virtual void on_stream_closed(QuicConnectionId cid, QuicStreamID sid) = 0;
@@ -58,6 +62,7 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
     virtual td::Timestamp next_alarm() const {
       return td::Timestamp::never();
     }
+    virtual void set_peer_mtu_callback(std::function<td::uint64(adnl::AdnlNodeIdShort)> f) = 0;
     virtual ~Callback() = default;
   };
 
@@ -74,18 +79,47 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
   void close(QuicConnectionId cid);
   void log_stats(std::string reason = "stats");
 
+  void set_default_mtu(td::uint64 mtu);
+  void set_peer_mtu(adnl::AdnlNodeIdShort peer_id, td::uint64 mtu);
+
   constexpr static size_t DEFAULT_FLOOD_CONTROL = 10;
 
-  QuicServer(td::UdpSocketFd fd, td::Ed25519::PrivateKey server_key, td::BufferSlice alpn,
+  QuicServer(td::UdpSocketFd fd, td::Ed25519::PrivateKey server_key, td::uint64 defaukt_mtu, td::BufferSlice alpn,
              std::unique_ptr<Callback> callback, Options options,
-             std::optional<size_t> flood_control = DEFAULT_FLOOD_CONTROL);
+             std::map<adnl::AdnlNodeIdShort, td::uint64> peers_mtu = {});
 
   static td::Result<td::actor::ActorOwn<QuicServer>> create(int port, td::Ed25519::PrivateKey server_key,
-                                                            std::unique_ptr<Callback> callback, td::Slice alpn = "ton",
-                                                            td::Slice bind_host = "0.0.0.0");
+                                                            std::unique_ptr<Callback> callback, td::uint64 default_mtu,
+                                                            td::Slice alpn = "ton", td::Slice bind_host = "0.0.0.0");
   static td::Result<td::actor::ActorOwn<QuicServer>> create(int port, td::Ed25519::PrivateKey server_key,
-                                                            std::unique_ptr<Callback> callback, td::Slice alpn,
-                                                            td::Slice bind_host, Options options);
+                                                            std::unique_ptr<Callback> callback, td::uint64 default_mtu,
+                                                            td::Slice alpn, td::Slice bind_host, Options options,
+                                                            std::map<adnl::AdnlNodeIdShort, td::uint64> peers_mtu = {});
+
+  struct Stats {
+    struct Entry {
+      size_t total_conns = 1;
+      QuicConnectionStats impl_stats = {};
+
+      Entry operator+(const Entry &other) const {
+        Entry res = {.total_conns = total_conns + other.total_conns, .impl_stats = impl_stats + other.impl_stats};
+        res.impl_stats.mean_rtt = (static_cast<double>(total_conns) * impl_stats.mean_rtt +
+                                   static_cast<double>(other.total_conns) * other.impl_stats.mean_rtt) /
+                                  static_cast<double>(total_conns + other.total_conns);
+        return res;
+      }
+
+      Entry operator-(const Entry &other) const {
+        Entry res = {.total_conns = total_conns - other.total_conns, .impl_stats = impl_stats - other.impl_stats};
+        res.impl_stats.mean_rtt = impl_stats.mean_rtt;
+        return res;
+      }
+
+    } summary = {};
+    std::unordered_map<QuicConnectionId, Entry> per_conn = {};
+  };
+
+  void collect_stats(td::Promise<Stats> P);
 
  protected:
   void start_up() override;
@@ -117,20 +151,34 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
     std::unique_ptr<QuicConnectionPImpl> impl_;
     td::IPAddress remote_address;
     QuicConnectionId cid;
-    std::optional<QuicConnectionId> temp_cid;
+    std::optional<QuicConnectionId> bootstrap_routed_cid;
+    std::set<QuicConnectionId> routed_cids;
     bool is_outbound;
     bool in_active_queue = false;
     friend td::StringBuilder &operator<<(td::StringBuilder &sb, const ConnectionState &state) {
       sb << "Connection{" << (state.is_outbound ? "to" : "from") << " " << state.remote_address;
       sb << " cid=" << state.cid;
-      if (state.temp_cid) {
-        sb << " (temp=" << state.temp_cid.value() << ")";
-      }
       sb << "}";
       return sb;
     }
   };
+  struct BootstrapRouteKey {
+    td::IPAddress remote_address;
+    QuicConnectionId routed_cid;
+    friend bool operator<(const BootstrapRouteKey &a, const BootstrapRouteKey &b) {
+      return std::tie(a.remote_address, a.routed_cid) < std::tie(b.remote_address, b.routed_cid);
+    }
+  };
   void on_connection_updated(ConnectionState &state);
+  void bind_cid(const QuicConnectionId &primary_cid, const QuicConnectionId &cid);
+  void unbind_cid(const QuicConnectionId &primary_cid, const QuicConnectionId &cid);
+  void unbind_all_cids(ConnectionState &state);
+  td::Result<std::shared_ptr<ConnectionState>> install_connection(std::unique_ptr<QuicConnectionPImpl> p_impl,
+                                                                  const td::IPAddress &remote_address, bool is_outbound,
+                                                                  std::optional<QuicConnectionId> bootstrap_routed_cid);
+  void on_local_cid_issued(const QuicConnectionId &primary_cid, const QuicConnectionId &cid);
+  void on_local_cid_retired(const QuicConnectionId &primary_cid, const QuicConnectionId &cid);
+  bool is_first_packet_for_new_connection(td::Slice datagram) const;
 
   void update_alarm();
   void drain_ingress();
@@ -150,12 +198,14 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
   bool gro_enabled_{false};
   CongestionControlAlgo cc_algo_{CongestionControlAlgo::Cubic};
   std::optional<size_t> flood_control_;
+  std::optional<size_t> max_streams_bidi_;
   std::unordered_map<std::string, size_t> flood_map_;
 
   std::unique_ptr<Callback> callback_;
   td::actor::ActorId<QuicServer> self_id_;
 
-  std::map<QuicConnectionId, QuicConnectionId> to_primary_cid_;
+  std::map<QuicConnectionId, QuicConnectionId> cid_to_primary_cid_;
+  std::map<BootstrapRouteKey, QuicConnectionId> bootstrap_routes_;
   std::map<QuicConnectionId, std::shared_ptr<ConnectionState>> connections_;
   std::deque<QuicConnectionId> active_connections_;
   std::vector<QuicConnectionId> to_erase_connections_;
@@ -185,6 +235,9 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
   };
   UdpStats ingress_stats_;
   UdpStats egress_stats_;
+
+  td::uint64 default_mtu_ = 0;
+  std::map<adnl::AdnlNodeIdShort, td::uint64> peers_mtu_;
 };
 
 }  // namespace ton::quic
