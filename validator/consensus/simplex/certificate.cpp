@@ -30,15 +30,19 @@ td::Result<td::Ref<Certificate<T>>> Certificate<T>::from_tl(tl::voteSignatureSet
     voted[who] = true;
 
     auto validator = PeerValidatorId{who}.get_using(bus);
-    if (!validator.check_signature(bus.session_id, vote_to_sign, signature->signature_)) {
-      return td::Status::Error(PSTRING() << "Invalid vote signature for " << validator);
-    }
     signatures.emplace_back(VoteSignature{validator.idx, std::move(signature->signature_)});
     voted_weight += validator.weight;
   }
 
   if (voted_weight < (bus.total_weight * 2) / 3 + 1) {
     return td::Status::Error("Not enough signatures in certificate");
+  }
+
+  for (const auto& [who, signature] : signatures) {
+    auto validator = PeerValidatorId{who}.get_using(bus);
+    if (!validator.check_signature(bus.session_id, vote_to_sign, signature)) {
+      return td::Status::Error(PSTRING() << "Invalid vote signature for " << validator);
+    }
   }
 
   return td::make_ref<Certificate<T>>(std::move(vote), std::move(signatures));
@@ -66,7 +70,8 @@ template <ValidVote T>
 tl::VoteSignatureSetRef Certificate<T>::to_tl_vote_signature_set() const {
   std::vector<tl::VoteSignatureRef> tl_sigs;
   for (const auto& [validator, signature] : signatures) {
-    tl_sigs.push_back(create_tl_object<tl::voteSignature>(validator.value(), signature.clone()));
+    auto idx = static_cast<td::uint32>(validator.value());
+    tl_sigs.push_back(create_tl_object<tl::voteSignature>(idx, signature.clone()));
   }
   return create_tl_object<tl::voteSignatureSet>(std::move(tl_sigs));
 }
