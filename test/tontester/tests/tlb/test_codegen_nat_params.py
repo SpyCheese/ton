@@ -2,8 +2,12 @@
 
 from generated.nat_params import (
     FixedArrayType,
+    MaybeTupleType,
     ThreeIntsType,
     fixed_array,
+    just,
+    maybe_tuple,
+    nothing,
     three_ints,
 )
 from tlb.object import UintTypeConstructor
@@ -50,3 +54,25 @@ class TestThreeInts:
     def test_bit_count(self):
         obj = three_ints(items=fixed_array[int](3, UintTypeConstructor(32), items=[0, 0, 0]))
         assert obj.serialize().begin_parse().remaining_bits == 96
+
+
+class TestMaybeTuple:
+    """Maybe (3 * uint8): tuple as a generic arg, exercises TupleTypeConstructor."""
+
+    def test_just_roundtrip(self):
+        from tlb.object import TupleTypeConstructor
+
+        uint8_ti = UintTypeConstructor(8)
+        tuple_ti = TupleTypeConstructor(3, uint8_ti)
+        inner = just[list[int]](tuple_ti, value=[10, 20, 30])
+        obj = maybe_tuple(inner=inner)
+        result = MaybeTupleType().load_from(obj.serialize().begin_parse())
+        assert isinstance(result, maybe_tuple)
+        assert isinstance(result.inner, just)
+        assert result.inner.value == [10, 20, 30]
+
+    def test_nothing_roundtrip(self):
+        obj = maybe_tuple(inner=nothing())
+        result = MaybeTupleType().load_from(obj.serialize().begin_parse())
+        assert isinstance(result, maybe_tuple)
+        assert isinstance(result.inner, nothing)

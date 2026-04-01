@@ -158,7 +158,7 @@ class PyContext:
                 "RefType",
                 "TLBRecord",
                 "TlbModelError",
-                "TupleTypeInfo",
+                "TupleTypeConstructor",
                 "TypeInfo",
                 "UintTypeConstructor",
             ]

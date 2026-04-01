@@ -222,18 +222,23 @@ class BitsTypeConstructor(TypeInfo[bitarray]):
 
 
 @final
-class TupleTypeInfo[X](TypeInfo[list[X], int, TypeInfo[X]]):
-    @override
-    def serialize_value(self, value: list[X], builder: Builder) -> None:
-        raise NotImplementedError("TupleTypeInfo.serialize_value")
+class TupleTypeConstructor[X](TypeInfo[list[X]]):
+    def __init__(self, count: int, element_ti: TypeInfo[X]) -> None:
+        self._count = count
+        self._element_ti = element_ti
 
     @override
-    def load_from(self, cs: Slice, count: int, element_ti: TypeInfo[X]) -> list[X]:
+    def serialize_value(self, value: list[X], builder: Builder) -> None:
+        for i in range(self._count):
+            self._element_ti.serialize_value(value[i], builder)
+
+    @override
+    def load_from(self, cs: Slice) -> list[X]:
         result: list[X] = []
-        for _ in range(count):
-            result.append(element_ti.load_from(cs))
+        for _ in range(self._count):
+            result.append(self._element_ti.load_from(cs))
         return result
 
     @override
     def __repr__(self) -> str:
-        return "Tuple"
+        return f"Tuple({self._count}, {self._element_ti!r})"

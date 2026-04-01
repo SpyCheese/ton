@@ -438,9 +438,9 @@ class TupleStrategy(TypeStrategy):
 
     @override
     def type_info_expr(self) -> str:
-        self.ctx.use("TupleTypeInfo")
+        self.ctx.use("TupleTypeConstructor")
         elem_ti = self.element.type_info_expr()
-        return f"TupleTypeInfo[{self.element.py_type()}].instantiate({self.count.local}, {elem_ti})"
+        return f"TupleTypeConstructor({self.count.local}, {elem_ti})"
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:

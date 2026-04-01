@@ -51,7 +51,7 @@ _RESERVED: frozenset[str] = (
             "Slice",
             "TLBRecord",
             "TlbModelError",
-            "TupleTypeInfo",
+            "TupleTypeConstructor",
             "TypeInfo",
             "UintTypeConstructor",
         }
