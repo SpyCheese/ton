@@ -1,6 +1,5 @@
 """CRC32 auto-tag computation."""
 
-from __future__ import annotations
 
 import zlib
 

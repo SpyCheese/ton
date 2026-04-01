@@ -1,0 +1,7 @@
+// Types with nat parameters
+
+// Basic: type parameterized by a natural number
+fixed_array$_ {n:#} {X:Type} items:(n * X) = FixedArray n X;
+
+// Concrete nat param instantiation
+three_ints$_ items:(FixedArray 3 uint32) = ThreeInts;

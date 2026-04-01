@@ -4,7 +4,6 @@ All identifiers are resolved, nat vs type expressions are separated into
 distinct union types, and deserialization plans are computed.
 """
 
-from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -14,9 +13,6 @@ from .ast_nodes import CompareOp
 
 class SemaError(Exception):
     pass
-
-
-# ── Parameter kinds ───────────────────────────────────────────────────
 
 
 class ParamKind(Enum):
@@ -30,7 +26,17 @@ class ParamDef:
     kind: ParamKind
 
 
-# ── Nat expressions (evaluate to natural numbers at runtime) ──────────
+@dataclass(frozen=True)
+class TypeLevelParam:
+    """Sentinel for a type-level parameter position.
+
+    Used as a scope binding key so that NatTypeArg(position) can resolve
+    to the correct Python variable name. One per position on the type.
+    """
+
+    position: int
+    kind: ParamKind
+    is_output: bool
 
 
 @dataclass
@@ -83,15 +89,12 @@ class NatTypeArg:
     Known from the caller at deserialization time.
     """
 
-    position: int
+    param: TypeLevelParam
 
 
 type ResolvedNatExpr = (
     NatLiteral | NatParamRef | NatFieldValue | NatAdd | NatSub | NatMul | NatGetBit | NatTypeArg
 )
-
-
-# ── Type expressions (describe serialization format) ──────────────────
 
 
 @dataclass
@@ -114,14 +117,6 @@ class TupleType:
 
 
 @dataclass
-class CondType:
-    """selector ? inner — conditional field."""
-
-    selector: ResolvedNatExpr
-    inner: ResolvedTypeExpr
-
-
-@dataclass
 class CellRefType:
     """^T — value in a referenced cell."""
 
@@ -135,14 +130,45 @@ class AnonymousRecordType:
     type: ResolvedType
 
 
-type ResolvedTypeExpr = (
-    TypeParamRef | TypeApply | TupleType | CondType | CellRefType | AnonymousRecordType
-)
+type ResolvedTypeExpr = TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
 
 type ResolvedExpr = ResolvedNatExpr | ResolvedTypeExpr
 
 
-# ── Fields ────────────────────────────────────────────────────────────
+def _nat_references_params(expr: ResolvedNatExpr) -> bool:
+    """Check whether a nat expression references any constructor parameters."""
+    match expr:
+        case NatParamRef() | NatFieldValue():
+            return True
+        case NatAdd(left=left, right=right) | NatSub(left=left, right=right) | NatMul(left=left, right=right):
+            return _nat_references_params(left) or _nat_references_params(right)
+        case NatGetBit(value=value, bit=bit):
+            return _nat_references_params(value) or _nat_references_params(bit)
+        case _:
+            return False
+
+
+def references_type_params(expr: ResolvedTypeExpr) -> bool:
+    """Check whether a type expression references any constructor parameters (type or nat)."""
+    match expr:
+        case TypeParamRef():
+            return True
+        case TypeApply(arguments=arguments):
+            for a in arguments:
+                if isinstance(
+                    a, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
+                ):
+                    if references_type_params(a):
+                        return True
+                elif _nat_references_params(a):
+                    return True
+            return False
+        case CellRefType(inner=inner):
+            return references_type_params(inner)
+        case TupleType(element=element):
+            return references_type_params(element)
+        case AnonymousRecordType():
+            return any(references_type_params(f.type_expr) for f in expr.type.constructors[0].fields)
 
 
 @dataclass(eq=False)
@@ -150,9 +176,7 @@ class ResolvedField:
     name: str | None
     type_expr: ResolvedTypeExpr
     is_nat_valued: bool = False
-
-
-# ── Deserialization steps ─────────────────────────────────────────────
+    condition: ResolvedNatExpr | None = None
 
 
 @dataclass
@@ -207,9 +231,6 @@ class CheckConstraint:
 type DeserStep = ReadField | BindParam | BindOutputParam | SolveConstraint | CheckConstraint
 
 
-# ── Constructor ───────────────────────────────────────────────────────
-
-
 @dataclass
 class ResolvedConstraint:
     """A resolved constraint expression (from { expr } in the source).
@@ -236,17 +257,11 @@ class ResolvedConstructor:
     is_special: bool
     params: list[ParamDef]
     fields: list[ResolvedField]
-    # Resolved expression for each non-output result param position.
-    # Used to bind implicit params from type args at deser start.
-    # Key = result param position, value = resolved expr referencing implicit params.
     result_param_exprs: dict[int, ResolvedExpr] = field(default_factory=dict)
-    # Fields and constraints in source order (for left-to-right deser processing)
     source_order: list[FieldOrConstraint] = field(default_factory=list)
     deser_steps: list[DeserStep] = field(default_factory=list)
     output_values: list[ResolvedNatExpr] = field(default_factory=list)
-
-
-# ── Constructor match tree ─────────────────────────────────────────────
+    output_nat_params: set[ParamDef] = field(default_factory=set)
 
 
 @dataclass
@@ -291,9 +306,6 @@ class MatchFail:
 type MatchTree = MatchTag | MatchBit | MatchConstraint | MatchConstructor | MatchFail
 
 
-# ── Inference info ────────────────────────────────────────────────────
-
-
 @dataclass
 class InferenceInfo:
     """Per-Type-param: can output params propagate through this param?"""
@@ -302,15 +314,12 @@ class InferenceInfo:
     constructor_field: dict[ResolvedConstructor, ResolvedField] = field(default_factory=dict)
 
 
-# ── Type ──────────────────────────────────────────────────────────────
-
-
 @dataclass(eq=False)
 class ResolvedType:
     name: str
     type_idx: int
     arity: int = 0
-    param_kinds: list[ParamKind] = field(default_factory=list)
+    type_level_params: list[TypeLevelParam] = field(default_factory=list)
     constructors: list[ResolvedConstructor] = field(default_factory=list)
 
     produces_nat: bool = False
@@ -321,5 +330,4 @@ class ResolvedType:
     typedef_target: ResolvedTypeExpr | None = None
 
     match_tree: MatchTree | None = None
-    output_param_positions: list[int] = field(default_factory=list)
     inference: list[InferenceInfo] = field(default_factory=list)

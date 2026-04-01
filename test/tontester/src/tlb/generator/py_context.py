@@ -4,7 +4,6 @@ Owns the import tracker, name scope, and ref wrapper registry.
 Both py_codegen and py_emit depend on this, avoiding circular imports.
 """
 
-from __future__ import annotations
 
 from collections.abc import Callable
 
@@ -18,10 +17,7 @@ class PyContext:
     scope: NameScope
     used_imports: set[str]
     _next_tmp: int
-    # Ref wrapper registry: (inner_class_name, is_special) -> generated class name
-    # Populated by CellRefStrategy, emitted by FileGenerator before type code
     ref_wrappers: dict[tuple[str, bool], str]
-    # Deferred ref wrapper source code (generated lazily, emitted once)
     ref_wrapper_code: list[str]
 
     def __init__(self) -> None:
@@ -75,7 +71,6 @@ class PyContext:
             sb.line(f"_value: {inner_py_type} | None")
             sb.blank()
 
-            # __init__: accept either a value or a Cell
             sb.line(f"def __init__(self, value: {inner_py_type} | Cell) -> None:")
             with sb.block():
                 sb.line("if isinstance(value, Cell):")
@@ -88,7 +83,6 @@ class PyContext:
                     sb.line("self._value = value")
             sb.blank()
 
-            # ref property: lazy deserialize
             sb.line("@property")
             sb.line(f"def ref(self) -> {inner_py_type}:")
             with sb.block():
@@ -110,13 +104,11 @@ class PyContext:
                                 "raise TlbModelError("
                                 + f"'expected special cell for {inner_class_name}, got ordinary cell')"
                             )
-                    # Load inner value
                     sb.line(f"self._value = {wrapper_name}._load_inner(cs)")
                     sb.line("self._cell = None")
                 sb.line("return self._value")
             sb.blank()
 
-            # serialize_ref: serialize to a Cell
             sb.line("def serialize_ref(self) -> Cell:")
             with sb.block():
                 sb.line("if self._cell is not None:")
@@ -128,7 +120,6 @@ class PyContext:
                 sb.line("return builder.end_cell()")
             sb.blank()
 
-            # Static helpers for inner (de)serialization — filled by the strategy
             sb.line("@staticmethod")
             sb.line(f"def _store_inner(value: {inner_py_type}, builder: Builder) -> None:")
             with sb.block():
@@ -144,8 +135,6 @@ class PyContext:
         return wrapper_name
 
     def emit_imports(self, sb: SourceBuilder) -> None:
-        sb.line("from __future__ import annotations")
-        sb.blank()
         if "dataclass" in self.used_imports:
             sb.line("from dataclasses import dataclass")
         typing_parts = [n for n in ["final", "override"] if n in self.used_imports]
@@ -158,6 +147,22 @@ class PyContext:
         if pytoniq:
             sb.line(f"from pytoniq_core import {', '.join(pytoniq)}")
         sb.blank()
-        tlb_obj = [n for n in ["TLBRecord", "TypeInfo", "TlbModelError"] if n in self.used_imports]
+        tlb_obj = [
+            n
+            for n in [
+                "AnyType",
+                "BitsTypeConstructor",
+                "InstantiableTypeInfo",
+                "IntTypeConstructor",
+                "Ref",
+                "RefType",
+                "TLBRecord",
+                "TlbModelError",
+                "TupleTypeInfo",
+                "TypeInfo",
+                "UintTypeConstructor",
+            ]
+            if n in self.used_imports
+        ]
         if tlb_obj:
             sb.line(f"from tlb.object import {', '.join(tlb_obj)}")

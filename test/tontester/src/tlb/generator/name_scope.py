@@ -5,7 +5,6 @@ and previously registered names. Maps sema objects (ResolvedType,
 ResolvedConstructor, ParamDef, ResolvedField) to unique Python identifiers.
 """
 
-from __future__ import annotations
 
 import keyword
 
@@ -14,15 +13,14 @@ from .sema_types import (
     ResolvedConstructor,
     ResolvedField,
     ResolvedType,
+    TypeLevelParam,
 )
 
-# Python keywords and soft keywords that can't be used as identifiers
 _RESERVED: frozenset[str] = (
     frozenset(keyword.kwlist)
     | frozenset(keyword.softkwlist)
     | frozenset(
         {
-            # builtins we don't want to shadow
             "int",
             "str",
             "bool",
@@ -43,19 +41,24 @@ _RESERVED: frozenset[str] = (
             "Exception",
             "ValueError",
             "TypeError",
-            # names from our runtime library
+            "BitsTypeConstructor",
             "Builder",
             "Cell",
+            "InstantiableTypeInfo",
+            "IntTypeConstructor",
+            "Ref",
+            "RefType",
             "Slice",
-            "TypeInfo",
             "TLBRecord",
             "TlbModelError",
+            "TupleTypeInfo",
+            "TypeInfo",
+            "UintTypeConstructor",
         }
     )
 )
 
-# Sema objects we can bind names to
-type Bindable = ResolvedType | ResolvedConstructor | ResolvedField | ParamDef
+type Bindable = ResolvedType | ResolvedConstructor | ResolvedField | ParamDef | TypeLevelParam
 
 
 class NameScope:
@@ -67,7 +70,7 @@ class NameScope:
     """
 
     _used: set[str]
-    _bindings: dict[int, str]  # id(sema_object) -> python name
+    _bindings: dict[int, str]
     _parent: NameScope | None
 
     def __init__(self, parent: NameScope | None = None) -> None:
@@ -99,6 +102,18 @@ class NameScope:
         self._used.add(name)
         self._bindings[id(obj)] = name
         return name
+
+    def bind_field(self, obj: Bindable, preferred: str) -> str:
+        """Register a field name. Only avoids keywords and sibling field collisions,
+        not parent scope names (since fields are accessed via self.X)."""
+        candidate = preferred
+        suffix = 1
+        while candidate in _RESERVED or candidate in self._used:
+            candidate = f"{preferred}_{suffix}"
+            suffix += 1
+        self._used.add(candidate)
+        self._bindings[id(obj)] = candidate
+        return candidate
 
     def reserve(self, name: str) -> str:
         """Reserve a name without binding to an object."""

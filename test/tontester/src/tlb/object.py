@@ -1,12 +1,10 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Protocol, cast, final, override
 
 from bitarray import bitarray
 from pytoniq_core import Builder, Cell, Slice
 
 
-# ===== Support classes =====
 class TlbModelError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
@@ -65,10 +63,13 @@ class TLBRecord(ABC):
     @abstractmethod
     def serialize_to(self, builder: Builder) -> None: ...
 
-    def serialize(self):
+    def serialize(self) -> Cell:
         builder = Builder()
         self.serialize_to(builder)
         return builder.end_cell()
+
+    def get_output(self, idx: int) -> int:
+        raise TlbModelError(f"type has no output param at index {idx}")
 
 
 @final
@@ -150,7 +151,6 @@ class _AnyType(TypeInfo[Slice]):
 AnyType = _AnyType()
 
 
-# ===== Primitives =====
 @final
 class UintTypeConstructor(TypeInfo[int]):
     def __init__(self, n: int):
@@ -174,14 +174,6 @@ class UintTypeConstructor(TypeInfo[int]):
         return f"uint{self._n}"
 
 
-Uint8Type: TypeInfo[int] = UintTypeConstructor(8)
-Uint16Type: TypeInfo[int] = UintTypeConstructor(16)
-Uint32Type: TypeInfo[int] = UintTypeConstructor(32)
-Uint64Type: TypeInfo[int] = UintTypeConstructor(64)
-Uint128Type: TypeInfo[int] = UintTypeConstructor(128)
-Uint256Type: TypeInfo[int] = UintTypeConstructor(256)
-
-
 @final
 class IntTypeConstructor(TypeInfo[int]):
     def __init__(self, n: int):
@@ -203,14 +195,6 @@ class IntTypeConstructor(TypeInfo[int]):
     @override
     def __repr__(self):
         return f"int{self._n}"
-
-
-Int8Type: TypeInfo[int] = IntTypeConstructor(8)
-Int16Type: TypeInfo[int] = IntTypeConstructor(16)
-Int32Type: TypeInfo[int] = IntTypeConstructor(32)
-Int64Type: TypeInfo[int] = IntTypeConstructor(64)
-Int128Type: TypeInfo[int] = IntTypeConstructor(128)
-Int256Type: TypeInfo[int] = IntTypeConstructor(256)
 
 
 @final
@@ -237,77 +221,19 @@ class BitsTypeConstructor(TypeInfo[bitarray]):
         return f"bytes{self._n}"
 
 
-Bits256Type: TypeInfo[bitarray] = BitsTypeConstructor(256)
-
-
-# ===== Test =====
 @final
-@dataclass
-class Just[X](TLBRecord):
-    _tx: TypeInfo[X]
-    value: X
+class TupleTypeInfo[X](TypeInfo[list[X], int, TypeInfo[X]]):
+    @override
+    def serialize_value(self, value: list[X], builder: Builder) -> None:
+        raise NotImplementedError("TupleTypeInfo.serialize_value")
 
     @override
-    def serialize_to(self, builder: Builder):
-        _ = builder.store_bit(1)
-        self._tx.serialize_value(self.value, builder)
-
-
-@final
-@dataclass
-class Nothing(TLBRecord):
-    @override
-    def serialize_to(self, builder: Builder):
-        _ = builder.store_bit(0)
-
-
-type Maybe[X] = Just[X] | Nothing
-
-
-@final
-class MaybeType[X](InstantiableTypeInfo[Maybe[X], TypeInfo[X]]):
-    @override
-    def serialize_value(cls, value: Maybe[X], builder: Builder):
-        return value.serialize_to(builder)
+    def load_from(self, cs: Slice, count: int, element_ti: TypeInfo[X]) -> list[X]:
+        result: list[X] = []
+        for _ in range(count):
+            result.append(element_ti.load_from(cs))
+        return result
 
     @override
-    def load_from(cls, cs: Slice, tx: TypeInfo[X]) -> Maybe[X]:
-        if cs.load_bit() == 1:
-            return Just(tx, tx.load_from(cs))
-        else:
-            return Nothing()
-
-    @override
-    def __repr__(self):
-        return "Maybe"
-
-
-Maybe_int8 = MaybeType[int].instantiate(Int8Type)
-Maybe_Maybe_int8 = MaybeType[Maybe[int]].instantiate(Maybe_int8)
-
-jst = Just(Maybe_int8, Just(Int8Type, 42))
-cell = jst.serialize()
-print(cell)
-value = Maybe_Maybe_int8.deserialize(cell)
-print(value)
-
-Ref_int8 = RefType[int].instantiate(Int8Type)
-Maybe_Ref_int8 = MaybeType[Ref[int]].instantiate(Ref_int8)
-
-maybe_ref_int = Just(Ref_int8, Ref(Int8Type, 123))
-print(maybe_ref_int)
-print(maybe_ref_int.serialize())
-
-deser = Maybe_Ref_int8.deserialize(maybe_ref_int.serialize())
-assert isinstance(deser, Just)
-print(deser.value.ref)
-print(deser)
-
-ref_Any = RefType[Slice].instantiate(AnyType)
-Maybe_ref_Any = MaybeType[Ref[Slice]].instantiate(ref_Any)
-
-maybe_ref_any = Just(ref_Any, Ref(AnyType, Builder().store_uint(42, 32).end_cell()))
-print(maybe_ref_any)
-print(maybe_ref_any.serialize())
-deser = Maybe_ref_Any.deserialize(maybe_ref_any.serialize())
-print(deser)
+    def __repr__(self) -> str:
+        return "Tuple"

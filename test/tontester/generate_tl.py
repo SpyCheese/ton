@@ -39,7 +39,11 @@ if __name__ == "__main__":
     tlb_schemas = repo_root / "test/tontester/tests/tlb/schemas"
     tlb_out = repo_root / "test/tontester/tests/tlb/generated"
     tlb_out.mkdir(parents=True, exist_ok=True)
-    (tlb_out / "__init__.py").touch()
     for schema_file in sorted(tlb_schemas.glob("*.tlb")):
         out_file = tlb_out / (schema_file.stem + ".py")
         generate_tlb_python(schema_file, out_file)
+
+    # Generate block.tlb
+    block_tlb = repo_root / "crypto/block/block.tlb"
+    block_out = tlb_out / "block.py"
+    generate_tlb_python(block_tlb, block_out)

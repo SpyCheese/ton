@@ -5,7 +5,6 @@ from tlb.generator.sema_types import (
     BindParam,
     CellRefType,
     CheckConstraint,
-    CondType,
     MatchBit,
     MatchConstraint,
     MatchConstructor,
@@ -54,18 +53,18 @@ class TestTypeRegistration:
     def test_parameterized_type(self):
         ts = types_by_name("nothing$0 {X:Type} = Maybe X;\njust$1 {X:Type} value:X = Maybe X;")
         assert ts["Maybe"].arity == 1
-        assert ts["Maybe"].param_kinds == [ParamKind.TYPE]
+        assert [p.kind for p in ts["Maybe"].type_level_params] == [ParamKind.TYPE]
 
     def test_nat_param(self):
         ts = types_by_name("foo$_ {n:#} x:(## n) = Foo n;")
         assert ts["Foo"].arity == 1
-        assert ts["Foo"].param_kinds == [ParamKind.NAT]
+        assert [p.kind for p in ts["Foo"].type_level_params] == [ParamKind.NAT]
 
     def test_output_params(self):
         ts = types_by_name(
             "unary_zero$0 = Unary ~0; unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);"
         )
-        assert ts["Unary"].output_param_positions == [0]
+        assert [p for p in ts["Unary"].type_level_params if p.is_output][0].position == 0
 
 
 # ── Expression resolution ────────────────────────────────────────────
@@ -85,12 +84,13 @@ class TestExpressionResolution:
         assert len(field_type.arguments) == 1
 
     def test_cell_ref(self):
+        """^Cell resolves to CellRefType(Any) — Cell is an alias for Any."""
         ts = types_by_name("foo$_ x:^Cell = Foo;")
         field_type = ts["Foo"].constructors[0].fields[0].type_expr
         assert isinstance(field_type, CellRefType)
         inner = field_type.inner
         assert isinstance(inner, TypeApply)
-        assert inner.type.name == "Cell"
+        assert inner.type.name == "Any"
         assert inner.arguments == []
 
     def test_cell_ref_on_nat_producing_type(self):
@@ -104,10 +104,23 @@ class TestExpressionResolution:
         ts = types_by_name("foo$_ {n:#} x:n?uint32 = Foo n;")
         con = ts["Foo"].constructors[0]
         n_param = con.params[0]
-        field_type = con.fields[0].type_expr
-        assert isinstance(field_type, CondType)
-        assert field_type.selector == NatParamRef(n_param)
-        assert isinstance(field_type.inner, TypeApply)
+        field = con.fields[0]
+        assert field.condition == NatParamRef(n_param)
+        assert isinstance(field.type_expr, TypeApply)
+
+    def test_conditional_not_nested(self):
+        """Conditional can't appear nested in a type expression."""
+        with pytest.raises(SemaError, match="conditional.*field level"):
+            _ = analyze_text(
+                "nothing$0 {X:Type} = Maybe X;\n"
+                + "just$1 {X:Type} value:X = Maybe X;\n"
+                + "foo$_ {n:#} x:(Maybe n?uint32) = Foo n;"
+            )
+
+    def test_unconditional_field_has_none_condition(self):
+        """Regular fields have condition=None."""
+        ts = types_by_name("foo$_ x:uint32 = Foo;")
+        assert ts["Foo"].constructors[0].fields[0].condition is None
 
     def test_tuple_nat_times_type(self):
         """n * Bit is a tuple: n values of Bit."""
@@ -139,9 +152,9 @@ class TestExpressionResolution:
         """flags.3 is a NatGetBit expression."""
         ts = types_by_name("foo$_ flags:(## 8) x:flags.3?uint32 = Foo;")
         con = ts["Foo"].constructors[0]
-        field_type = con.fields[1].type_expr
-        assert isinstance(field_type, CondType)
-        assert isinstance(field_type.selector, NatGetBit)
+        field = con.fields[1]
+        assert isinstance(field.condition, NatGetBit)
+        assert isinstance(field.type_expr, TypeApply)
 
     def test_nat_valued_field(self):
         ts = types_by_name("foo$_ {n:#} len:(#< n) = Foo n;")
@@ -338,7 +351,7 @@ class TestDeserPlan:
         assert isinstance(steps[0], SolveConstraint)
         assert steps[0].target_param.name == "n"
         assert isinstance(steps[0].value, NatTypeArg)
-        assert steps[0].value.position == 0
+        assert steps[0].value.param.position == 0
 
     def test_type_param_binding(self):
         """Type params are bound via BindParam."""
@@ -367,7 +380,7 @@ hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode
         assert len(n_solve) == 1
         assert isinstance(n_solve[0].value, NatSub)
         assert isinstance(n_solve[0].value.left, NatTypeArg)
-        assert n_solve[0].value.left.position == 0
+        assert n_solve[0].value.left.param.position == 0
 
     def test_constant_result_param(self):
         """Constant result param (0) becomes a CheckConstraint."""
@@ -535,7 +548,7 @@ right$1 {X:Type} {Y:Type} value:Y = Either X Y;
 """
         )
         assert ts["Either"].arity == 2
-        assert ts["Either"].param_kinds == [ParamKind.TYPE, ParamKind.TYPE]
+        assert [p.kind for p in ts["Either"].type_level_params] == [ParamKind.TYPE, ParamKind.TYPE]
         # Neither X nor Y should be inference-capable
         assert len(ts["Either"].inference) == 2
         assert ts["Either"].inference[0].is_capable is False
@@ -655,6 +668,95 @@ class TestSemaErrors:
         """Constraints with ~ inside multiplication can't be solved."""
         with pytest.raises(SemaError, match="cannot be computed"):
             _ = analyze_text("foo$_ {n:#} {m:#} {n = (~m) * 2} x:uint32 = T n;")
+
+
+# ── Inline records ───────────────────────────────────────────────────
+
+
+class TestInlineRecords:
+    def test_inline_record_creates_anonymous_type(self):
+        """Inline record [a:uint32 b:uint8] produces an anonymous ResolvedType."""
+        _, types = analyze_text("foo$_ inner:[a:uint32 b:uint8] = Foo;")
+        # Should have Foo and an anonymous type
+        anon_types = [t for t in types if t.name == ""]
+        assert len(anon_types) == 1
+        anon = anon_types[0]
+        assert len(anon.constructors) == 1
+        assert len(anon.constructors[0].fields) == 2
+        assert anon.constructors[0].fields[0].name == "a"
+        assert anon.constructors[0].fields[1].name == "b"
+
+    def test_inline_record_has_match_tree(self):
+        """Anonymous types go through match tree building."""
+        _, types = analyze_text("foo$_ inner:[a:uint32] = Foo;")
+        anon = [t for t in types if t.name == ""][0]
+        assert anon.match_tree is not None
+        assert isinstance(anon.match_tree, MatchConstructor)
+
+    def test_inline_record_has_deser_plan(self):
+        """Anonymous types go through deser plan generation."""
+        _, types = analyze_text("foo$_ inner:[a:uint32 b:uint8] = Foo;")
+        anon = [t for t in types if t.name == ""][0]
+        steps = anon.constructors[0].deser_steps
+        reads = [s for s in steps if isinstance(s, ReadField)]
+        assert len(reads) == 2
+
+    def test_inline_record_in_cell_ref(self):
+        """^[x:uint32 y:uint32] creates a cell-referenced anonymous type."""
+        _, types = analyze_text("foo$_ inner:^[x:uint32 y:uint32] = Foo;")
+        ts = {t.name: t for t in types}
+        foo_field = ts["Foo"].constructors[0].fields[0]
+        assert isinstance(foo_field.type_expr, CellRefType)
+
+    def test_nested_inline_records(self):
+        """Inline record can contain another inline record."""
+        _, types = analyze_text("foo$_ inner:[a:uint32 b:[x:uint8 y:uint8]] = Foo;")
+        anon_types = [t for t in types if t.name == ""]
+        assert len(anon_types) == 2  # outer and inner
+
+    def test_inline_record_scope_isolation(self):
+        """Type params from outer scope don't leak into inline records."""
+        with pytest.raises(SemaError, match="undefined"):
+            _ = analyze_text("foo$_ {T:Type} inner:[a:T] = Foo T;")
+
+    def test_inline_record_with_own_type_param(self):
+        """Inline record with its own type param, applied to outer T."""
+        _, types = analyze_text("foo$_ {T:Type} inner:([{X:Type} a:X] T) = Foo T;")
+        anon = [t for t in types if t.name == ""][0]
+        assert anon.arity == 1
+        assert [p.kind for p in anon.type_level_params] == [ParamKind.TYPE]
+
+    def test_unbound_type_var_in_inline_record(self):
+        """Referencing undefined type inside inline record is an error."""
+        with pytest.raises(SemaError, match="undefined"):
+            _ = analyze_text("foo$_ inner:[a:T] = Foo;")
+
+    def test_inline_record_nat_param_is_internal(self):
+        """Nat params in inline records are internal (arity=0), resolved by deser plan."""
+        _, types = analyze_text(
+            "unary_zero$0 = Unary ~0;\n"
+            + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
+            + "bit$_ (## 1) = Bit;\n"
+            + "foo$_ x:[{n:#} len:(Unary ~n) data:(n * Bit)] = Foo;"
+        )
+        anon = [t for t in types if t.name == ""][0]
+        assert anon.arity == 0  # nat params don't contribute to arity
+        assert anon.constructors[0].params[0].name == "n"
+        # n is bound via BindOutputParam in the deser plan
+        binds = [s for s in anon.constructors[0].deser_steps if isinstance(s, BindOutputParam)]
+        assert len(binds) == 1
+        assert binds[0].target_param.name == "n"
+
+    def test_inline_record_mixed_params(self):
+        """Inline record with both type param (external) and nat param (internal)."""
+        _, types = analyze_text(
+            "unary_zero$0 = Unary ~0;\n"
+            + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
+            + "foo$_ {T:Type} x:([{X:Type} {n:#} a:X len:(Unary ~n)] T) = Foo T;"
+        )
+        anon = [t for t in types if t.name == ""][0]
+        assert anon.arity == 1  # only type param X contributes
+        assert [p.kind for p in anon.type_level_params] == [ParamKind.TYPE]
 
 
 # ── Full block.tlb ───────────────────────────────────────────────────

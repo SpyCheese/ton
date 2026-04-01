@@ -4,17 +4,15 @@ Each TypeStrategy knows how to emit store/load code for a particular
 type expression. Uses PyContext for import tracking and name scoping.
 """
 
-from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import final, override
+from typing import TypeIs, final, override
 
 from .name_scope import NameScope
 from .py_context import PyContext
 from .sema_builtins import (
     Any_type,
     Bits_type,
-    Cell_type,
     Int_type,
     Nat_type,
     NatLeq_type,
@@ -23,8 +21,8 @@ from .sema_builtins import (
     UInt_type,
 )
 from .sema_types import (
+    AnonymousRecordType,
     CellRefType,
-    CondType,
     NatAdd,
     NatFieldValue,
     NatGetBit,
@@ -34,14 +32,84 @@ from .sema_types import (
     NatSub,
     NatTypeArg,
     ParamDef,
+    ParamKind,
     ResolvedExpr,
     ResolvedNatExpr,
     ResolvedTypeExpr,
     TupleType,
     TypeApply,
     TypeParamRef,
+    references_type_params,
 )
 from .source_builder import SourceBuilder
+
+
+class NatExpr:
+    """A resolved nat expression that can be rendered in different contexts.
+
+    Holds the sema expression and scope, renders with appropriate prefix:
+    - local form (for load_from): bare variable name
+    - self form (for serialize_to): self-prefixed
+    """
+
+    _expr: ResolvedNatExpr
+    _scope: NameScope
+
+    def __init__(self, expr: ResolvedNatExpr, scope: NameScope) -> None:
+        self._expr = expr
+        self._scope = scope
+
+    @property
+    def local(self) -> str:
+        return self._render(self._expr)
+
+    @property
+    def self_(self) -> str:
+        return self._render(self._expr, prefix="self.")
+
+    @property
+    def is_constant(self) -> bool:
+        """True if this is a compile-time constant (NatLiteral)."""
+        return isinstance(self._expr, NatLiteral)
+
+    def _render(self, expr: ResolvedNatExpr, prefix: str = "") -> str:
+        match expr:
+            case NatLiteral(value=value):
+                return str(value)
+            case NatParamRef(param=param):
+                return f"{prefix}{self._scope.lookup(param)}"
+            case NatFieldValue(field=field):
+                return f"{prefix}{self._scope.lookup(field)}"
+            case NatAdd(left=left, right=right):
+                return f"({self._render(left, prefix)} + {self._render(right, prefix)})"
+            case NatSub(left=left, right=right):
+                return f"({self._render(left, prefix)} - {self._render(right, prefix)})"
+            case NatMul(left=left, right=right):
+                return f"({self._render(left, prefix)} * {self._render(right, prefix)})"
+            case NatGetBit(value=value, bit=bit):
+                return f"(({self._render(value, prefix)} >> {self._render(bit, prefix)}) & 1)"
+            case NatTypeArg(param=param):
+                return self._scope.lookup(param)
+
+
+@final
+class _DerivedNatExpr(NatExpr):
+    """A NatExpr with a transformation applied, e.g. '({}).bit_length()'."""
+
+    def __init__(self, base: NatExpr, template: str) -> None:
+        super().__init__(base._expr, base._scope)
+        self._base = base
+        self._template = template
+
+    @property
+    @override
+    def local(self) -> str:
+        return self._template.format(self._base.local)
+
+    @property
+    @override
+    def self_(self) -> str:
+        return self._template.format(self._base.self_)
 
 
 class TypeStrategy(ABC):
@@ -50,6 +118,15 @@ class TypeStrategy(ABC):
     @abstractmethod
     def py_type(self) -> str:
         """Python type annotation string."""
+        ...
+
+    @abstractmethod
+    def type_info_expr(self) -> str:
+        """Python expression evaluating to a TypeInfo for this type.
+
+        Used when this type appears as a generic argument, e.g. the T in
+        Maybe T needs to produce a TypeInfo[T] expression at runtime.
+        """
         ...
 
     @abstractmethod
@@ -70,52 +147,85 @@ class TypeStrategy(ABC):
 
 @final
 class UintStrategy(TypeStrategy):
-    def __init__(self, width: str) -> None:
+    def __init__(self, width: NatExpr, ctx: PyContext) -> None:
         self.width = width
+        self.ctx = ctx
 
     @override
     def py_type(self) -> str:
         return "int"
 
     @override
+    def type_info_expr(self) -> str:
+        self.ctx.use("UintTypeConstructor")
+        return f"UintTypeConstructor({self.width.local})"
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        sb.line(f"_ = {builder}.store_uint({value}, {self.width})")
+        if self.width.is_constant:
+            sb.line(f"_ = {builder}.store_uint({value}, {self.width.self_})")
+        else:
+            sb.line(f"if {self.width.self_} > 0:")
+            with sb.block():
+                sb.line(f"_ = {builder}.store_uint({value}, {self.width.self_})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        sb.line(f"{target} = {cs}.load_uint({self.width})")
+        if self.width.is_constant:
+            sb.line(f"{target} = {cs}.load_uint({self.width.local})")
+        else:
+            sb.line(
+                f"{target} = {cs}.load_uint({self.width.local}) if {self.width.local} > 0 else 0"
+            )
 
     @override
     def descriptor(self) -> str:
-        return f"uint{self.width}"
+        return f"uint{self.width.local}"
 
 
 @final
 class IntStrategy(TypeStrategy):
-    def __init__(self, width: str) -> None:
+    def __init__(self, width: NatExpr, ctx: PyContext) -> None:
         self.width = width
+        self.ctx = ctx
 
     @override
     def py_type(self) -> str:
         return "int"
 
     @override
+    def type_info_expr(self) -> str:
+        self.ctx.use("IntTypeConstructor")
+        return f"IntTypeConstructor({self.width.local})"
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        sb.line(f"_ = {builder}.store_int({value}, {self.width})")
+        if self.width.is_constant:
+            sb.line(f"_ = {builder}.store_int({value}, {self.width.self_})")
+        else:
+            sb.line(f"if {self.width.self_} > 0:")
+            with sb.block():
+                sb.line(f"_ = {builder}.store_int({value}, {self.width.self_})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        sb.line(f"{target} = {cs}.load_int({self.width})")
+        if self.width.is_constant:
+            sb.line(f"{target} = {cs}.load_int({self.width.local})")
+        else:
+            sb.line(
+                f"{target} = {cs}.load_int({self.width.local}) if {self.width.local} > 0 else 0"
+            )
 
     @override
     def descriptor(self) -> str:
-        return f"int{self.width}"
+        return f"int{self.width.local}"
 
 
 @final
 class BitsStrategy(TypeStrategy):
-    def __init__(self, width: str, ctx: PyContext) -> None:
+    def __init__(self, width: NatExpr, ctx: PyContext) -> None:
         self.width = width
+        self.ctx = ctx
         ctx.use("bitarray")
 
     @override
@@ -123,20 +233,31 @@ class BitsStrategy(TypeStrategy):
         return "bitarray"
 
     @override
+    def type_info_expr(self) -> str:
+        self.ctx.use("BitsTypeConstructor")
+        return f"BitsTypeConstructor({self.width.local})"
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
         sb.line(f"_ = {builder}.store_bits({value})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        sb.line(f"{target} = {cs}.load_bits({self.width})")
+        sb.line(f"{target} = {cs}.load_bits({self.width.local})")
 
     @override
     def descriptor(self) -> str:
-        return f"bits{self.width}"
+        return f"bits{self.width.local}"
 
 
 @final
 class UserTypeStrategy(TypeStrategy):
+    """User-defined type, possibly generic.
+
+    ti_args: runtime expressions for each type/nat arg (TypeInfo exprs or int exprs).
+    type_var_args: Python type annotations for type args only (for generic subscription).
+    """
+
     def __init__(
         self,
         type_name: str,
@@ -154,19 +275,28 @@ class UserTypeStrategy(TypeStrategy):
         return self.type_name
 
     @override
+    def type_info_expr(self) -> str:
+        info_name = f"{self.type_name}Type"
+        if self.type_var_args:
+            info_name = f"{info_name}[{', '.join(self.type_var_args)}]"
+        if self.ti_args:
+            return f"{info_name}.instantiate({', '.join(self.ti_args)})"
+        return f"{info_name}()"
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
         sb.line(f"{value}.serialize_to({builder})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        type_info_name = f"{self.type_name}Type"
+        info_name = f"{self.type_name}Type"
         if self.type_var_args:
-            type_info_name = f"{type_info_name}[{', '.join(self.type_var_args)}]"
+            info_name = f"{info_name}[{', '.join(self.type_var_args)}]"
         if self.ti_args:
             args = ", ".join([cs] + self.ti_args)
-            sb.line(f"{target} = {type_info_name}().load_from({args})")
+            sb.line(f"{target} = {info_name}().load_from({args})")
         else:
-            sb.line(f"{target} = {type_info_name}().load_from({cs})")
+            sb.line(f"{target} = {info_name}().load_from({cs})")
 
     @override
     def descriptor(self) -> str:
@@ -175,10 +305,11 @@ class UserTypeStrategy(TypeStrategy):
 
 @final
 class CellRefStrategy(TypeStrategy):
-    """^Type: uses a lazy ref wrapper class.
+    """^Type for fully concrete inner types: uses a lazy ref wrapper class.
 
     Each distinct (inner_type, is_special) pair gets one wrapper class,
-    shared across all fields that use it.
+    shared across all fields that use it. Only used when the inner type
+    has no type parameters — otherwise GenericCellRefStrategy is used.
     """
 
     def __init__(self, inner: TypeStrategy, ctx: PyContext, is_special: bool = False) -> None:
@@ -186,7 +317,6 @@ class CellRefStrategy(TypeStrategy):
         self.ctx = ctx
 
         inner_type = inner.py_type()
-        # Use the strategy's descriptor for dedup — e.g. "uint32" not just "int"
         inner_key = inner.descriptor()
 
         def emit_store_body(sb: SourceBuilder) -> None:
@@ -209,6 +339,13 @@ class CellRefStrategy(TypeStrategy):
         return self.wrapper_name
 
     @override
+    def type_info_expr(self) -> str:
+        self.ctx.use("RefType")
+        inner_ti = self.inner.type_info_expr()
+        inner_py = self.inner.py_type()
+        return f"RefType[{inner_py}].instantiate({inner_ti})"
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
         sb.line(f"_ = {builder}.store_ref({value}.serialize_ref())")
 
@@ -222,35 +359,56 @@ class CellRefStrategy(TypeStrategy):
 
 
 @final
-class CellTypeStrategy(TypeStrategy):
-    def __init__(self, ctx: PyContext) -> None:
-        ctx.use("Cell")
+class GenericCellRefStrategy(TypeStrategy):
+    """^Type when the inner type involves type parameters.
+
+    Uses the runtime Ref[X] and RefType[X] instead of a generated wrapper
+    class, because wrapper classes are file-level and can't capture type params.
+    """
+
+    def __init__(self, inner: TypeStrategy, ctx: PyContext) -> None:
+        self.inner = inner
+        self.ctx = ctx
+        ctx.use("Ref")
 
     @override
     def py_type(self) -> str:
-        return "Cell"
+        return f"Ref[{self.inner.py_type()}]"
+
+    @override
+    def type_info_expr(self) -> str:
+        self.ctx.use("RefType")
+        return f"RefType[{self.inner.py_type()}].instantiate({self.inner.type_info_expr()})"
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        sb.line(f"_ = {builder}.store_ref({value})")
+        sb.line(f"{value}.serialize_to({builder})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        sb.line(f"{target} = {cs}.load_ref()")
+        self.ctx.use("Ref")
+        inner_ti = self.inner.type_info_expr()
+        sb.line(f"{target} = Ref({inner_ti}, {cs}.load_ref())")
 
     @override
     def descriptor(self) -> str:
-        return "Cell"
+        return f"ref_{self.inner.descriptor()}"
 
 
 @final
 class SliceTypeStrategy(TypeStrategy):
     def __init__(self, ctx: PyContext) -> None:
+        self.ctx = ctx
         ctx.use("Slice")
 
     @override
     def py_type(self) -> str:
         return "Slice"
+
+    @override
+    def type_info_expr(self) -> str:
+        self.ctx.use("AnyType")
+        return "AnyType"
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
@@ -266,58 +424,11 @@ class SliceTypeStrategy(TypeStrategy):
 
 
 @final
-class CondStrategy(TypeStrategy):
-    """flag?Type: conditional field, present when selector is nonzero.
-
-    Stores both a 'self.' prefixed selector (for serialize_to) and a bare
-    selector (for load_from) since the same field is an attribute vs local.
-    """
-
-    def __init__(
-        self, selector_self: str, selector_local: str, inner: TypeStrategy, ctx: PyContext
-    ) -> None:
-        self.selector_self = selector_self
-        self.selector_local = selector_local
-        self.inner = inner
-        self.ctx = ctx
-
-    @override
-    def py_type(self) -> str:
-        return f"{self.inner.py_type()} | None"
-
-    @override
-    def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        sb.line(f"if {self.selector_self}:")
-        with sb.block():
-            sb.line(f"assert {value} is not None")
-            self.inner.emit_store(value, builder, sb)
-
-    @override
-    def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        sb.line(f"if {self.selector_local}:")
-        with sb.block():
-            self.inner.emit_load(target, cs, sb)
-        sb.line("else:")
-        with sb.block():
-            sb.line(f"{target} = None")
-
-    @override
-    def descriptor(self) -> str:
-        return f"cond_{self.selector_local}_{self.inner.descriptor()}"
-
-
-@final
 class TupleStrategy(TypeStrategy):
-    """n * Type: fixed or variable-length sequence of values.
+    """n * Type: fixed or variable-length sequence of values."""
 
-    Like CondStrategy, stores both self-prefixed and local count expressions.
-    """
-
-    def __init__(
-        self, count_self: str, count_local: str, element: TypeStrategy, ctx: PyContext
-    ) -> None:
-        self.count_self = count_self
-        self.count_local = count_local
+    def __init__(self, count: NatExpr, element: TypeStrategy, ctx: PyContext) -> None:
+        self.count = count
         self.element = element
         self.ctx = ctx
 
@@ -326,16 +437,22 @@ class TupleStrategy(TypeStrategy):
         return f"list[{self.element.py_type()}]"
 
     @override
+    def type_info_expr(self) -> str:
+        self.ctx.use("TupleTypeInfo")
+        elem_ti = self.element.type_info_expr()
+        return f"TupleTypeInfo[{self.element.py_type()}].instantiate({self.count.local}, {elem_ti})"
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
         idx = self.ctx.tmp("_i")
-        sb.line(f"for {idx} in range({self.count_self}):")
+        sb.line(f"for {idx} in range({self.count.self_}):")
         with sb.block():
             self.element.emit_store(f"{value}[{idx}]", builder, sb)
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
         sb.line(f"{target}: list[{self.element.py_type()}] = []")
-        sb.line(f"for _ in range({self.count_local}):")
+        sb.line(f"for _ in range({self.count.local}):")
         with sb.block():
             elem_tmp = self.ctx.tmp("_elem")
             self.element.emit_load(elem_tmp, cs, sb)
@@ -343,7 +460,7 @@ class TupleStrategy(TypeStrategy):
 
     @override
     def descriptor(self) -> str:
-        return f"tuple_{self.count_local}_{self.element.descriptor()}"
+        return f"tuple_{self.count.local}_{self.element.descriptor()}"
 
 
 @final
@@ -365,6 +482,10 @@ class TypeParamStrategy(TypeStrategy):
         return self.type_var
 
     @override
+    def type_info_expr(self) -> str:
+        return self.ti_var
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
         sb.line(f"self.{self.ti_var}.serialize_value({value}, {builder})")
 
@@ -377,31 +498,141 @@ class TypeParamStrategy(TypeStrategy):
         return f"typeparam_{self.param.name}"
 
 
-@final
-class TodoStrategy(TypeStrategy):
-    def __init__(self, desc: str = "unsupported") -> None:
-        self.desc = desc
+class StrategyBuilder:
+    """Builds TypeStrategy instances for resolved type expressions.
 
-    @override
-    def py_type(self) -> str:
-        return "object"
+    Holds the constructor-local context (scope, type param mappings)
+    instead of threading them through every strategy_for call.
+    Tracks which type params are referenced during building.
+    """
 
-    @override
-    def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        sb.line(f"raise NotImplementedError('{self.desc}')")
+    ctx: PyContext
+    scope: NameScope
+    used_type_params: set[ParamDef]
 
-    @override
-    def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        sb.line(f"{target} = None  # TODO: {self.desc}")
+    def __init__(self, ctx: PyContext, scope: NameScope) -> None:
+        self.ctx = ctx
+        self.scope = scope
+        self.used_type_params = set()
 
-    @override
-    def descriptor(self) -> str:
-        return f"todo_{self.desc}"
+    @staticmethod
+    def _to_nat(expr: ResolvedExpr) -> ResolvedNatExpr:
+        assert _is_nat(expr)
+        return expr
+
+    def _nat(self, expr: ResolvedExpr) -> NatExpr:
+        """Create a NatExpr from a resolved expression."""
+        return NatExpr(self._to_nat(expr), self.scope)
+
+    def _nat_derived(self, expr: ResolvedExpr, template: str) -> NatExpr:
+        """Create a NatExpr with a transformation template like '({}).bit_length()'."""
+        base = NatExpr(self._to_nat(expr), self.scope)
+        return _DerivedNatExpr(base, template)
+
+    def build(
+        self, type_expr: ResolvedTypeExpr, *, inside_generic_arg: bool = False
+    ) -> TypeStrategy:
+        """Create a TypeStrategy for a resolved type expression.
+
+        inside_generic_arg: when True, ^Type uses Ref[X] from runtime instead
+        of generating a wrapper class, since wrappers are file-level concrete
+        classes incompatible with the generic Ref[X] type system.
+        """
+        match type_expr:
+            case TypeApply():
+                return self._build_type_apply(type_expr)
+
+            case TypeParamRef(param=param):
+                assert param.kind == ParamKind.TYPE, (
+                    f"nat param {param.name} used as type"
+                )
+                ti_var = self.scope.lookup(param)
+                self.used_type_params.add(param)
+                return TypeParamStrategy(param, param.name, ti_var)
+
+            case CellRefType(inner=inner_expr):
+                is_concrete = not references_type_params(inner_expr)
+                inner = self.build(inner_expr, inside_generic_arg=inside_generic_arg)
+                if is_concrete and not inside_generic_arg:
+                    return CellRefStrategy(inner, self.ctx)
+                return GenericCellRefStrategy(inner, self.ctx)
+
+            case TupleType(count=count_expr, element=element_expr):
+                count = NatExpr(count_expr, self.scope)
+                element = self.build(element_expr, inside_generic_arg=inside_generic_arg)
+                return TupleStrategy(count, element, self.ctx)
+
+            case AnonymousRecordType():
+                return UserTypeStrategy(self.ctx.scope.lookup(type_expr.type))
+
+    def _build_type_apply(self, type_expr: TypeApply) -> TypeStrategy:
+        t = type_expr.type
+        if t is UInt_type:
+            assert len(type_expr.arguments) == 1
+            return UintStrategy(self._nat(type_expr.arguments[0]), self.ctx)
+        if t is Int_type:
+            assert len(type_expr.arguments) == 1
+            return IntStrategy(self._nat(type_expr.arguments[0]), self.ctx)
+        if t is Bits_type:
+            assert len(type_expr.arguments) == 1
+            return BitsStrategy(self._nat(type_expr.arguments[0]), self.ctx)
+        if t is Nat_type:
+            return UintStrategy(NatExpr(NatLiteral(32), NameScope()), self.ctx)
+        if t is NatWidth_type:
+            assert len(type_expr.arguments) == 1
+            return UintStrategy(self._nat(type_expr.arguments[0]), self.ctx)
+        if t is NatLeq_type:
+            assert len(type_expr.arguments) == 1
+            return UintStrategy(
+                self._nat_derived(type_expr.arguments[0], "({}).bit_length()"), self.ctx
+            )
+        if t is NatLess_type:
+            assert len(type_expr.arguments) == 1
+            return UintStrategy(
+                self._nat_derived(type_expr.arguments[0], "({} - 1).bit_length()"), self.ctx
+            )
+        if t.is_builtin and t.arity == 0:
+            name = t.name
+            if name.startswith("uint"):
+                assert t.produces_nat
+                return UintStrategy(NatExpr(NatLiteral(int(name[4:])), NameScope()), self.ctx)
+            if name.startswith("int"):
+                assert t.produces_nat
+                return IntStrategy(NatExpr(NatLiteral(int(name[3:])), NameScope()), self.ctx)
+            if name.startswith("bits"):
+                return BitsStrategy(NatExpr(NatLiteral(int(name[4:])), NameScope()), self.ctx)
+        if t is Any_type:
+            return SliceTypeStrategy(self.ctx)
+        if not t.is_builtin:
+            return self._build_user_type(type_expr)
+
+        assert False, f"unhandled builtin type: {t.name}"
+
+    def _build_user_type(self, type_expr: TypeApply) -> UserTypeStrategy:
+        """Build strategy for a user-defined type, handling all arg kinds."""
+        t = type_expr.type
+        ti_args: list[str] = []
+        type_var_args: list[str] = []
+
+        for tlp, arg in zip(t.type_level_params, type_expr.arguments, strict=True):
+            if tlp.is_output:
+                continue
+            param_kind = tlp.kind
+            if param_kind == ParamKind.NAT:
+                assert _is_nat(arg)
+                ti_args.append(NatExpr(arg, self.scope).local)
+            else:
+                assert isinstance(arg, TypeParamRef | TypeApply | TupleType | CellRefType)
+                arg_strategy = self.build(arg, inside_generic_arg=True)
+                ti_args.append(arg_strategy.type_info_expr())
+                type_var_args.append(arg_strategy.py_type())
+
+        return UserTypeStrategy(self.ctx.scope.lookup(t), ti_args, type_var_args)
 
 
-def _as_nat(expr: ResolvedExpr) -> ResolvedNatExpr:
-    """Assert that a ResolvedExpr is a nat expression and narrow the type."""
-    assert isinstance(
+def _is_nat(expr: ResolvedExpr) -> TypeIs[ResolvedNatExpr]:
+    """Type guard: check whether a ResolvedExpr is a nat expression."""
+    return isinstance(
         expr,
         NatLiteral
         | NatParamRef
@@ -412,125 +643,3 @@ def _as_nat(expr: ResolvedExpr) -> ResolvedNatExpr:
         | NatGetBit
         | NatTypeArg,
     )
-    return expr
-
-
-def strategy_for(
-    type_expr: ResolvedTypeExpr,
-    ctx: PyContext,
-    scope: NameScope | None = None,
-    type_param_vars: dict[ParamDef, str] | None = None,
-) -> TypeStrategy:
-    """Create a TypeStrategy for a resolved type expression."""
-    if isinstance(type_expr, TypeApply):
-        t = type_expr.type
-        if t is UInt_type:
-            assert len(type_expr.arguments) == 1
-            return UintStrategy(nat_to_python(_as_nat(type_expr.arguments[0])))
-        if t is Int_type:
-            assert len(type_expr.arguments) == 1
-            return IntStrategy(nat_to_python(_as_nat(type_expr.arguments[0])))
-        if t is Bits_type:
-            assert len(type_expr.arguments) == 1
-            return BitsStrategy(nat_to_python(_as_nat(type_expr.arguments[0])), ctx)
-        if t is Nat_type:
-            return UintStrategy("32")
-        if t is NatWidth_type:
-            assert len(type_expr.arguments) == 1
-            return UintStrategy(nat_to_python(_as_nat(type_expr.arguments[0])))
-        if t is NatLeq_type:
-            assert len(type_expr.arguments) == 1
-            b = nat_to_python(_as_nat(type_expr.arguments[0]))
-            return UintStrategy(f"({b}).bit_length()")
-        if t is NatLess_type:
-            assert len(type_expr.arguments) == 1
-            b = nat_to_python(_as_nat(type_expr.arguments[0]))
-            return UintStrategy(f"({b} - 1).bit_length()")
-        if t.is_builtin and t.arity == 0 and t.produces_nat:
-            name = t.name
-            if name.startswith("uint"):
-                return UintStrategy(str(int(name[4:])))
-            if name.startswith("int"):
-                return IntStrategy(str(int(name[3:])))
-            if name.startswith("bits"):
-                return BitsStrategy(str(int(name[4:])), ctx)
-        if t is Cell_type:
-            return CellTypeStrategy(ctx)
-        if t is Any_type:
-            return SliceTypeStrategy(ctx)
-        if not t.is_builtin:
-            ti_args: list[str] = []
-            type_var_args: list[str] = []
-            for arg in type_expr.arguments:
-                if isinstance(arg, TypeParamRef):
-                    if type_param_vars is not None and arg.param in type_param_vars:
-                        ti_args.append(type_param_vars[arg.param])
-                        type_var_args.append(arg.param.name)
-            return UserTypeStrategy(ctx.scope.lookup(t), ti_args, type_var_args)
-
-    if isinstance(type_expr, TypeParamRef):
-        if type_param_vars is not None and type_expr.param in type_param_vars:
-            ti_var = type_param_vars[type_expr.param]
-            return TypeParamStrategy(type_expr.param, type_expr.param.name, ti_var)
-        return TodoStrategy(f"unbound type param {type_expr.param.name}")
-
-    if isinstance(type_expr, CellRefType):
-        inner = strategy_for(type_expr.inner, ctx, scope, type_param_vars)
-        return CellRefStrategy(inner, ctx)
-
-    if isinstance(type_expr, CondType):
-        sel_local = nat_to_python(type_expr.selector, scope)
-        sel_self = nat_to_python(type_expr.selector, scope, prefix="self.")
-        inner = strategy_for(type_expr.inner, ctx, scope, type_param_vars)
-        return CondStrategy(sel_self, sel_local, inner, ctx)
-
-    if isinstance(type_expr, TupleType):
-        cnt_local = nat_to_python(type_expr.count, scope)
-        cnt_self = nat_to_python(type_expr.count, scope, prefix="self.")
-        element = strategy_for(type_expr.element, ctx, scope, type_param_vars)
-        return TupleStrategy(cnt_self, cnt_local, element, ctx)
-
-    return TodoStrategy()
-
-
-class NatEmitter:
-    """Converts resolved nat expressions to Python expression strings.
-
-    Handles scope-aware name lookup and self-prefix for different contexts.
-    """
-
-    scope: NameScope | None
-    prefix: str
-
-    def __init__(self, scope: NameScope | None = None, prefix: str = "") -> None:
-        self.scope = scope
-        self.prefix = prefix
-
-    def emit(self, expr: ResolvedNatExpr) -> str:
-        if isinstance(expr, NatLiteral):
-            return str(expr.value)
-        if isinstance(expr, NatParamRef):
-            name = self.scope.lookup(expr.param) if self.scope is not None else expr.param.name
-            return f"{self.prefix}{name}"
-        if isinstance(expr, NatFieldValue):
-            name = (
-                self.scope.lookup(expr.field)
-                if self.scope is not None
-                else (expr.field.name or "_field")
-            )
-            return f"{self.prefix}{name}"
-        if isinstance(expr, NatAdd):
-            return f"({self.emit(expr.left)} + {self.emit(expr.right)})"
-        if isinstance(expr, NatSub):
-            return f"({self.emit(expr.left)} - {self.emit(expr.right)})"
-        if isinstance(expr, NatMul):
-            return f"({self.emit(expr.left)} * {self.emit(expr.right)})"
-        if isinstance(expr, NatGetBit):
-            return f"(({self.emit(expr.value)} >> {self.emit(expr.bit)}) & 1)"
-        # NatTypeArg
-        return f"_type_arg_{expr.position}"
-
-
-def nat_to_python(expr: ResolvedNatExpr, scope: NameScope | None = None, prefix: str = "") -> str:
-    """Convenience wrapper around NatEmitter."""
-    return NatEmitter(scope, prefix).emit(expr)

@@ -1,0 +1,148 @@
+"""Tests for generated Python code from TL-B cellref schema."""
+
+from generated.cellref import (
+    DoubleRefType,
+    NestedRefType,
+    Ref_Ref_uint8,
+    Ref_TickTock,
+    Ref_uint8,
+    Ref_uint32,
+    Ref_uint64,
+    RefToRecordType,
+    SimpleRefType,
+    double_ref,
+    nested_ref,
+    ref_to_record,
+    simple_ref,
+)
+from generated.cellref import (
+    bool_false as cr_bool_false,
+)
+from generated.cellref import (
+    bool_true as cr_bool_true,
+)
+from generated.cellref import (
+    tick_tock as cr_tick_tock,
+)
+
+# ── Cell references ───────────────────────────────────────────────────
+
+
+class TestCellRef:
+    def test_simple_ref_roundtrip(self):
+        """^uint32: value stored in a referenced cell, accessed via .ref."""
+        obj = simple_ref(x=Ref_uint32(42))
+        result = SimpleRefType().load_from(obj.serialize().begin_parse())
+        assert result.x.ref == 42
+
+    def test_simple_ref_lazy(self):
+        """Ref wrapper is lazy — doesn't parse until .ref is accessed."""
+        obj = simple_ref(x=Ref_uint32(999))
+        result = SimpleRefType().load_from(obj.serialize().begin_parse())
+        # Cell is stored, not yet parsed
+        assert result.x._cell is not None  # pyright: ignore[reportPrivateUsage]
+        val = result.x.ref
+        assert val == 999
+        # After access, cell is released
+        assert result.x._cell is None  # pyright: ignore[reportPrivateUsage]
+
+    def test_simple_ref_structure(self):
+        """simple_ref serializes as 0 data bits + 1 ref."""
+        cell = simple_ref(x=Ref_uint32(999)).serialize()
+        cs = cell.begin_parse()
+        assert cs.remaining_bits == 0
+        assert cs.remaining_refs == 1
+
+    def test_nested_ref_roundtrip(self):
+        """Mix of inline and ref fields."""
+        obj = nested_ref(a=10, b=Ref_uint64(20), c=-5)
+        result = NestedRefType().load_from(obj.serialize().begin_parse())
+        assert result.a == 10
+        assert result.b.ref == 20
+        assert result.c == -5
+
+    def test_nested_ref_structure(self):
+        """a:uint32 (32 bits) + b:^uint64 (1 ref) + c:int8 (8 bits) = 40 bits + 1 ref."""
+        cell = nested_ref(a=0, b=Ref_uint64(0), c=0).serialize()
+        cs = cell.begin_parse()
+        assert cs.remaining_bits == 40  # 32 + 8
+        assert cs.remaining_refs == 1
+
+    def test_ref_to_user_type(self):
+        """^TickTock: user-defined type in a referenced cell."""
+        tt = cr_tick_tock(tick=cr_bool_true(), tock=cr_bool_false())
+        obj = ref_to_record(inner=Ref_TickTock(tt))
+        result = RefToRecordType().load_from(obj.serialize().begin_parse())
+        inner = result.inner.ref
+        assert isinstance(inner, cr_tick_tock)
+        assert isinstance(inner.tick, cr_bool_true)
+        assert isinstance(inner.tock, cr_bool_false)
+
+    def test_ref_to_user_type_structure(self):
+        """ref_to_record: 0 data bits + 1 ref (containing 2 bits for TickTock)."""
+        tt = cr_tick_tock(tick=cr_bool_false(), tock=cr_bool_false())
+        cell = ref_to_record(inner=Ref_TickTock(tt)).serialize()
+        cs = cell.begin_parse()
+        assert cs.remaining_bits == 0
+        assert cs.remaining_refs == 1
+        ref_cs = cs.load_ref().begin_parse()
+        assert ref_cs.remaining_bits == 2
+
+    def test_double_ref_roundtrip(self):
+        """^^uint8: two levels of cell references, access via .ref.ref."""
+        inner = Ref_uint8(42)
+        obj = double_ref(x=Ref_Ref_uint8(inner))
+        result = DoubleRefType().load_from(obj.serialize().begin_parse())
+        assert result.x.ref.ref == 42
+
+    def test_double_ref_structure(self):
+        """^^uint8: outer cell has 0 bits + 1 ref, inner ref has 0 bits + 1 ref, innermost has 8 bits."""
+        inner = Ref_uint8(255)
+        cell = double_ref(x=Ref_Ref_uint8(inner)).serialize()
+        cs = cell.begin_parse()
+        assert cs.remaining_bits == 0
+        assert cs.remaining_refs == 1
+        inner1 = cs.load_ref().begin_parse()
+        assert inner1.remaining_bits == 0
+        assert inner1.remaining_refs == 1
+        inner2 = inner1.load_ref().begin_parse()
+        assert inner2.remaining_bits == 8
+        assert inner2.load_uint(8) == 255
+
+    def test_wrapper_from_cell(self):
+        """Ref wrapper constructed from a raw Cell (e.g. pruned branch)."""
+        from pytoniq_core import Builder
+
+        # Serialize a uint32 into a cell manually
+        b = Builder()
+        _ = b.store_uint(12345, 32)
+        cell = b.end_cell()
+        # Create wrapper from cell, not from value
+        wrapper = Ref_uint32(cell)
+        assert wrapper.ref == 12345
+
+    def test_wrapper_serialize_from_cell(self):
+        """Wrapper constructed from cell can serialize back."""
+        from pytoniq_core import Builder
+
+        b = Builder()
+        _ = b.store_uint(777, 32)
+        cell = b.end_cell()
+        obj = simple_ref(x=Ref_uint32(cell))
+        result = SimpleRefType().load_from(obj.serialize().begin_parse())
+        assert result.x.ref == 777
+
+    def test_generic_ref_set_cell(self):
+        """Ref[X].set_cell replaces the value with a raw cell."""
+        from pytoniq_core import Builder
+        from tlb.object import Ref, UintTypeConstructor
+
+        uint32_ti = UintTypeConstructor(32)
+        ref: Ref[int] = Ref(uint32_ti, 42)
+        assert ref.ref == 42
+
+        # Replace with a different cell via set_cell
+        b = Builder()
+        _ = b.store_uint(999, 32)
+        ref.set_cell(b.end_cell())
+        assert ref.ref == 999

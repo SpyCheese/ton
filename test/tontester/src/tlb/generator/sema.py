@@ -10,8 +10,6 @@ Phases:
 7. Classify types (enum, typedef)
 """
 
-from __future__ import annotations
-
 from .ast_nodes import Constructor, Schema
 from .lexer import Lexer
 from .parser import Parser
@@ -19,7 +17,14 @@ from .sema_deser import build_deser_plan, classify_inference
 from .sema_match import build_match_tree
 from .sema_resolve import TypeRegistry, check_type_arities, register_types, resolve_constructors
 from .sema_tags import assign_tags
-from .sema_types import ResolvedType
+from .sema_types import (
+    AnonymousRecordType,
+    CellRefType,
+    ResolvedType,
+    ResolvedTypeExpr,
+    TupleType,
+    TypeApply,
+)
 
 
 def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
@@ -29,18 +34,12 @@ def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
     """
     registry = TypeRegistry()
 
-    # Phase 1: Register all types
     register_types(schema, registry)
-
-    # Phase 2: Resolve constructors
     resolve_constructors(schema, registry)
 
     user_types = registry.all_user_types()
-
-    # Phase 2b: Check type application arities (must happen after all types are registered)
     check_type_arities(user_types)
 
-    # Phase 3: Compute tags
     ast_by_type: dict[str, list[Constructor]] = {}
     for c in schema.constructors:
         ast_by_type.setdefault(c.result_type, []).append(c)
@@ -49,22 +48,20 @@ def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
         if ast_constructors:
             assign_tags(rt, ast_constructors)
 
-    # Phase 4: Build match trees (bit dispatch + constraint disambiguation)
     for rt in user_types:
         rt.match_tree = build_match_tree(rt)
 
-    # Phase 5: Classify inference
     for rt in user_types:
         rt.inference = classify_inference(rt)
 
-    # Phase 6: Compute deser plans
     for rt in user_types:
         for rc in rt.constructors:
             _ = build_deser_plan(rc)
 
-    # Phase 7: Classify types
     for rt in user_types:
         _classify_type(rt)
+
+    user_types = _toposort(user_types)
 
     return registry, user_types
 
@@ -92,3 +89,59 @@ def _classify_type(rt: ResolvedType) -> None:
         ):
             rt.is_typedef = True
             rt.typedef_target = c.fields[0].type_expr
+
+
+def _toposort(types: list[ResolvedType]) -> list[ResolvedType]:
+    """Topologically sort types so dependencies come before dependents."""
+    type_set = set(id(t) for t in types)
+    deps: dict[int, set[int]] = {id(t): set() for t in types}
+
+    for t in types:
+        for c in t.constructors:
+            for f in c.fields:
+                _collect_deps(f.type_expr, type_set, deps[id(t)])
+        deps[id(t)].discard(id(t))
+
+    # Kahn's algorithm
+    dependents: dict[int, list[int]] = {tid: [] for tid in deps}
+    in_degree = {tid: len(d) for tid, d in deps.items()}
+    for tid, d in deps.items():
+        for dep in d:
+            if dep in dependents:
+                dependents[dep].append(tid)
+
+    queue = [tid for tid, deg in in_degree.items() if deg == 0]
+    result_ids: list[int] = []
+    while queue:
+        tid = queue.pop(0)
+        result_ids.append(tid)
+        for dependent in dependents.get(tid, []):
+            in_degree[dependent] -= 1
+            if in_degree[dependent] == 0:
+                queue.append(dependent)
+
+    remaining = [tid for tid in deps if tid not in set(result_ids)]
+    result_ids.extend(remaining)
+
+    by_id = {id(t): t for t in types}
+    return [by_id[tid] for tid in result_ids]
+
+
+def _collect_deps(expr: ResolvedTypeExpr, type_set: set[int], deps: set[int]) -> None:
+    """Collect type dependencies from a type expression."""
+    if isinstance(expr, TypeApply):
+        if id(expr.type) in type_set:
+            deps.add(id(expr.type))
+        for arg in expr.arguments:
+            if isinstance(arg, TypeApply | CellRefType | TupleType | AnonymousRecordType):
+                _collect_deps(arg, type_set, deps)
+    elif isinstance(expr, CellRefType):
+        _collect_deps(expr.inner, type_set, deps)
+    elif isinstance(expr, TupleType):
+        _collect_deps(expr.element, type_set, deps)
+    elif isinstance(expr, AnonymousRecordType):
+        if id(expr.type) in type_set:
+            deps.add(id(expr.type))
+        for c in expr.type.constructors:
+            for f in c.fields:
+                _collect_deps(f.type_expr, type_set, deps)

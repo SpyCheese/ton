@@ -4,14 +4,12 @@ Phase 1: Register all type names and determine arities/param kinds.
 Phase 2: Resolve each constructor's fields and expressions.
 """
 
-from __future__ import annotations
 
 from .ast_nodes import (
     Add,
     Apply,
     CellRef,
     Compare,
-    CompareOp,
     Conditional,
     Constraint,
     Constructor,
@@ -31,7 +29,6 @@ from .sema_builtins import BUILTIN_TYPES_NUM, create_builtin_registry
 from .sema_types import (
     AnonymousRecordType,
     CellRefType,
-    CondType,
     NatAdd,
     NatFieldValue,
     NatGetBit,
@@ -51,18 +48,19 @@ from .sema_types import (
     SemaError,
     TupleType,
     TypeApply,
+    TypeLevelParam,
     TypeParamRef,
 )
-
-# ── Type Registry ────────────────────────────────────────────────────
 
 
 class TypeRegistry:
     _types: dict[str, ResolvedType]
+    _anon_types: list[ResolvedType]
     _next_idx: int
 
     def __init__(self) -> None:
         self._types = create_builtin_registry()
+        self._anon_types = []
         self._next_idx = BUILTIN_TYPES_NUM + len(self._types)
 
     def lookup(self, name: str) -> ResolvedType | None:
@@ -76,11 +74,14 @@ class TypeRegistry:
         self._types[name] = t
         return t
 
+    def register_anonymous(self) -> ResolvedType:
+        t = ResolvedType(name="", type_idx=self._next_idx)
+        self._next_idx += 1
+        self._anon_types.append(t)
+        return t
+
     def all_user_types(self) -> list[ResolvedType]:
-        return [t for t in self._types.values() if not t.is_builtin]
-
-
-# ── Phase 1: Register types and determine arities ────────────────────
+        return [t for t in self._types.values() if not t.is_builtin] + self._anon_types
 
 
 def register_types(schema: Schema, registry: TypeRegistry) -> None:
@@ -94,7 +95,6 @@ def register_types(schema: Schema, registry: TypeRegistry) -> None:
         if resolved_type.is_builtin:
             raise SemaError(f"cannot redefine built-in type '{type_name}'")
 
-        # Determine arity from result params count (must be consistent)
         arity = len(constructors[0].result_params)
         for c in constructors[1:]:
             if len(c.result_params) != arity:
@@ -104,12 +104,9 @@ def register_types(schema: Schema, registry: TypeRegistry) -> None:
                     + f"expected {arity}"
                 )
 
-        # Determine param kinds from implicit param declarations
         param_kinds = _determine_param_kinds(type_name, constructors, arity)
         resolved_type.arity = arity
-        resolved_type.param_kinds = param_kinds
 
-        # Determine which result positions are output (~) and check consistency
         output_positions: list[int] = []
         for i in range(arity):
             negated_count = sum(1 for c in constructors if c.result_params[i].negated)
@@ -121,9 +118,11 @@ def register_types(schema: Schema, registry: TypeRegistry) -> None:
                     + f"in {negated_count} of {len(constructors)} constructors; "
                     + "must be all or none"
                 )
-        resolved_type.output_param_positions = output_positions
+        resolved_type.type_level_params = [
+            TypeLevelParam(position=i, kind=param_kinds[i], is_output=(i in output_positions))
+            for i in range(arity)
+        ]
 
-        # Check for duplicate constructor names within the same type
         seen_names: set[str] = set()
         for c in constructors:
             if c.name is not None:
@@ -131,7 +130,6 @@ def register_types(schema: Schema, registry: TypeRegistry) -> None:
                     raise SemaError(f"type '{type_name}': duplicate constructor name '{c.name}'")
                 seen_names.add(c.name)
 
-        # Check that all constructors agree on is_special (! prefix)
         special_count = sum(1 for c in constructors if c.is_special)
         if 0 < special_count < len(constructors):
             raise SemaError(
@@ -147,7 +145,6 @@ def _determine_param_kinds(
     kinds: list[ParamKind | None] = [None] * arity
 
     for c in constructors:
-        # Build a map from implicit param name to its kind
         implicit_kinds: dict[str, ParamKind] = {}
         for f in c.fields:
             if isinstance(f, ImplicitParam):
@@ -155,14 +152,12 @@ def _determine_param_kinds(
 
         for i, rp in enumerate(c.result_params):
             if rp.negated:
-                # Output params are always nat
                 kind = ParamKind.NAT
             elif isinstance(rp.expr, Identifier) and rp.expr.name in implicit_kinds:
                 kind = implicit_kinds[rp.expr.name]
             elif isinstance(rp.expr, IntConst):
                 kind = ParamKind.NAT
             else:
-                # Complex expression or unknown — assume nat
                 kind = ParamKind.NAT
 
             if kinds[i] is None:
@@ -171,9 +166,6 @@ def _determine_param_kinds(
                 raise SemaError(f"inconsistent param kind at position {i} of type '{type_name}'")
 
     return [k or ParamKind.NAT for k in kinds]
-
-
-# ── Phase 2: Resolve constructors ────────────────────────────────────
 
 
 def resolve_constructors(schema: Schema, registry: TypeRegistry) -> None:
@@ -190,15 +182,10 @@ def check_type_arities(user_types: list[ResolvedType]) -> None:
             for f in c.fields:
                 _check_type_apply_arity(f.type_expr)
             for expr in c.result_param_exprs.values():
-                if isinstance(
-                    expr, TypeApply | TupleType | CondType | CellRefType | AnonymousRecordType
-                ):
+                if isinstance(expr, TypeApply | TupleType | CellRefType | AnonymousRecordType):
                     _check_type_apply_arity(expr)
 
 
-# ── Scope for name resolution ────────────────────────────────────────
-
-# A scope entry is either a param or a resolved field
 type ScopeEntry = tuple[ParamDef, None] | tuple[None, ResolvedField]
 
 
@@ -221,14 +208,6 @@ class _Scope:
     def lookup(self, name: str) -> ScopeEntry | None:
         return self.entries.get(name)
 
-    def copy(self) -> _Scope:
-        s = _Scope()
-        s.entries = dict(self.entries)
-        return s
-
-
-# ── Constructor resolution ───────────────────────────────────────────
-
 
 def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedConstructor:
     parent_type = registry.lookup(c.result_type)
@@ -236,7 +215,6 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
 
     scope = _Scope()
 
-    # Process implicit params
     params: list[ParamDef] = []
     for f in c.fields:
         if isinstance(f, ImplicitParam):
@@ -245,7 +223,6 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
             params.append(p)
             scope.add_param(p)
 
-    # Process explicit fields and constraints, preserving source order
     fields: list[ResolvedField] = []
     source_order: list[ResolvedField | ResolvedConstraint] = []
     for f in c.fields:
@@ -259,20 +236,17 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
             rc = _resolve_constraint(f, scope, registry, params)
             source_order.append(rc)
 
-    # Resolve output values from output (~) result params
     # These CAN reference fields (e.g. hml_long's ~n where n is an explicit field)
     output_values: list[ResolvedNatExpr] = []
-    for i in parent_type.output_param_positions:
+    for i in [p.position for p in parent_type.type_level_params if p.is_output]:
         rp = c.result_params[i]
         expr = _resolve_nat_expr(rp.expr, scope, registry)
         output_values.append(expr)
 
-    # Resolve non-output result param expressions (used to bind params from type args)
     result_param_exprs: dict[int, ResolvedExpr] = {}
     for i, rp in enumerate(c.result_params):
-        if i not in parent_type.output_param_positions:
+        if not parent_type.type_level_params[i].is_output:
             expr = _resolve_expr(rp.expr, scope, registry)
-            # Non-output result params can only reference params, not fields
             _check_no_field_refs_in_expr(
                 expr, f"result param at position {i} of constructor '{c.name}'"
             )
@@ -296,46 +270,45 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
 
 
 def _resolve_field(f: ExplicitField, scope: _Scope, registry: TypeRegistry) -> ResolvedField:
-    type_expr = _resolve_type_expr(f.type_expr, scope, registry)
+    condition: ResolvedNatExpr | None = None
+    raw_expr = f.type_expr
+    if isinstance(raw_expr, Conditional):
+        condition = _resolve_nat_expr(raw_expr.selector, scope, registry)
+        raw_expr = raw_expr.type_expr
+    type_expr = _resolve_type_expr(raw_expr, scope, registry)
     is_nat = _is_nat_valued(type_expr)
-    return ResolvedField(name=f.name, type_expr=type_expr, is_nat_valued=is_nat)
+    return ResolvedField(
+        name=f.name, type_expr=type_expr, is_nat_valued=is_nat, condition=condition
+    )
 
 
 def _resolve_constraint(
     c: Constraint, scope: _Scope, registry: TypeRegistry, params: list[ParamDef]
 ) -> ResolvedConstraint:
     """Resolve a constraint expression, detecting negated (output) variables."""
-    from .ast_nodes import Compare as AstCompare
-
     expr = c.expr
-    if not isinstance(expr, AstCompare):
+    if not isinstance(expr, Compare):
         raise SemaError("constraint must be a comparison expression")
 
     left = _resolve_nat_expr(expr.left, scope, registry)
     right = _resolve_nat_expr(expr.right, scope, registry)
 
-    # Detect negated param (output variable to solve for)
     negated = _find_negated_in_ast(expr, params)
 
-    op = _convert_compare_op(expr.op)
-    return ResolvedConstraint(op=op, left=left, right=right, negated_param=negated)
+    return ResolvedConstraint(op=expr.op, left=left, right=right, negated_param=negated)
 
 
 def _find_negated_in_ast(expr: Compare, params: list[ParamDef]) -> ParamDef | None:
     """Find a ~param in a comparison's AST subtree. Errors if there are multiple."""
-    from .ast_nodes import Add as AstAdd
-    from .ast_nodes import Multiply as AstMul
-    from .ast_nodes import NegatedIdentifier as AstNeg
-
     found: list[ParamDef] = []
 
     def scan(e: TypeExpr) -> None:
-        if isinstance(e, AstNeg):
+        if isinstance(e, NegatedIdentifier):
             for p in params:
                 if p.name == e.name:
                     found.append(p)
                     return
-        if isinstance(e, AstAdd | AstMul):
+        if isinstance(e, Add | Multiply):
             scan(e.left)
             scan(e.right)
 
@@ -349,17 +322,10 @@ def _find_negated_in_ast(expr: Compare, params: list[ParamDef]) -> ParamDef | No
     return found[0] if found else None
 
 
-def _convert_compare_op(op: CompareOp) -> CompareOp:
-    return op
-
-
 def _is_nat_valued(expr: ResolvedTypeExpr) -> bool:
     if isinstance(expr, TypeApply):
         return expr.type.produces_nat
     return False
-
-
-# ── Validation helpers ────────────────────────────────────────────────
 
 
 def _check_no_field_refs_in_expr(expr: ResolvedExpr, context: str) -> None:
@@ -382,23 +348,16 @@ def _check_type_apply_arity(expr: ResolvedTypeExpr) -> None:
         if actual != expected:
             raise SemaError(f"type '{expr.type.name}' expects {expected} arguments, got {actual}")
         for arg in expr.arguments:
-            if isinstance(
-                arg, TypeApply | TupleType | CondType | CellRefType | AnonymousRecordType
-            ):
+            if isinstance(arg, TypeApply | TupleType | CellRefType | AnonymousRecordType):
                 _check_type_apply_arity(arg)
     elif isinstance(expr, TupleType):
         _check_type_apply_arity(expr.element)
-    elif isinstance(expr, CondType):
-        _check_type_apply_arity(expr.inner)
     elif isinstance(expr, CellRefType):
         _check_type_apply_arity(expr.inner)
     elif isinstance(expr, AnonymousRecordType):
         for c in expr.type.constructors:
             for f in c.fields:
                 _check_type_apply_arity(f.type_expr)
-
-
-# ── Expression resolution ────────────────────────────────────────────
 
 
 def _resolve_expr(expr: TypeExpr, scope: _Scope, registry: TypeRegistry) -> ResolvedExpr:
@@ -414,15 +373,20 @@ def _resolve_expr(expr: TypeExpr, scope: _Scope, registry: TypeRegistry) -> Reso
 
         case Apply(function=func, arguments=args):
             resolved_func = _resolve_expr(func, scope, registry)
-            if not isinstance(resolved_func, TypeApply):
-                raise SemaError("cannot apply non-type expression")
             resolved_args: list[ResolvedExpr] = []
             for a in args:
                 resolved_args.append(_resolve_expr(a, scope, registry))
-            return TypeApply(
-                type=resolved_func.type,
-                arguments=resolved_func.arguments + resolved_args,
-            )
+            if isinstance(resolved_func, TypeApply):
+                return TypeApply(
+                    type=resolved_func.type,
+                    arguments=resolved_func.arguments + resolved_args,
+                )
+            if isinstance(resolved_func, AnonymousRecordType):
+                return TypeApply(
+                    type=resolved_func.type,
+                    arguments=resolved_args,
+                )
+            raise SemaError("cannot apply non-type expression")
 
         case Add(left=left, right=right):
             return NatAdd(
@@ -446,10 +410,9 @@ def _resolve_expr(expr: TypeExpr, scope: _Scope, registry: TypeRegistry) -> Reso
                 bit=_resolve_nat_expr(bit, scope, registry),
             )
 
-        case Conditional(selector=sel, type_expr=te):
-            return CondType(
-                selector=_resolve_nat_expr(sel, scope, registry),
-                inner=_resolve_type_expr(te, scope, registry),
+        case Conditional():
+            raise SemaError(
+                "conditional (?) can only appear at field level, not nested in type expressions"
             )
 
         case CellRef(inner=inner):
@@ -459,7 +422,7 @@ def _resolve_expr(expr: TypeExpr, scope: _Scope, registry: TypeRegistry) -> Reso
             raise SemaError("comparison expressions are only valid inside constraints")
 
         case InlineRecord(fields=field_defs):
-            return _resolve_inline_record(field_defs, scope, registry)
+            return _resolve_inline_record(field_defs, registry)
 
 
 def _resolve_identifier(name: str, scope: _Scope, registry: TypeRegistry) -> ResolvedExpr:
@@ -507,13 +470,13 @@ def _resolve_type_expr(expr: TypeExpr, scope: _Scope, registry: TypeRegistry) ->
 
 
 def _resolve_inline_record(
-    field_defs: list[FieldDef], scope: _Scope, registry: TypeRegistry
+    field_defs: list[FieldDef], registry: TypeRegistry
 ) -> AnonymousRecordType:
-    anon_type = ResolvedType(name="", type_idx=-1, is_builtin=False)
+    anon_type = registry.register_anonymous()
     fields: list[ResolvedField] = []
     params: list[ParamDef] = []
 
-    inner_scope = scope.copy()
+    inner_scope = _Scope()
 
     for f in field_defs:
         if isinstance(f, ExplicitField):
@@ -527,6 +490,19 @@ def _resolve_inline_record(
             params.append(p)
             inner_scope.add_param(p)
 
+    # Only type params become type-level params (external, passed in).
+    # Nat params stay internal — resolved by the deser plan.
+    type_params = [p for p in params if p.kind == ParamKind.TYPE]
+    anon_type.arity = len(type_params)
+    anon_type.type_level_params = [
+        TypeLevelParam(position=i, kind=ParamKind.TYPE, is_output=False)
+        for i in range(len(type_params))
+    ]
+
+    result_param_exprs: dict[int, ResolvedExpr] = {}
+    for i, p in enumerate(type_params):
+        result_param_exprs[i] = TypeParamRef(p)
+
     constructor = ResolvedConstructor(
         name=None,
         tag_bits="",
@@ -535,12 +511,11 @@ def _resolve_inline_record(
         is_special=False,
         params=params,
         fields=fields,
+        source_order=list(fields),
+        result_param_exprs=result_param_exprs,
     )
     anon_type.constructors.append(constructor)
     return AnonymousRecordType(type=anon_type)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────
 
 
 def _is_resolved_nat(expr: ResolvedExpr) -> bool:
@@ -551,7 +526,7 @@ def _as_nat(expr: ResolvedExpr) -> ResolvedNatExpr:
     if _is_resolved_nat(expr):
         assert not isinstance(
             expr,
-            TypeParamRef | TypeApply | TupleType | CondType | CellRefType | AnonymousRecordType,
+            TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType,
         )
         return expr
     raise SemaError("expected nat expression, got type expression")
@@ -561,7 +536,7 @@ def _as_type(expr: ResolvedExpr) -> ResolvedTypeExpr:
     if not _is_resolved_nat(expr):
         assert isinstance(
             expr,
-            TypeParamRef | TypeApply | TupleType | CondType | CellRefType | AnonymousRecordType,
+            TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType,
         )
         return expr
     raise SemaError("expected type expression, got nat expression")
