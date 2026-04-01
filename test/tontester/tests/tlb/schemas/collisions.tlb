@@ -1,0 +1,17 @@
+// Name collision stress test: names that collide with Python keywords,
+// builtins, runtime library names, and each other.
+
+// Constructor name same as a Python keyword
+pass$0 = Pass;
+return$1 = Pass;
+
+// Type name that could collide with builtins
+int$_ value:uint32 = Int;
+
+// Field name is a Python keyword
+class$_ for:uint32 import:int8 = Class;
+
+// Constructor and type sharing names across types
+foo$0 x:uint32 = Foo;
+bar$1 x:uint32 = Foo;
+foo$_ y:uint64 = Bar;

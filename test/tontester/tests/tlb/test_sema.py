@@ -1,0 +1,673 @@
+import pytest
+from tlb.generator.sema import analyze_text
+from tlb.generator.sema_types import (
+    BindOutputParam,
+    BindParam,
+    CellRefType,
+    CheckConstraint,
+    CondType,
+    MatchBit,
+    MatchConstraint,
+    MatchConstructor,
+    MatchFail,
+    MatchTag,
+    NatAdd,
+    NatFieldValue,
+    NatGetBit,
+    NatLiteral,
+    NatMul,
+    NatParamRef,
+    NatSub,
+    NatTypeArg,
+    ParamKind,
+    ReadField,
+    ResolvedType,
+    SemaError,
+    SolveConstraint,
+    TupleType,
+    TypeApply,
+    TypeParamRef,
+)
+
+
+def types_by_name(text: str) -> dict[str, ResolvedType]:
+    _, user_types = analyze_text(text)
+    return {t.name: t for t in user_types}
+
+
+# ── Basic type registration ──────────────────────────────────────────
+
+
+class TestTypeRegistration:
+    def test_simple_type(self):
+        ts = types_by_name("unit$_ = Unit;")
+        assert "Unit" in ts
+        assert ts["Unit"].arity == 0
+        assert len(ts["Unit"].constructors) == 1
+        assert ts["Unit"].constructors[0].name == "unit"
+
+    def test_multi_constructor(self):
+        ts = types_by_name("bool_false$0 = Bool; bool_true$1 = Bool;")
+        assert ts["Bool"].arity == 0
+        assert len(ts["Bool"].constructors) == 2
+
+    def test_parameterized_type(self):
+        ts = types_by_name("nothing$0 {X:Type} = Maybe X;\njust$1 {X:Type} value:X = Maybe X;")
+        assert ts["Maybe"].arity == 1
+        assert ts["Maybe"].param_kinds == [ParamKind.TYPE]
+
+    def test_nat_param(self):
+        ts = types_by_name("foo$_ {n:#} x:(## n) = Foo n;")
+        assert ts["Foo"].arity == 1
+        assert ts["Foo"].param_kinds == [ParamKind.NAT]
+
+    def test_output_params(self):
+        ts = types_by_name(
+            "unary_zero$0 = Unary ~0; unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);"
+        )
+        assert ts["Unary"].output_param_positions == [0]
+
+
+# ── Expression resolution ────────────────────────────────────────────
+
+
+class TestExpressionResolution:
+    def test_type_apply(self):
+        ts = types_by_name("""
+            nothing$0 {X:Type} = Maybe X;
+            just$1 {X:Type} value:X = Maybe X;
+            foo$_ x:(Maybe uint32) = Foo;
+        """)
+        foo_cons = ts["Foo"].constructors[0]
+        field_type = foo_cons.fields[0].type_expr
+        assert isinstance(field_type, TypeApply)
+        assert field_type.type is ts["Maybe"]
+        assert len(field_type.arguments) == 1
+
+    def test_cell_ref(self):
+        ts = types_by_name("foo$_ x:^Cell = Foo;")
+        field_type = ts["Foo"].constructors[0].fields[0].type_expr
+        assert isinstance(field_type, CellRefType)
+        inner = field_type.inner
+        assert isinstance(inner, TypeApply)
+        assert inner.type.name == "Cell"
+        assert inner.arguments == []
+
+    def test_cell_ref_on_nat_producing_type(self):
+        """^uint32 is valid — cell reference to a nat-valued type."""
+        ts = types_by_name("foo$_ x:^uint32 = Foo;")
+        field_type = ts["Foo"].constructors[0].fields[0].type_expr
+        assert isinstance(field_type, CellRefType)
+        assert isinstance(field_type.inner, TypeApply)
+
+    def test_conditional(self):
+        ts = types_by_name("foo$_ {n:#} x:n?uint32 = Foo n;")
+        con = ts["Foo"].constructors[0]
+        n_param = con.params[0]
+        field_type = con.fields[0].type_expr
+        assert isinstance(field_type, CondType)
+        assert field_type.selector == NatParamRef(n_param)
+        assert isinstance(field_type.inner, TypeApply)
+
+    def test_tuple_nat_times_type(self):
+        """n * Bit is a tuple: n values of Bit."""
+        ts = types_by_name("bit$_ (## 1) = Bit; foo$_ {n:#} s:(n * Bit) = Foo n;")
+        con = ts["Foo"].constructors[0]
+        n_param = con.params[0]
+        field_type = con.fields[0].type_expr
+        assert isinstance(field_type, TupleType)
+        assert field_type.count == NatParamRef(n_param)
+        assert isinstance(field_type.element, TypeApply)
+        assert field_type.element.type is ts["Bit"]
+
+    def test_tuple_nat_times_nat_is_natmul(self):
+        """n * m where both are nat → NatMul, not TupleType."""
+        ts = types_by_name("foo$_ {n:#} {m:#} x:(## (n * m)) = Foo n m;")
+        con = ts["Foo"].constructors[0]
+        field_type = con.fields[0].type_expr
+        # (## (n * m)): ## applied to (n * m) which is NatMul
+        assert isinstance(field_type, TypeApply)
+        assert len(field_type.arguments) == 1
+        assert isinstance(field_type.arguments[0], NatMul)
+
+    def test_tuple_type_times_type_error(self):
+        """Type * Type is an error."""
+        with pytest.raises(SemaError, match="nat expression"):
+            _ = analyze_text("foo$_ x:(Bit * Bit) = Foo; bit$_ (## 1) = Bit;")
+
+    def test_getbit(self):
+        """flags.3 is a NatGetBit expression."""
+        ts = types_by_name("foo$_ flags:(## 8) x:flags.3?uint32 = Foo;")
+        con = ts["Foo"].constructors[0]
+        field_type = con.fields[1].type_expr
+        assert isinstance(field_type, CondType)
+        assert isinstance(field_type.selector, NatGetBit)
+
+    def test_nat_valued_field(self):
+        ts = types_by_name("foo$_ {n:#} len:(#< n) = Foo n;")
+        field = ts["Foo"].constructors[0].fields[0]
+        assert field.is_nat_valued is True
+
+    def test_type_param_ref(self):
+        ts = types_by_name("just$1 {X:Type} value:X = Maybe X;")
+        field_type = ts["Maybe"].constructors[0].fields[0].type_expr
+        assert isinstance(field_type, TypeParamRef)
+
+    def test_undefined_type_error(self):
+        with pytest.raises(SemaError, match="undefined"):
+            _ = analyze_text("foo$_ x:Nonexistent = Foo;")
+
+    def test_undefined_lowercase_error(self):
+        with pytest.raises(SemaError, match="undefined"):
+            _ = analyze_text("foo$_ {n:#} x:(## unknown) = Foo n;")
+
+    def test_empty_schema(self):
+        _, user_types = analyze_text("")
+        assert user_types == []
+
+
+# ── Tag computation ──────────────────────────────────────────────────
+
+
+class TestTags:
+    def test_explicit_tag(self):
+        ts = types_by_name("bool_false$0 = Bool; bool_true$1 = Bool;")
+        cons = ts["Bool"].constructors
+        assert cons[0].tag_bits == "0"
+        assert cons[1].tag_bits == "1"
+
+    def test_auto_tag_is_32_bits(self):
+        ts = types_by_name("foo x:uint32 = Foo;")
+        assert ts["Foo"].constructors[0].tag_len == 32
+
+    def test_empty_tag(self):
+        ts = types_by_name("unit$_ = Unit;")
+        assert ts["Unit"].constructors[0].tag_bits == ""
+        assert ts["Unit"].constructors[0].tag_len == 0
+
+
+# ── Match tree ────────────────────────────────────────────────────────
+
+
+class TestMatchTree:
+    def test_single_constructor_no_tag(self):
+        ts = types_by_name("unit$_ = Unit;")
+        tree = ts["Unit"].match_tree
+        assert isinstance(tree, MatchConstructor)
+        assert tree.constructor.name == "unit"
+
+    def test_single_constructor_with_tag(self):
+        ts = types_by_name("foo#4 = Foo;")
+        tree = ts["Foo"].match_tree
+        assert isinstance(tree, MatchTag)
+        assert tree.bits == "0100"
+        assert isinstance(tree.child, MatchConstructor)
+
+    def test_two_constructors_bit_split(self):
+        ts = types_by_name("bool_false$0 = Bool; bool_true$1 = Bool;")
+        tree = ts["Bool"].match_tree
+        assert isinstance(tree, MatchBit)
+        assert isinstance(tree.zero, MatchConstructor)
+        assert isinstance(tree.one, MatchConstructor)
+        assert tree.zero.constructor.name == "bool_false"
+        assert tree.one.constructor.name == "bool_true"
+
+    def test_shared_tag_param_disambiguation(self):
+        """HashmapNode: both constructors have empty tags, disambiguated by params."""
+        ts = types_by_name(
+            """
+dummy$_ {n:#} {X:Type} = Hashmap n X;
+hmn_leaf#_ {X:Type} value:X = HashmapNode 0 X;
+hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode (n + 1) X;
+"""
+        )
+        tree = ts["HashmapNode"].match_tree
+        # Should be a constraint-based split on arg_0
+        assert isinstance(tree, MatchConstraint)
+        assert isinstance(tree.condition, CheckConstraint)
+
+    def test_typedef_follows_through(self):
+        """Typedef constructor follows through to the inner type for dispatch."""
+        ts = types_by_name(
+            """
+inner#ab x:uint32 = Inner;
+other#cd y:uint64 = Other;
+_ Inner = Outer;
+_ Other = Outer;
+"""
+        )
+        tree = ts["Outer"].match_tree
+        # Should split on bits since Inner (#ab) and Other (#cd) have different tags
+        assert tree is not None
+        assert not isinstance(tree, MatchFail)
+
+    def test_multi_constant_disambiguation(self):
+        """ConfigParam-like: many constructors with different constant params."""
+        ts = types_by_name(
+            """
+_ x:uint32 = P 0;
+_ x:uint64 = P 1;
+_ x:bits256 = P 2;
+"""
+        )
+        tree = ts["P"].match_tree
+        # Should build a constraint tree splitting on arg_0
+        assert tree is not None
+        assert not isinstance(tree, MatchFail)
+
+    def test_empty_type(self):
+        """Type with no constructors."""
+        ts = types_by_name("foo$_ = Foo; bar$_ = Bar;")
+        # Both are fine — just single constructors
+        assert isinstance(ts["Foo"].match_tree, MatchConstructor)
+
+    def test_three_way_bit_split(self):
+        """Three constructors with different bit prefixes."""
+        ts = types_by_name(
+            """
+a$00 = T;
+b$01 = T;
+c$1 = T;
+"""
+        )
+        tree = ts["T"].match_tree
+        assert isinstance(tree, MatchBit)
+        # bit 0: split further into 00 vs 01
+        assert isinstance(tree.zero, MatchBit)
+        # bit 1: single constructor
+        assert isinstance(tree.one, MatchConstructor)
+        assert tree.one.constructor.name == "c"
+
+
+# ── Inference capability ─────────────────────────────────────────────
+
+
+class TestInference:
+    def test_pair_is_inference_capable(self):
+        ts = types_by_name("pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;")
+        pair = ts["Pair"]
+        assert len(pair.inference) == 2
+        assert pair.inference[0].is_capable is True
+        assert pair.inference[1].is_capable is True
+
+    def test_maybe_not_inference_capable(self):
+        ts = types_by_name("nothing$0 {X:Type} = Maybe X;\njust$1 {X:Type} value:X = Maybe X;")
+        maybe = ts["Maybe"]
+        assert len(maybe.inference) == 1
+        assert maybe.inference[0].is_capable is False
+
+
+# ── Classification ───────────────────────────────────────────────────
+
+
+class TestClassification:
+    def test_enum(self):
+        ts = types_by_name("bool_false$0 = Bool; bool_true$1 = Bool;")
+        assert ts["Bool"].is_enum is True
+
+    def test_not_enum(self):
+        ts = types_by_name("foo$_ x:uint32 = Foo;")
+        assert ts["Foo"].is_enum is False
+
+    def test_typedef(self):
+        ts = types_by_name("_ uint32 = Coins;")
+        assert ts["Coins"].is_typedef is True
+        assert isinstance(ts["Coins"].typedef_target, TypeApply)
+
+    def test_not_typedef_with_tag(self):
+        ts = types_by_name("foo x:uint32 = Foo;")
+        # Has auto-tag, so not a typedef
+        assert ts["Foo"].is_typedef is False
+
+
+# ── Deser plan ───────────────────────────────────────────────────────
+
+
+class TestDeserPlan:
+    def test_basic_fields(self):
+        ts = types_by_name("foo$_ a:uint32 b:uint64 = Foo;")
+        steps = ts["Foo"].constructors[0].deser_steps
+        reads = [s for s in steps if isinstance(s, ReadField)]
+        assert len(reads) == 2
+
+    def test_entry_bindings(self):
+        """Nat params are bound from type args via SolveConstraint(identity)."""
+        ts = types_by_name("foo$_ {n:#} x:(## n) = Foo n;")
+        steps = ts["Foo"].constructors[0].deser_steps
+        # First step should bind n from NatTypeArg(0)
+        assert isinstance(steps[0], SolveConstraint)
+        assert steps[0].target_param.name == "n"
+        assert isinstance(steps[0].value, NatTypeArg)
+        assert steps[0].value.position == 0
+
+    def test_type_param_binding(self):
+        """Type params are bound via BindParam."""
+        ts = types_by_name("just$1 {X:Type} value:X = Maybe X;")
+        steps = ts["Maybe"].constructors[0].deser_steps
+        binds = [s for s in steps if isinstance(s, BindParam)]
+        assert len(binds) == 1
+        assert binds[0].target_param.name == "X"
+        assert binds[0].position == 0
+
+    def test_complex_result_param(self):
+        """Complex result param (n + 1) derives n from type arg."""
+        ts = types_by_name(
+            """
+dummy$_ {n:#} {X:Type} = Hashmap n X;
+hmn_leaf#_ {X:Type} value:X = HashmapNode 0 X;
+hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode (n + 1) X;
+"""
+        )
+        fork = ts["HashmapNode"].constructors[1]
+        steps = fork.deser_steps
+
+        # n should be solved from type_arg_0: n = NatTypeArg(0) - 1
+        solves = [s for s in steps if isinstance(s, SolveConstraint)]
+        n_solve = [s for s in solves if s.target_param.name == "n"]
+        assert len(n_solve) == 1
+        assert isinstance(n_solve[0].value, NatSub)
+        assert isinstance(n_solve[0].value.left, NatTypeArg)
+        assert n_solve[0].value.left.position == 0
+
+    def test_constant_result_param(self):
+        """Constant result param (0) becomes a CheckConstraint."""
+        ts = types_by_name(
+            """
+dummy$_ {n:#} {X:Type} = Hashmap n X;
+hmn_leaf#_ {X:Type} value:X = HashmapNode 0 X;
+hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode (n + 1) X;
+"""
+        )
+        leaf = ts["HashmapNode"].constructors[0]
+        steps = leaf.deser_steps
+        checks = [s for s in steps if isinstance(s, CheckConstraint)]
+        # Should check NatTypeArg(0) == 0
+        assert len(checks) >= 1
+        c = checks[0]
+        assert isinstance(c.left, NatTypeArg)
+        assert isinstance(c.right, NatLiteral)
+        assert c.right.value == 0
+
+    def test_constraint_check(self):
+        """Non-negated constraint becomes a CheckConstraint."""
+        ts = types_by_name("foo$_ {n:#} {n <= 30} x:(## n) = Foo n;")
+        steps = ts["Foo"].constructors[0].deser_steps
+        checks = [s for s in steps if isinstance(s, CheckConstraint)]
+        assert len(checks) >= 1
+
+    def test_constraint_solve(self):
+        """Constraint with ~var becomes SolveConstraint."""
+        ts = types_by_name(
+            """
+unary_zero$0 = Unary ~0;
+unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
+hm_edge#_ {n:#} {X:Type} {l:#} {m:#} label:(HmLabel ~l n) {n = (~m) + l} node:(HashmapNode m X) = Hashmap n X;
+hmn_leaf#_ {X:Type} value:X = HashmapNode 0 X;
+hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode (n + 1) X;
+hml_short$0 {m:#} {n:#} len:(Unary ~n) {n <= m} s:(n * Bit) = HmLabel ~n m;
+hml_long$10 {m:#} n:(#<= m) s:(n * Bit) = HmLabel ~n m;
+hml_same$11 {m:#} v:Bit n:(#<= m) = HmLabel ~n m;
+bit$_ (## 1) = Bit;
+"""
+        )
+        hm_edge = ts["Hashmap"].constructors[0]
+        steps = hm_edge.deser_steps
+
+        # Entry: bind n and X from type args
+        # Then: ReadField(label), BindOutputParam(l), SolveConstraint(m), ReadField(node)
+        reads = [s for s in steps if isinstance(s, ReadField)]
+        assert reads[0].field.name == "label"
+        assert reads[1].field.name == "node"
+
+        binds = [s for s in steps if isinstance(s, BindOutputParam)]
+        assert any(b.target_param.name == "l" for b in binds)
+
+        solves = [s for s in steps if isinstance(s, SolveConstraint)]
+        m_solve = [s for s in solves if s.target_param.name == "m"]
+        assert len(m_solve) == 1
+        assert isinstance(m_solve[0].value, NatSub)
+
+    def test_output_param_binding(self):
+        """Output params are extracted from fields with ~ arguments."""
+        ts = types_by_name(
+            """
+unary_zero$0 = Unary ~0;
+unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
+hml_short$0 {m:#} {n:#} len:(Unary ~n) {n <= m} s:(n * Bit) = HmLabel ~n m;
+bit$_ (## 1) = Bit;
+"""
+        )
+        hml_short = ts["HmLabel"].constructors[0]
+        steps = hml_short.deser_steps
+
+        binds = [s for s in steps if isinstance(s, BindOutputParam)]
+        assert any(b.target_param.name == "n" and b.extraction.final_output_idx == 0 for b in binds)
+
+    def test_output_values(self):
+        """Output values are resolved nat expressions."""
+        ts = types_by_name(
+            "unary_zero$0 = Unary ~0;\nunary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
+        )
+        zero = ts["Unary"].constructors[0]
+        assert len(zero.output_values) == 1
+        assert isinstance(zero.output_values[0], NatLiteral)
+        assert zero.output_values[0].value == 0
+
+        succ = ts["Unary"].constructors[1]
+        assert len(succ.output_values) == 1
+        assert isinstance(succ.output_values[0], NatAdd)
+
+    def test_inference_through_generic(self):
+        """Output param inferred through an inference-capable generic type."""
+        ts = types_by_name(
+            """
+unary_zero$0 = Unary ~0;
+unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
+pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;
+foo$_ {n:#} x:(Pair (Unary ~n) uint32) y:(## n) = Foo ~n;
+"""
+        )
+        foo_con = ts["Foo"].constructors[0]
+        binds = [s for s in foo_con.deser_steps if isinstance(s, BindOutputParam)]
+        assert len(binds) == 1
+        assert binds[0].target_param.name == "n"
+        assert len(binds[0].extraction.chain) == 1
+        assert binds[0].extraction.chain[0].type is ts["Pair"]
+        assert binds[0].extraction.final_output_idx == 0
+
+    def test_inference_double_nesting(self):
+        """Output param inferred through two levels of generic types."""
+        ts = types_by_name(
+            """
+unary_zero$0 = Unary ~0;
+unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
+pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;
+bar$_ {n:#} x:(Pair (Pair (Unary ~n) uint32) uint64) y:(## n) = Bar ~n;
+"""
+        )
+        bar_con = ts["Bar"].constructors[0]
+        binds = [s for s in bar_con.deser_steps if isinstance(s, BindOutputParam)]
+        assert len(binds) == 1
+        assert binds[0].target_param.name == "n"
+        assert len(binds[0].extraction.chain) == 2
+        assert binds[0].extraction.final_output_idx == 0
+
+    def test_no_inference_through_maybe(self):
+        """Maybe is NOT inference-capable, so using it to infer an output param is an error."""
+        with pytest.raises(SemaError, match="cannot be computed"):
+            _ = analyze_text("""
+nothing$0 {X:Type} = Maybe X;
+just$1 {X:Type} value:X = Maybe X;
+unary_zero$0 = Unary ~0;
+unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
+baz$_ {n:#} x:(Maybe (Unary ~n)) = Baz ~n;
+""")
+
+    def test_output_consistency_error(self):
+        """All constructors must agree on which positions are output (~)."""
+        with pytest.raises(SemaError, match="negated"):
+            _ = analyze_text("""
+foo$0 {n:#} x:uint32 = T ~n;
+bar$1 {n:#} x:uint32 = T n;
+""")
+
+
+# ── Multiple types interaction ────────────────────────────────────────
+
+
+class TestMultipleTypes:
+    def test_cross_type_references(self):
+        ts = types_by_name(
+            """
+nothing$0 {X:Type} = Maybe X;
+just$1 {X:Type} value:X = Maybe X;
+foo$_ x:(Maybe uint32) = Foo;"""
+        )
+        field_type = ts["Foo"].constructors[0].fields[0].type_expr
+        assert isinstance(field_type, TypeApply)
+        assert field_type.type is ts["Maybe"]
+
+    def test_either_type(self):
+        ts = types_by_name(
+            """
+left$0 {X:Type} {Y:Type} value:X = Either X Y;
+right$1 {X:Type} {Y:Type} value:Y = Either X Y;
+"""
+        )
+        assert ts["Either"].arity == 2
+        assert ts["Either"].param_kinds == [ParamKind.TYPE, ParamKind.TYPE]
+        # Neither X nor Y should be inference-capable
+        assert len(ts["Either"].inference) == 2
+        assert ts["Either"].inference[0].is_capable is False
+        assert ts["Either"].inference[1].is_capable is False
+
+    def test_shared_tag_constructors(self):
+        """Types where constructors share empty tags (disambiguated by params)."""
+        ts = types_by_name(
+            """
+dummy$_ {n:#} {X:Type} = Hashmap n X;
+hmn_leaf#_ {X:Type} value:X = HashmapNode 0 X;
+hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode (n + 1) X;
+"""
+        )
+        tree = ts["HashmapNode"].match_tree
+        # Must use constraint-based disambiguation, not MatchFail
+        assert tree is not None
+        assert not isinstance(tree, MatchFail)
+
+
+# ── Semantic errors ───────────────────────────────────────────────────
+
+
+class TestSemaErrors:
+    def test_inconsistent_arity(self):
+        with pytest.raises(SemaError, match="inconsistent arity"):
+            _ = analyze_text("foo$0 x:uint32 = T x; bar$1 = T;")
+
+    def test_builtin_redefinition(self):
+        with pytest.raises(SemaError, match="cannot redefine"):
+            _ = analyze_text("foo$_ = Cell;")
+
+    def test_duplicate_constructor_name(self):
+        with pytest.raises(SemaError, match="duplicate constructor name"):
+            _ = analyze_text("foo$0 = T; foo$1 = T;")
+
+    def test_duplicate_param_name(self):
+        with pytest.raises(SemaError, match="duplicate parameter name"):
+            _ = analyze_text("foo$_ {n:#} {n:Type} = T;")
+
+    def test_duplicate_field_name(self):
+        with pytest.raises(SemaError, match="duplicate field name"):
+            _ = analyze_text("foo$_ a:uint32 a:uint64 = T;")
+
+    def test_wrong_arity(self):
+        """Applying a type with wrong number of arguments."""
+        with pytest.raises(SemaError, match="expects 1 arguments, got 2"):
+            _ = analyze_text("""
+                nothing$0 {X:Type} = Maybe X;
+                just$1 {X:Type} value:X = Maybe X;
+                foo$_ x:(Maybe uint32 uint64) = Foo;
+            """)
+
+    def test_field_ref_in_input_result_param(self):
+        """Non-output result params cannot reference explicit fields."""
+        with pytest.raises(SemaError, match="cannot reference field"):
+            _ = analyze_text("foo$_ x:uint32 = T x;")
+
+    def test_output_value_can_reference_field(self):
+        """Output values CAN reference nat-valued fields (like hml_long)."""
+        ts = types_by_name("""
+            foo$_ {m:#} n:(#<= m) = T ~n m;
+        """)
+        con = ts["T"].constructors[0]
+        assert len(con.output_values) == 1
+        assert isinstance(con.output_values[0], NatFieldValue)
+
+    def test_uncomputable_param(self):
+        """Param that can't be bound from type args, fields, or constraints."""
+        with pytest.raises(SemaError, match="cannot be computed"):
+            _ = analyze_text("foo$_ {n:#} x:uint32 = T;")
+
+    def test_output_consistency(self):
+        """All constructors must agree on ~ positions."""
+        with pytest.raises(SemaError, match="negated"):
+            _ = analyze_text("""
+                foo$0 {n:#} x:uint32 = T ~n;
+                bar$1 {n:#} x:uint32 = T n;
+            """)
+
+    def test_multiple_negated_in_constraint(self):
+        """Constraint with two ~ params should error."""
+        with pytest.raises(SemaError, match="multiple negated"):
+            _ = analyze_text("""
+                foo$_ {n:#} {m:#} {l:#} {(~n) = (~m) + l} x:uint32 = T;
+            """)
+
+    def test_zero_arity_applied_with_args(self):
+        """Applying a zero-arity type with arguments should error."""
+        with pytest.raises(SemaError, match="expects 0 arguments"):
+            _ = analyze_text("""
+                foo$_ = Foo;
+                bar$_ x:(Foo uint32) = Bar;
+            """)
+
+    def test_special_consistency_error(self):
+        """All constructors must agree on ! (special cell) prefix."""
+        with pytest.raises(SemaError, match="special"):
+            _ = analyze_text("""
+                !merkle$0 x:uint32 = T;
+                normal$1 y:uint64 = T;
+            """)
+
+    def test_special_all_marked(self):
+        """All constructors with ! is fine."""
+        ts = types_by_name("""
+            !a$0 x:uint32 = T;
+            !b$1 y:uint64 = T;
+        """)
+        assert ts["T"].is_special is True
+
+    def test_normal_not_special(self):
+        ts = types_by_name("foo$_ x:uint32 = T;")
+        assert ts["T"].is_special is False
+
+    def test_multiplicative_constraint_unsolvable(self):
+        """Constraints with ~ inside multiplication can't be solved."""
+        with pytest.raises(SemaError, match="cannot be computed"):
+            _ = analyze_text("foo$_ {n:#} {m:#} {n = (~m) * 2} x:uint32 = T n;")
+
+
+# ── Full block.tlb ───────────────────────────────────────────────────
+
+
+class TestBlockTlb:
+    def test_analyze_block_tlb(self):
+        with open("crypto/block/block.tlb") as f:
+            text = f.read()
+        _, user_types = analyze_text(text)
+        type_names = {t.name for t in user_types}
+        assert "Hashmap" in type_names
+        assert "HashmapE" in type_names
+        assert "Message" in type_names
+        assert "Block" in type_names
+        assert len(user_types) > 100
