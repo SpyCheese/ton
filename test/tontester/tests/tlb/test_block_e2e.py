@@ -103,7 +103,7 @@ class TestBlockDeserialization:
         vf = testnet_block.value_flow.ref
         anon = vf.field.ref
         ec = anon.from_prev_blk.other
-        d = ec.dict_1
+        d = ec.dict
         assert isinstance(d, hme_root)
         root = d.root.ref
         assert isinstance(root, hm_edge)

@@ -34,10 +34,12 @@ from .sema_types import (
     ParamDef,
     ParamKind,
     ResolvedExpr,
+    ResolvedField,
     ResolvedNatExpr,
     ResolvedTypeExpr,
     TupleType,
     TypeApply,
+    TypeLevelParam,
     TypeParamRef,
     references_type_params,
 )
@@ -61,7 +63,7 @@ class NatExpr:
 
     @property
     def local(self) -> str:
-        return self._render(self._expr)
+        return self._render(self._expr, use_local=True)
 
     @property
     def self_(self) -> str:
@@ -72,22 +74,27 @@ class NatExpr:
         """True if this is a compile-time constant (NatLiteral)."""
         return isinstance(self._expr, NatLiteral)
 
-    def _render(self, expr: ResolvedNatExpr, prefix: str = "") -> str:
+    def _resolve(self, obj: ParamDef | TypeLevelParam | ResolvedField, use_local: bool) -> str:
+        if use_local:
+            return self._scope.lookup_local(obj)
+        return self._scope.lookup(obj)
+
+    def _render(self, expr: ResolvedNatExpr, use_local: bool = False, prefix: str = "") -> str:
         match expr:
             case NatLiteral(value=value):
                 return str(value)
             case NatParamRef(param=param):
-                return f"{prefix}{self._scope.lookup(param)}"
+                return f"{prefix}{self._resolve(param, use_local)}"
             case NatFieldValue(field=field):
-                return f"{prefix}{self._scope.lookup(field)}"
+                return f"{prefix}{self._resolve(field, use_local)}"
             case NatAdd(left=left, right=right):
-                return f"({self._render(left, prefix)} + {self._render(right, prefix)})"
+                return f"({self._render(left, use_local, prefix)} + {self._render(right, use_local, prefix)})"
             case NatSub(left=left, right=right):
-                return f"({self._render(left, prefix)} - {self._render(right, prefix)})"
+                return f"({self._render(left, use_local, prefix)} - {self._render(right, use_local, prefix)})"
             case NatMul(left=left, right=right):
-                return f"({self._render(left, prefix)} * {self._render(right, prefix)})"
+                return f"({self._render(left, use_local, prefix)} * {self._render(right, use_local, prefix)})"
             case NatGetBit(value=value, bit=bit):
-                return f"(({self._render(value, prefix)} >> {self._render(bit, prefix)}) & 1)"
+                return f"(({self._render(value, use_local, prefix)} >> {self._render(bit, use_local, prefix)}) & 1)"
             case NatTypeArg(param=param):
                 return self._scope.lookup(param)
 

@@ -3,11 +3,15 @@
 from generated.collisions import (
     BarType,
     ClassType,
+    ClsFieldType,
+    CsFieldType,
     FooType,
     IntType,
     PassType,
     bar,
     class_1,
+    cls_field,
+    cs_field,
     foo,
     foo_1,
     int_1,
@@ -59,3 +63,17 @@ class TestNameCollisions:
         result = FooType().load_from(obj.serialize().begin_parse())
         assert isinstance(result, bar)
         assert result.x == 77
+
+    def test_field_named_cs(self):
+        """Field named 'cs' keeps its name; local var in load_from is renamed."""
+        obj = cs_field(a=10, cs=20, b=30)
+        result = CsFieldType().load_from(obj.serialize().begin_parse())
+        assert result.a == 10
+        assert result.cs == 20
+        assert result.b == 30
+
+    def test_field_named_cls(self):
+        """Field named 'cls' keeps its name; local var in load_from is renamed."""
+        obj = cls_field(cls=42)
+        result = ClsFieldType().load_from(obj.serialize().begin_parse())
+        assert result.cls == 42

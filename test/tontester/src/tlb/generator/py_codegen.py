@@ -409,22 +409,23 @@ class ConstructorGenerator:
     ) -> None:
         match step:
             case ReadField():
-                name, strat, cond = field_map[id(step.field)]
+                field_name, strat, cond = field_map[id(step.field)]
+                var_name = local.lookup_local(step.field)
                 if cond is not None:
                     sel = NatExpr(cond, local).local
                     sb.line(f"if {sel}:")
                     with sb.block():
-                        strat.emit_load(name, "cs", sb)
+                        strat.emit_load(var_name, "cs", sb)
                     sb.line("else:")
                     with sb.block():
-                        sb.line(f"{name} = None")
+                        sb.line(f"{var_name} = None")
                 else:
-                    strat.emit_load(name, "cs", sb)
-                ctor_args.append(f"{name}={name}")
+                    strat.emit_load(var_name, "cs", sb)
+                ctor_args.append(f"{field_name}={var_name}")
             case SolveConstraint():
                 from .sema_types import NatTypeArg as NTA
 
-                var_name = local.lookup(step.target_param)
+                var_name = local.lookup_local(step.target_param)
                 value_expr = NatExpr(step.value, local).local
                 sb.line(f"{var_name} = {value_expr}")
                 if not isinstance(step.value, NTA):
@@ -437,8 +438,8 @@ class ConstructorGenerator:
                         )
             case BindOutputParam():
                 self.ctx.use("TlbModelError")
-                var_name = local.lookup(step.target_param)
-                source_name = local.lookup(step.extraction.source_field)
+                var_name = local.lookup_local(step.target_param)
+                source_name = local.lookup_local(step.extraction.source_field)
                 expr = source_name
                 for inf_step in step.extraction.chain:
                     field = inf_step.type.inference[inf_step.param_idx].constructor_field
@@ -469,8 +470,8 @@ class ConstructorGenerator:
                 if step.target_param not in self._used_type_params:
                     return
                 tlp = self.c.parent_type.type_level_params[step.position]
-                type_name = local.lookup(tlp)
-                var_name = local.lookup(step.target_param)
+                type_name = local.lookup_local(tlp)
+                var_name = local.lookup_local(step.target_param)
                 if type_name != var_name:
                     sb.line(f"{var_name} = {type_name}")
 

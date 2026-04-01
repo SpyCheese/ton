@@ -15,3 +15,7 @@ class$_ for:uint32 import:int8 = Class;
 foo$0 x:uint32 = Foo;
 bar$1 x:uint32 = Foo;
 foo$_ y:uint64 = Bar;
+
+// Field name collides with load_from parameters
+cs_field$_ a:# cs:# b:# = CsField;
+cls_field$_ cls:# = ClsField;

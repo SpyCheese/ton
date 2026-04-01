@@ -55,7 +55,7 @@ class TestSized:
     """Sized: len:(Unary ~n) data:(n * Bit) — output param determines field width."""
 
     def test_empty(self):
-        obj = sized(0, len_1=unary_zero(), data=[])
+        obj = sized(0, len=unary_zero(), data=[])
         result = SizedType().load_from(obj.serialize().begin_parse())
         assert isinstance(result, sized)
         assert result.data == []
@@ -63,7 +63,7 @@ class TestSized:
     def test_three_bits(self):
         obj = sized(
             3,
-            len_1=unary_succ(2, x=unary_succ(1, x=unary_succ(0, x=unary_zero()))),
+            len=unary_succ(2, x=unary_succ(1, x=unary_succ(0, x=unary_zero()))),
             data=[bit(1), bit(0), bit(1)],
         )
         result = SizedType().load_from(obj.serialize().begin_parse())

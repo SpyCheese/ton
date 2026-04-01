@@ -16,9 +16,10 @@ from .sema_types import (
     TypeLevelParam,
 )
 
+_PYTHON_KEYWORDS: frozenset[str] = frozenset(keyword.kwlist) | frozenset(keyword.softkwlist)
+
 _RESERVED: frozenset[str] = (
-    frozenset(keyword.kwlist)
-    | frozenset(keyword.softkwlist)
+    _PYTHON_KEYWORDS
     | frozenset(
         {
             "int",
@@ -41,9 +42,12 @@ _RESERVED: frozenset[str] = (
             "Exception",
             "ValueError",
             "TypeError",
+            "bitarray",
             "BitsTypeConstructor",
             "Builder",
             "Cell",
+            "cls",
+            "cs",
             "InstantiableTypeInfo",
             "IntTypeConstructor",
             "Ref",
@@ -71,11 +75,13 @@ class NameScope:
 
     _used: set[str]
     _bindings: dict[int, str]
+    _local_bindings: dict[int, str]
     _parent: NameScope | None
 
     def __init__(self, parent: NameScope | None = None) -> None:
         self._used = set()
         self._bindings = {}
+        self._local_bindings = {}
         self._parent = parent
 
     def _is_taken(self, name: str) -> bool:
@@ -104,16 +110,43 @@ class NameScope:
         return name
 
     def bind_field(self, obj: Bindable, preferred: str) -> str:
-        """Register a field name. Only avoids keywords and sibling field collisions,
-        not parent scope names (since fields are accessed via self.X)."""
-        candidate = preferred
+        """Register a field name and a corresponding local variable name.
+
+        The field name (returned, used for self.X) avoids only Python keywords
+        and sibling collisions. The local variable name (retrieved via
+        lookup_local) additionally avoids _RESERVED names like 'cs' and 'cls'
+        that are used as method parameters in generated code.
+        """
+        field_name = preferred
         suffix = 1
-        while candidate in _RESERVED or candidate in self._used:
-            candidate = f"{preferred}_{suffix}"
+        while field_name in _PYTHON_KEYWORDS or field_name in self._used:
+            field_name = f"{preferred}_{suffix}"
             suffix += 1
-        self._used.add(candidate)
-        self._bindings[id(obj)] = candidate
-        return candidate
+        self._used.add(field_name)
+        self._bindings[id(obj)] = field_name
+
+        local_name = field_name
+        suffix = 1
+        while local_name in _RESERVED or local_name in self._local_bindings.values():
+            local_name = f"{preferred}_{suffix}"
+            suffix += 1
+        self._local_bindings[id(obj)] = local_name
+        return field_name
+
+    def lookup_local(self, obj: Bindable) -> str:
+        """Get the local variable name for a sema object.
+
+        For field-bound objects, returns the local-safe name (avoiding cs/cls etc.).
+        For other objects, falls back to the regular binding.
+        """
+        key = id(obj)
+        if key in self._local_bindings:
+            return self._local_bindings[key]
+        if key in self._bindings:
+            return self._bindings[key]
+        if self._parent is not None:
+            return self._parent.lookup_local(obj)
+        raise KeyError(f"no local binding for {obj!r}")
 
     def reserve(self, name: str) -> str:
         """Reserve a name without binding to an object."""
