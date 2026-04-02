@@ -175,6 +175,41 @@ class UintTypeConstructor(TypeInfo[int]):
 
 
 @final
+class BoundedUintTypeConstructor(TypeInfo[int]):
+    def __init__(self, bound: int, *, inclusive: bool):
+        self._bound = bound
+        self._inclusive = inclusive
+        if inclusive:
+            self._width = bound.bit_length()
+            self._max = bound
+        else:
+            assert bound > 0
+            self._width = (bound - 1).bit_length()
+            self._max = bound - 1
+
+    @override
+    def serialize_value(self, value: int, builder: Builder):
+        if value < 0 or value > self._max:
+            op = "<=" if self._inclusive else "<"
+            raise TlbModelError(f"value {value} out of range for #{op} {self._bound}")
+        if self._width > 0:
+            _ = builder.store_uint(value, self._width)
+
+    @override
+    def load_from(self, cs: Slice):
+        value = cs.load_uint(self._width) if self._width > 0 else 0
+        if value > self._max:
+            op = "<=" if self._inclusive else "<"
+            raise TlbModelError(f"value {value} out of range for #{op} {self._bound}")
+        return value
+
+    @override
+    def __repr__(self):
+        op = "<=" if self._inclusive else "<"
+        return f"#{op}{self._bound}"
+
+
+@final
 class IntTypeConstructor(TypeInfo[int]):
     def __init__(self, n: int):
         assert n > 0

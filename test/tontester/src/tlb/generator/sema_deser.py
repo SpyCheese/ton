@@ -22,7 +22,6 @@ from .sema_types import (
     OutputExtraction,
     ParamDef,
     ParamKind,
-    TypeParamDef,
     ReadField,
     ResolvedConstraint,
     ResolvedConstructor,
@@ -35,6 +34,7 @@ from .sema_types import (
     SolveConstraint,
     TupleType,
     TypeApply,
+    TypeParamDef,
     TypeParamRef,
 )
 
@@ -75,7 +75,9 @@ def classify_inference(resolved_type: ResolvedType) -> list[InferenceInfo]:
     return result
 
 
-def _param_for_type_position(constructor: ResolvedConstructor, position: int) -> TypeParamDef | None:
+def _param_for_type_position(
+    constructor: ResolvedConstructor, position: int
+) -> TypeParamDef | None:
     """Find the implicit Type param at the given type-parameter position."""
     type_idx = 0
     for tlp in constructor.parent_type.type_level_params:

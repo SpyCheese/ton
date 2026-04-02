@@ -39,7 +39,6 @@ from .sema_types import (
     NatSub,
     ParamDef,
     ParamKind,
-    TypeParamDef,
     ResolvedConstraint,
     ResolvedConstructor,
     ResolvedExpr,
@@ -51,6 +50,7 @@ from .sema_types import (
     TupleType,
     TypeApply,
     TypeLevelParam,
+    TypeParamDef,
     TypeParamRef,
 )
 
@@ -324,9 +324,7 @@ def _collect_nat_less_constraints(
                 arg, TypeApply | TypeParamRef | CellRefType | TupleType | AnonymousRecordType
             )
             if not isinstance(arg, NatLiteral):
-                out.append(
-                    ResolvedConstraint(op=CompareOp.GT, left=arg, right=NatLiteral(0))
-                )
+                out.append(ResolvedConstraint(op=CompareOp.GT, left=arg, right=NatLiteral(0)))
         case TypeApply(arguments=args):
             for a in args:
                 if isinstance(a, TypeApply | TupleType | CellRefType | AnonymousRecordType):

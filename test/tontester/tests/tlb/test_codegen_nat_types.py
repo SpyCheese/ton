@@ -91,3 +91,59 @@ class TestNatBuiltins:
         """#< n nested inside Maybe — n=0 rejected before reading."""
         with pytest.raises(TlbModelError, match="constraint failed"):
             _ = LtNestedType().load_from(lt_nested(1, x=nothing()).serialize().begin_parse(), 0)
+
+
+class TestBoundsValidation:
+    """#< and #<= reject out-of-range values."""
+
+    def test_leq_accepts_max(self):
+        """#<= 100 accepts value == bound."""
+        obj = leq_test(n=100)
+        assert LeqTestType().load_from(obj.serialize().begin_parse()).n == 100
+
+    def test_leq_accepts_zero(self):
+        """#<= 100 accepts value 0."""
+        obj = leq_test(n=0)
+        assert LeqTestType().load_from(obj.serialize().begin_parse()).n == 0
+
+    def test_leq_rejects_over_max(self):
+        """#<= 100 rejects value > bound on load."""
+        from pytoniq_core import Builder
+
+        b = Builder()
+        _ = b.store_uint(101, (100).bit_length())
+        with pytest.raises(TlbModelError, match="out of range"):
+            _ = LeqTestType().load_from(b.end_cell().begin_parse())
+
+    def test_leq_rejects_negative_on_store(self):
+        """#<= 100 rejects negative values on store."""
+        with pytest.raises(TlbModelError, match="out of range"):
+            _ = leq_test(n=-1).serialize()
+
+    def test_lt_accepts_max(self):
+        """#< 16 accepts value == bound - 1."""
+        obj = lt_test(n=15)
+        assert LtTestType().load_from(obj.serialize().begin_parse()).n == 15
+
+    def test_lt_accepts_zero(self):
+        """#< 16 accepts value 0."""
+        obj = lt_test(n=0)
+        assert LtTestType().load_from(obj.serialize().begin_parse()).n == 0
+
+    def test_lt_rejects_at_bound(self):
+        """#< n rejects value == bound on load.
+
+        #< 5 stores 3 bits (raw range 0..7) with bound 0..4 — value 5
+        fits in bits but is out of range.
+        """
+        from pytoniq_core import Builder
+
+        b = Builder()
+        _ = b.store_uint(5, (4).bit_length())
+        with pytest.raises(TlbModelError, match="out of range"):
+            _ = LtParamType().load_from(b.end_cell().begin_parse(), 5)
+
+    def test_lt_rejects_negative_on_store(self):
+        """#< 16 rejects negative values on store."""
+        with pytest.raises(TlbModelError, match="out of range"):
+            _ = lt_test(n=-1).serialize()

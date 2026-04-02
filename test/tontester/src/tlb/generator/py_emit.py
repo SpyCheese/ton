@@ -32,7 +32,6 @@ from .sema_types import (
     NatSub,
     NatTypeArg,
     ParamKind,
-    TypeParamDef,
     ResolvedExpr,
     ResolvedField,
     ResolvedNatExpr,
@@ -40,6 +39,7 @@ from .sema_types import (
     TupleType,
     TypeApply,
     TypeLevelParam,
+    TypeParamDef,
     TypeParamRef,
     references_type_params,
 )
@@ -102,31 +102,6 @@ class NatExpr:
                 return f"(({self._render(value, use_local, prefix)} >> {self._render(bit, use_local, prefix)}) & 1)"
             case NatTypeArg(param=param):
                 return self._scope.lookup(param)
-
-
-@final
-class _DerivedNatExpr(NatExpr):
-    """A NatExpr with a transformation applied, e.g. '({}).bit_length()'."""
-
-    def __init__(self, base: NatExpr, template: str) -> None:
-        super().__init__(base._expr, base._scope)
-        self._base = base
-        self._template = template
-
-    @property
-    @override
-    def local(self) -> str:
-        return self._template.format(self._base.local)
-
-    @property
-    @override
-    def self_(self) -> str:
-        return self._template.format(self._base.self_)
-
-    @property
-    @override
-    def is_constant(self) -> bool:
-        return False
 
 
 class TypeStrategy(ABC):
@@ -210,6 +185,56 @@ class UintStrategy(TypeStrategy):
     @override
     def descriptor(self) -> str:
         return f"uint{self.width.local}"
+
+
+@final
+class BoundedUintStrategy(TypeStrategy):
+    """Strategy for #<= N (inclusive) or #< N (exclusive) bounded unsigned integers."""
+
+    def __init__(self, bound: NatExpr, inclusive: bool, ctx: PyContext) -> None:
+        self.bound = bound
+        self.inclusive = inclusive
+        self.ctx = ctx
+
+    @override
+    def py_type(self) -> str:
+        return "int"
+
+    @override
+    def type_info_expr(self) -> str:
+        self.ctx.use("BoundedUintTypeConstructor")
+        return f"BoundedUintTypeConstructor({self.bound.local}, inclusive={self.inclusive})"
+
+    @override
+    def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
+        if self.inclusive and self.bound.is_zero:
+            sb.line("pass")
+            return
+        self.ctx.use("BoundedUintTypeConstructor")
+        sb.line(
+            f"BoundedUintTypeConstructor({self.bound.self_}, inclusive={self.inclusive})"
+            + f".serialize_value({value}, {builder})"
+        )
+
+    @override
+    def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
+        if self.inclusive and self.bound.is_zero:
+            sb.line(f"{target} = 0")
+            return
+        self.ctx.use("BoundedUintTypeConstructor")
+        sb.line(
+            f"{target} = BoundedUintTypeConstructor({self.bound.local}, inclusive={self.inclusive})"
+            + f".load_from({cs})"
+        )
+
+    @override
+    def load_uses_cs(self) -> bool:
+        return not (self.inclusive and self.bound.is_zero)
+
+    @override
+    def descriptor(self) -> str:
+        op = "leq" if self.inclusive else "lt"
+        return f"{op}{self.bound.local}"
 
 
 @final
@@ -569,11 +594,6 @@ class StrategyBuilder:
         """Create a NatExpr from a resolved expression."""
         return NatExpr(self._to_nat(expr), self.scope)
 
-    def _nat_derived(self, expr: ResolvedExpr, template: str) -> NatExpr:
-        """Create a NatExpr with a transformation template like '({}).bit_length()'."""
-        base = NatExpr(self._to_nat(expr), self.scope)
-        return _DerivedNatExpr(base, template)
-
     def build(
         self, type_expr: ResolvedTypeExpr, *, inside_generic_arg: bool = False
     ) -> TypeStrategy:
@@ -626,24 +646,10 @@ class StrategyBuilder:
             return UintStrategy(self._nat(type_expr.arguments[0]), self.ctx)
         if t is NatLeq_type:
             assert len(type_expr.arguments) == 1
-            nat = self._to_nat(type_expr.arguments[0])
-            if isinstance(nat, NatLiteral):
-                return UintStrategy(
-                    NatExpr(NatLiteral(nat.value.bit_length()), NameScope()), self.ctx
-                )
-            return UintStrategy(
-                self._nat_derived(type_expr.arguments[0], "({}).bit_length()"), self.ctx
-            )
+            return BoundedUintStrategy(self._nat(type_expr.arguments[0]), True, self.ctx)
         if t is NatLess_type:
             assert len(type_expr.arguments) == 1
-            nat = self._to_nat(type_expr.arguments[0])
-            if isinstance(nat, NatLiteral):
-                return UintStrategy(
-                    NatExpr(NatLiteral((nat.value - 1).bit_length()), NameScope()), self.ctx
-                )
-            return UintStrategy(
-                self._nat_derived(type_expr.arguments[0], "({} - 1).bit_length()"), self.ctx
-            )
+            return BoundedUintStrategy(self._nat(type_expr.arguments[0]), False, self.ctx)
         if t.is_builtin and t.arity == 0:
             name = t.name
             if name.startswith("uint"):

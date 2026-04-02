@@ -9,7 +9,7 @@ from typing import Protocol
 
 from .identity_key import IdentityKey
 from .name_scope import NameScope
-from .sema_types import TypeParamDef, ResolvedConstructor, ResolvedType
+from .sema_types import ResolvedConstructor, ResolvedType, TypeParamDef
 from .source_builder import SourceBuilder
 
 
@@ -179,6 +179,7 @@ class PyContext:
             for n in [
                 "AnyType",
                 "BitsTypeConstructor",
+                "BoundedUintTypeConstructor",
                 "InstantiableTypeInfo",
                 "IntTypeConstructor",
                 "Ref",

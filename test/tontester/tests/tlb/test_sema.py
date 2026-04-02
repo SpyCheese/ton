@@ -1,6 +1,6 @@
 import pytest
-from tlb.generator.sema import analyze_text
 from tlb.generator.ast_nodes import CompareOp
+from tlb.generator.sema import analyze_text
 from tlb.generator.sema_types import (
     BindOutputParam,
     BindParam,
@@ -657,8 +657,7 @@ class TestSemaErrors:
         n_param = con.params[0]
         assert isinstance(n_param, NatParamDef)
         check_steps = [
-            s for s in con.deser_steps
-            if isinstance(s, CheckConstraint) and s.op == CompareOp.GT
+            s for s in con.deser_steps if isinstance(s, CheckConstraint) and s.op == CompareOp.GT
         ]
         assert len(check_steps) == 1
         assert check_steps[0].left == NatParamRef(n_param)

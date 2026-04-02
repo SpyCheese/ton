@@ -17,10 +17,10 @@ from .identity_key import IdentityKey
 from .sema_types import (
     NatParamDef,
     ResolvedConstructor,
-    TypeParamDef,
     ResolvedField,
     ResolvedType,
     TypeLevelParam,
+    TypeParamDef,
 )
 
 type BindableForName = ResolvedType | ResolvedConstructor | TypeLevelParam
@@ -63,6 +63,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "TypeError",
         "bitarray",
         "BitsTypeConstructor",
+        "BoundedUintTypeConstructor",
         "Builder",
         "Cell",
         "cls",
@@ -202,7 +203,9 @@ class NameScope:
             return self._parent.lookup_private(obj)
         raise KeyError(f"no private binding for {obj!r}")
 
-    def lookup_local(self, obj: BindableForField | BindableForPrivateField | BindableForName) -> str:
+    def lookup_local(
+        self, obj: BindableForField | BindableForPrivateField | BindableForName
+    ) -> str:
         """Get the local variable name for a sema object.
 
         For field-bound objects, returns the local-safe name (avoiding cs/cls etc.).

@@ -25,12 +25,12 @@ from .sema_types import (
     ParamDef,
     ParamKind,
     ReadField,
-    TypeParamDef,
     ResolvedConstructor,
     ResolvedField,
     ResolvedType,
     SolveConstraint,
     TypeLevelParam,
+    TypeParamDef,
     TypeParamRef,
 )
 from .source_builder import SourceBuilder
@@ -496,9 +496,7 @@ class ConstructorGenerator:
                 if type_name != var_name:
                     sb.line(f"{var_name} = {type_name}")
 
-    def _emit_inference_access(
-        self, inf_step: InferenceStep, expr: str, sb: SourceBuilder
-    ) -> str:
+    def _emit_inference_access(self, inf_step: InferenceStep, expr: str, sb: SourceBuilder) -> str:
         """Emit code to access the inference field on a (possibly multi-constructor) type.
 
         Returns the expression for the accessed field value.
