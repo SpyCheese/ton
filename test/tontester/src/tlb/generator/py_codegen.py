@@ -19,10 +19,12 @@ from .sema_types import (
     MatchFail,
     MatchTag,
     MatchTree,
+    NatParamDef,
     NatTypeArg,
     ParamDef,
     ParamKind,
     ReadField,
+    TypeParamDef,
     ResolvedConstructor,
     ResolvedField,
     ResolvedType,
@@ -254,7 +256,7 @@ class ConstructorGenerator:
     type_scope: NameScope
     scope: NameScope
     params: list[ParamDef]
-    type_params: list[ParamDef]
+    type_params: list[TypeParamDef]
     strategies: dict[IdentityKey[ResolvedField], TypeStrategy]
     cls_name: str
 
@@ -274,23 +276,20 @@ class ConstructorGenerator:
         self.ctx.register_constructor(self.c, self)
 
         for p in self.c.params:
-            if p.kind == ParamKind.TYPE:
-                _ = self.scope.bind_field(p, f"_t{p.name}")
-            else:
-                _ = self.scope.bind_field(p, p.name)
+            match p:
+                case TypeParamDef():
+                    _ = self.scope.bind_field(p, f"_t{p.name}")
+                case NatParamDef():
+                    _ = self.scope.bind_field(p, p.name)
 
         for f in self.c.fields:
             _ = self.scope.bind_field(f, f.name or "field")
 
         self.cls_name = self.ctx.scope.lookup(self.c)
 
-    def type_var_name(self, p: ParamDef) -> str:
-        """Get the scope-bound type variable name for a type ParamDef."""
-        for pos, expr in self.c.result_param_exprs.items():
-            if isinstance(expr, TypeParamRef) and expr.param is p:
-                tlp = self.c.parent_type.type_level_params[pos]
-                return self.type_scope.lookup(tlp.type_var)
-        return p.name
+    def type_var_name(self, p: TypeParamDef) -> str:
+        """Get the scope-bound type variable name for a TypeParamDef."""
+        return self.type_scope.lookup(p.type_level_param.type_var)
 
     def generate(self, sb: SourceBuilder) -> None:
         self.ctx.use("final", "dataclass", "TLBRecord", "Builder", "Slice", "override")
@@ -300,9 +299,9 @@ class ConstructorGenerator:
             self.strategies[IdentityKey(f)] = builder.build(f.type_expr)
 
         self.params = [
-            p for p in self.c.params if p.kind == ParamKind.NAT or p in builder.used_type_params
+            p for p in self.c.params if isinstance(p, NatParamDef) or p in builder.used_type_params
         ]
-        self.type_params = [p for p in self.params if p.kind == ParamKind.TYPE]
+        self.type_params = [p for p in self.params if isinstance(p, TypeParamDef)]
 
         if self.type_params:
             self.ctx.use("TypeInfo")
@@ -317,11 +316,11 @@ class ConstructorGenerator:
 
         with sb.block():
             for p in self.c.params:
-                match p.kind:
-                    case ParamKind.TYPE:
+                match p:
+                    case TypeParamDef():
                         if p in self.type_params:
                             sb.line(f"{self.scope.lookup(p)}: TypeInfo[{self.type_var_name(p)}]")
-                    case ParamKind.NAT:
+                    case NatParamDef():
                         sb.line(f"{self.scope.lookup(p)}: int")
             for f in self.c.fields:
                 py_type = self.strategies[IdentityKey(f)].py_type()
@@ -398,11 +397,11 @@ class ConstructorGenerator:
                     sb.line("raise TlbModelError('tag mismatch')")
             ctor_args: list[str] = []
             for p in self.c.params:
-                match p.kind:
-                    case ParamKind.TYPE:
+                match p:
+                    case TypeParamDef():
                         if p in self.type_params:
                             ctor_args.append(self.scope.lookup(p))
-                    case ParamKind.NAT:
+                    case NatParamDef():
                         ctor_args.append(self.scope.lookup_local(p))
             for step in self.c.deser_steps:
                 self._emit_deser_step(step, ctor_args, sb)

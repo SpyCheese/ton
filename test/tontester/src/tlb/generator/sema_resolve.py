@@ -33,10 +33,12 @@ from .sema_types import (
     NatGetBit,
     NatLiteral,
     NatMul,
+    NatParamDef,
     NatParamRef,
     NatSub,
     ParamDef,
     ParamKind,
+    TypeParamDef,
     ResolvedConstraint,
     ResolvedConstructor,
     ResolvedExpr,
@@ -214,11 +216,28 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
 
     scope = _Scope()
 
+    # Build name → TypeLevelParam mapping for TYPE params from result params AST
+    type_param_tlp: dict[str, TypeLevelParam] = {}
+    for i, rp in enumerate(c.result_params):
+        tlp = parent_type.type_level_params[i]
+        if isinstance(rp.expr, Identifier) and tlp.kind == ParamKind.TYPE and not rp.negated:
+            type_param_tlp[rp.expr.name] = tlp
+
     params: list[ParamDef] = []
     for f in c.fields:
         if isinstance(f, ImplicitParam):
-            kind = ParamKind.TYPE if f.is_type else ParamKind.NAT
-            p = ParamDef(name=f.name, kind=kind)
+            if f.name in scope.entries:
+                raise SemaError(f"duplicate parameter name '{f.name}'")
+            p: ParamDef
+            if f.is_type:
+                if f.name not in type_param_tlp:
+                    raise SemaError(
+                        f"Type parameter '{f.name}' not found in result params of "
+                        + f"constructor '{c.name}'"
+                    )
+                p = TypeParamDef(name=f.name, type_level_param=type_param_tlp[f.name])
+            else:
+                p = NatParamDef(name=f.name)
             params.append(p)
             scope.add_param(p)
 
@@ -297,14 +316,14 @@ def _resolve_constraint(
     return ResolvedConstraint(op=expr.op, left=left, right=right, negated_param=negated)
 
 
-def _find_negated_in_ast(expr: Compare, params: list[ParamDef]) -> ParamDef | None:
+def _find_negated_in_ast(expr: Compare, params: list[ParamDef]) -> NatParamDef | None:
     """Find a ~param in a comparison's AST subtree. Errors if there are multiple."""
-    found: list[ParamDef] = []
+    found: list[NatParamDef] = []
 
     def scan(e: TypeExpr) -> None:
         if isinstance(e, NegatedIdentifier):
             for p in params:
-                if p.name == e.name:
+                if p.name == e.name and isinstance(p, NatParamDef):
                     found.append(p)
                     return
         if isinstance(e, Add | Multiply):
@@ -429,10 +448,11 @@ def _resolve_identifier(name: str, scope: _Scope, registry: TypeRegistry) -> Res
     if entry is not None:
         param, field = entry
         if param is not None:
-            if param.kind == ParamKind.NAT:
-                return NatParamRef(param)
-            else:
-                return TypeParamRef(param)
+            match param:
+                case NatParamDef():
+                    return NatParamRef(param)
+                case TypeParamDef():
+                    return TypeParamRef(param)
         assert field is not None
         if field.is_nat_valued:
             return NatFieldValue(field)
@@ -453,7 +473,7 @@ def _resolve_negated_identifier(name: str, scope: _Scope) -> NatParamRef:
     param, _ = entry
     if param is None:
         raise SemaError(f"'~{name}' must refer to an implicit parameter, not a field")
-    if param.kind != ParamKind.NAT:
+    if not isinstance(param, NatParamDef):
         raise SemaError(f"cannot negate Type parameter '{name}'")
     return NatParamRef(param)
 
@@ -477,6 +497,16 @@ def _resolve_inline_record(
 
     inner_scope = _Scope()
 
+    # Pre-count TYPE params to create TypeLevelParams first
+    type_param_count = sum(1 for f in field_defs if isinstance(f, ImplicitParam) and f.is_type)
+    type_level_params = [
+        TypeLevelParam(position=i, kind=ParamKind.TYPE, is_output=False)
+        for i in range(type_param_count)
+    ]
+    anon_type.arity = type_param_count
+    anon_type.type_level_params = type_level_params
+
+    type_param_idx = 0
     for f in field_defs:
         if isinstance(f, ExplicitField):
             rf = _resolve_field(f, inner_scope, registry)
@@ -484,19 +514,16 @@ def _resolve_inline_record(
             if f.name is not None:
                 inner_scope.add_field(f.name, rf)
         elif isinstance(f, ImplicitParam):
-            kind = ParamKind.TYPE if f.is_type else ParamKind.NAT
-            p = ParamDef(name=f.name, kind=kind)
+            p: ParamDef
+            if f.is_type:
+                p = TypeParamDef(name=f.name, type_level_param=type_level_params[type_param_idx])
+                type_param_idx += 1
+            else:
+                p = NatParamDef(name=f.name)
             params.append(p)
             inner_scope.add_param(p)
 
-    # Only type params become type-level params (external, passed in).
-    # Nat params stay internal — resolved by the deser plan.
-    type_params = [p for p in params if p.kind == ParamKind.TYPE]
-    anon_type.arity = len(type_params)
-    anon_type.type_level_params = [
-        TypeLevelParam(position=i, kind=ParamKind.TYPE, is_output=False)
-        for i in range(len(type_params))
-    ]
+    type_params = [p for p in params if isinstance(p, TypeParamDef)]
 
     result_param_exprs: dict[int, ResolvedExpr] = {}
     for i, p in enumerate(type_params):

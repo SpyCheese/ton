@@ -15,12 +15,14 @@ from .sema_types import (
     NatGetBit,
     NatLiteral,
     NatMul,
+    NatParamDef,
     NatParamRef,
     NatSub,
     NatTypeArg,
     OutputExtraction,
     ParamDef,
     ParamKind,
+    TypeParamDef,
     ReadField,
     ResolvedConstraint,
     ResolvedConstructor,
@@ -46,7 +48,7 @@ def classify_inference(resolved_type: ResolvedType) -> list[InferenceInfo]:
     result: list[InferenceInfo] = []
 
     for tlp in resolved_type.type_level_params:
-        if tlp.kind != ParamKind.TYPE:
+        if tlp.kind != ParamKind.TYPE:  # TypeLevelParam still uses ParamKind
             continue
         i = tlp.position
 
@@ -73,14 +75,14 @@ def classify_inference(resolved_type: ResolvedType) -> list[InferenceInfo]:
     return result
 
 
-def _param_for_type_position(constructor: ResolvedConstructor, position: int) -> ParamDef | None:
+def _param_for_type_position(constructor: ResolvedConstructor, position: int) -> TypeParamDef | None:
     """Find the implicit Type param at the given type-parameter position."""
     type_idx = 0
     for tlp in constructor.parent_type.type_level_params:
         if tlp.position == position:
             count = 0
             for p in constructor.params:
-                if p.kind == ParamKind.TYPE:
+                if isinstance(p, TypeParamDef):
                     if count == type_idx:
                         return p
                     count += 1
@@ -91,7 +93,7 @@ def _param_for_type_position(constructor: ResolvedConstructor, position: int) ->
 
 
 def _field_exposing_param(
-    constructor: ResolvedConstructor, param: ParamDef
+    constructor: ResolvedConstructor, param: TypeParamDef
 ) -> ResolvedField | None:
     """Find a field whose type is directly TypeParamRef(param)."""
     for field in constructor.fields:
@@ -215,7 +217,7 @@ def _solve_entry_expr(
         )
 
 
-def _find_unknown_nat_param(expr: ResolvedNatExpr, known: set[ParamDef]) -> ParamDef | None:
+def _find_unknown_nat_param(expr: ResolvedNatExpr, known: set[ParamDef]) -> NatParamDef | None:
     """Find a NatParamRef in a nat expression that isn't in the known set."""
     match expr:
         case NatParamRef(param=param) if param not in known:
@@ -372,7 +374,7 @@ def _solve_for_negated(constraint: ResolvedConstraint) -> ResolvedNatExpr | None
     return None
 
 
-def _expr_references_param(expr: ResolvedNatExpr, param: ParamDef) -> bool:
+def _expr_references_param(expr: ResolvedNatExpr, param: NatParamDef) -> bool:
     """Check if a resolved nat expression references a specific param."""
     match expr:
         case NatParamRef(param=p):
@@ -392,7 +394,7 @@ def _expr_references_param(expr: ResolvedNatExpr, param: ParamDef) -> bool:
 def _isolate_param(
     side_with_target: ResolvedNatExpr,
     other_side: ResolvedNatExpr,
-    target: ParamDef,
+    target: NatParamDef,
 ) -> ResolvedNatExpr | None:
     """Isolate target from: side_with_target = other_side.
 

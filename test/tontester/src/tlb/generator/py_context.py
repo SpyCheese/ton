@@ -9,7 +9,7 @@ from typing import Protocol
 
 from .identity_key import IdentityKey
 from .name_scope import NameScope
-from .sema_types import ParamDef, ResolvedConstructor, ResolvedType
+from .sema_types import TypeParamDef, ResolvedConstructor, ResolvedType
 from .source_builder import SourceBuilder
 
 
@@ -17,9 +17,9 @@ class ConstructorInfo(Protocol):
     """Protocol for constructor codegen data needed by cross-type lookups."""
 
     scope: NameScope
-    type_params: list[ParamDef]
+    type_params: list[TypeParamDef]
 
-    def type_var_name(self, p: ParamDef) -> str: ...
+    def type_var_name(self, p: TypeParamDef) -> str: ...
 
 
 class PyContext:

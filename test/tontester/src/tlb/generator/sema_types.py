@@ -20,9 +20,17 @@ class ParamKind(Enum):
 
 
 @dataclass(frozen=True)
-class ParamDef:
+class NatParamDef:
     name: str
-    kind: ParamKind
+
+
+@dataclass(frozen=True)
+class TypeParamDef:
+    name: str
+    type_level_param: TypeLevelParam
+
+
+type ParamDef = TypeParamDef | NatParamDef
 
 
 @dataclass(frozen=True)
@@ -54,7 +62,7 @@ class NatLiteral:
 
 @dataclass
 class NatParamRef:
-    param: ParamDef
+    param: NatParamDef
 
 
 @dataclass
@@ -107,7 +115,7 @@ type ResolvedNatExpr = (
 
 @dataclass
 class TypeParamRef:
-    param: ParamDef
+    param: TypeParamDef
 
 
 @dataclass
@@ -219,19 +227,19 @@ class ReadField:
 class BindParam:
     """Bind a Type param from a type argument (always identity assignment)."""
 
-    target_param: ParamDef
+    target_param: TypeParamDef
     position: int  # type arg position
 
 
 @dataclass
 class BindOutputParam:
-    target_param: ParamDef
+    target_param: NatParamDef
     extraction: OutputExtraction
 
 
 @dataclass
 class SolveConstraint:
-    target_param: ParamDef
+    target_param: NatParamDef
     value: ResolvedNatExpr
 
 
@@ -256,7 +264,7 @@ class ResolvedConstraint:
     op: CompareOp
     left: ResolvedNatExpr
     right: ResolvedNatExpr
-    negated_param: ParamDef | None = None
+    negated_param: NatParamDef | None = None
 
 
 type FieldOrConstraint = ResolvedField | ResolvedConstraint

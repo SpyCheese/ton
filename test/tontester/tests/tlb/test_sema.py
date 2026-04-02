@@ -15,6 +15,7 @@ from tlb.generator.sema_types import (
     NatGetBit,
     NatLiteral,
     NatMul,
+    NatParamDef,
     NatParamRef,
     NatSub,
     NatTypeArg,
@@ -104,6 +105,7 @@ class TestExpressionResolution:
         ts = types_by_name("foo$_ {n:#} x:n?uint32 = Foo n;")
         con = ts["Foo"].constructors[0]
         n_param = con.params[0]
+        assert isinstance(n_param, NatParamDef)
         field = con.fields[0]
         assert field.condition == NatParamRef(n_param)
         assert isinstance(field.type_expr, TypeApply)
@@ -127,6 +129,7 @@ class TestExpressionResolution:
         ts = types_by_name("bit$_ (## 1) = Bit; foo$_ {n:#} s:(n * Bit) = Foo n;")
         con = ts["Foo"].constructors[0]
         n_param = con.params[0]
+        assert isinstance(n_param, NatParamDef)
         field_type = con.fields[0].type_expr
         assert isinstance(field_type, TupleType)
         assert field_type.count == NatParamRef(n_param)
@@ -588,6 +591,11 @@ class TestSemaErrors:
     def test_duplicate_param_name(self):
         with pytest.raises(SemaError, match="duplicate parameter name"):
             _ = analyze_text("foo$_ {n:#} {n:Type} = T;")
+
+    def test_type_param_not_in_result(self):
+        """Type param declared but not used in result params."""
+        with pytest.raises(SemaError, match="not found in result params"):
+            _ = analyze_text("foo$_ {X:Type} x:uint32 = T;")
 
     def test_duplicate_field_name(self):
         with pytest.raises(SemaError, match="duplicate field name"):

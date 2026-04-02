@@ -27,11 +27,12 @@ from .sema_types import (
     NatGetBit,
     NatLiteral,
     NatMul,
+    NatParamDef,
     NatParamRef,
     NatSub,
     NatTypeArg,
-    ParamDef,
     ParamKind,
+    TypeParamDef,
     ResolvedExpr,
     ResolvedField,
     ResolvedNatExpr,
@@ -78,7 +79,7 @@ class NatExpr:
         """True if this is a compile-time constant 0."""
         return isinstance(self._expr, NatLiteral) and self._expr.value == 0
 
-    def _resolve(self, obj: ParamDef | TypeLevelParam | ResolvedField, use_local: bool) -> str:
+    def _resolve(self, obj: NatParamDef | TypeLevelParam | ResolvedField, use_local: bool) -> str:
         if use_local:
             return self._scope.lookup_local(obj)
         return self._scope.lookup(obj)
@@ -504,7 +505,7 @@ class TypeParamStrategy(TypeStrategy):
     ti_var is the Python variable holding the TypeInfo (e.g. "self._tX" or "_tX").
     """
 
-    def __init__(self, param: ParamDef, type_var: str, ti_var: str) -> None:
+    def __init__(self, param: TypeParamDef, type_var: str, ti_var: str) -> None:
         self.param = param
         self.type_var = type_var
         self.ti_var = ti_var
@@ -540,7 +541,7 @@ class StrategyBuilder:
 
     ctx: PyContext
     scope: NameScope
-    used_type_params: set[ParamDef]
+    used_type_params: set[TypeParamDef]
 
     def __init__(self, ctx: PyContext, scope: NameScope) -> None:
         self.ctx = ctx
@@ -575,7 +576,6 @@ class StrategyBuilder:
                 return self._build_type_apply(type_expr)
 
             case TypeParamRef(param=param):
-                assert param.kind == ParamKind.TYPE, f"nat param {param.name} used as type"
                 ti_var = self.scope.lookup(param)
                 self.used_type_params.add(param)
                 return TypeParamStrategy(param, param.name, ti_var)

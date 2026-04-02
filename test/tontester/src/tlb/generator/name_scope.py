@@ -2,14 +2,15 @@
 
 Tracks registered names, avoids collisions with Python keywords, builtins,
 and previously registered names. Maps sema objects (ResolvedType,
-ResolvedConstructor, ParamDef, ResolvedField) to unique Python identifiers.
+ResolvedConstructor, TypeParamDef, NatParamDef, ResolvedField) to unique Python identifiers.
 """
 
 import keyword
 
 from .sema_types import (
-    ParamDef,
+    NatParamDef,
     ResolvedConstructor,
+    TypeParamDef,
     ResolvedField,
     ResolvedType,
     TypeLevelParam,
@@ -69,7 +70,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
 )
 
 type Bindable = (
-    ResolvedType | ResolvedConstructor | ResolvedField | ParamDef | TypeLevelParam | TypeVarBinding
+    ResolvedType | ResolvedConstructor | ResolvedField | TypeParamDef | NatParamDef | TypeLevelParam | TypeVarBinding
 )
 
 
