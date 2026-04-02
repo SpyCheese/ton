@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from tlb.generator.py_codegen import generate_python
+from tlb.generator.py import generate_python
 from tlb.generator.sema import analyze_text
 
 import tl

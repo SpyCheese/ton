@@ -3,7 +3,7 @@
 import pytest
 from tlb.generator.ast_nodes import CompareOp
 from tlb.generator.sema import analyze_text
-from tlb.generator.sema_types import (
+from tlb.generator.sema.types import (
     CheckConstraint,
     MatchBit,
     MatchConstraint,

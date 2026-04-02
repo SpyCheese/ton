@@ -4,7 +4,7 @@ Phase 1: Register all type names and determine arities/param kinds.
 Phase 2: Resolve each constructor's fields and expressions.
 """
 
-from .ast_nodes import (
+from ..ast_nodes import (
     Add,
     Apply,
     CellRef,
@@ -25,8 +25,8 @@ from .ast_nodes import (
     Schema,
     TypeExpr,
 )
-from .sema_builtins import BUILTIN_TYPES_NUM, NatLess_type, create_builtin_registry
-from .sema_types import (
+from .builtins import NatLess_type, create_builtin_registry
+from .types import (
     AnonymousRecordType,
     CellRefType,
     NatAdd,
@@ -58,12 +58,10 @@ from .sema_types import (
 class TypeRegistry:
     _types: dict[str, ResolvedType]
     _anon_types: list[ResolvedType]
-    _next_idx: int
 
     def __init__(self) -> None:
         self._types = create_builtin_registry()
         self._anon_types = []
-        self._next_idx = BUILTIN_TYPES_NUM + len(self._types)
 
     def lookup(self, name: str) -> ResolvedType | None:
         return self._types.get(name)
@@ -71,14 +69,12 @@ class TypeRegistry:
     def register(self, name: str) -> ResolvedType:
         if name in self._types:
             return self._types[name]
-        t = ResolvedType(name=name, type_idx=self._next_idx)
-        self._next_idx += 1
+        t = ResolvedType(name=name)
         self._types[name] = t
         return t
 
     def register_anonymous(self) -> ResolvedType:
-        t = ResolvedType(name="", type_idx=self._next_idx)
-        self._next_idx += 1
+        t = ResolvedType(name="")
         self._anon_types.append(t)
         return t
 

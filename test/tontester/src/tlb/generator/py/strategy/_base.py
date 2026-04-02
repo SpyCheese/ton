@@ -1,0 +1,50 @@
+"""TypeStrategy ABC."""
+
+from abc import ABC, abstractmethod
+
+from ..source_builder import SourceBuilder
+
+
+class TypeStrategy(ABC):
+    """Knows how to emit store/load code for a resolved type expression."""
+
+    @abstractmethod
+    def py_type(self) -> str:
+        """Python type annotation string."""
+        ...
+
+    @abstractmethod
+    def type_info_expr(self) -> str:
+        """Python expression evaluating to a TypeInfo for this type.
+
+        Used when this type appears as a generic argument, e.g. the T in
+        Maybe T needs to produce a TypeInfo[T] expression at runtime.
+        """
+        ...
+
+    def type_info_expr_self(self) -> str:
+        """Like type_info_expr but renders nat params with self. prefix.
+
+        Used in serialize_to assertions. Default delegates to type_info_expr
+        which works when there are no nat param references in the expression.
+        """
+        return self.type_info_expr()
+
+    @abstractmethod
+    def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
+        """Emit statement(s) to store `value` into `builder`."""
+        ...
+
+    @abstractmethod
+    def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
+        """Emit statement(s) to load from `cs` into variable `target`."""
+        ...
+
+    def load_uses_cs(self) -> bool:
+        """Whether emit_load actually reads from the cs slice."""
+        return True
+
+    @abstractmethod
+    def descriptor(self) -> str:
+        """A unique string identifying this strategy for dedup purposes."""
+        ...

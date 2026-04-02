@@ -1,15 +1,15 @@
 """Shared context for Python code generation.
 
 Owns the import tracker, name scope, and ref wrapper registry.
-Both py_codegen and py_emit depend on this, avoiding circular imports.
+Both codegen and strategy modules depend on this, avoiding circular imports.
 """
 
 from collections.abc import Callable
 from typing import Protocol
 
-from .identity_key import IdentityKey
+from ..identity_key import IdentityKey
+from ..sema.types import ResolvedConstructor, ResolvedType, TypeParamDef
 from .name_scope import NameScope
-from .sema_types import ResolvedConstructor, ResolvedType, TypeParamDef
 from .source_builder import SourceBuilder
 
 

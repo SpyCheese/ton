@@ -10,8 +10,8 @@ Algorithm:
 Errors if any constructor's expansion runs out of tag bits (ambiguous).
 """
 
-from .ast_nodes import CompareOp
-from .sema_types import (
+from ..ast_nodes import CompareOp
+from .types import (
     CellRefType,
     CheckConstraint,
     MatchBit,

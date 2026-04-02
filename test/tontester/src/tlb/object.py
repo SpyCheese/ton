@@ -48,6 +48,18 @@ class _InstantiatedGenericType[T, *Args](TypeInfo[T]):
         return self._generic.deserialize(cell, *self._args)
 
     @override
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _InstantiatedGenericType)
+            and self._generic == other._generic  # pyright: ignore[reportUnknownMemberType]
+            and self._args == other._args  # pyright: ignore[reportUnknownMemberType]
+        )
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("instantiated", type(self._generic)))
+
+    @override
     def __repr__(self):
         args_str = ", ".join(repr(arg) for arg in self._args)
         return f"{repr(self._generic)}<{args_str}>"
@@ -70,6 +82,9 @@ class TLBRecord(ABC):
 
     def get_output(self, idx: int) -> int:
         raise TlbModelError(f"type has no output param at index {idx}")
+
+    def check_type[T](self, _idx: int, _ti: TypeInfo[T]) -> None:
+        pass
 
 
 @final
@@ -125,6 +140,14 @@ class RefType[X](InstantiableTypeInfo[Ref[X], TypeInfo[X]]):
         return Ref(tx, child)
 
     @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, RefType)
+
+    @override
+    def __hash__(self) -> int:
+        return hash("RefType")
+
+    @override
     def __repr__(self):
         return "Ref"
 
@@ -142,6 +165,14 @@ class _AnyType(TypeInfo[Slice]):
         while cs.remaining_refs:
             _ = cs.load_ref()
         return result
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _AnyType)
+
+    @override
+    def __hash__(self) -> int:
+        return hash("AnyType")
 
     @override
     def __repr__(self):
@@ -174,6 +205,14 @@ class UintTypeConstructor(TypeInfo[int]):
         if self._n == 0:
             return 0
         return cs.load_uint(self._n)
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, UintTypeConstructor) and self._n == other._n
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("uint", self._n))
 
     @override
     def __repr__(self):
@@ -211,6 +250,18 @@ class BoundedUintTypeConstructor(TypeInfo[int]):
         return value
 
     @override
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, BoundedUintTypeConstructor)
+            and self._bound == other._bound
+            and self._inclusive == other._inclusive
+        )
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("bounded_uint", self._bound, self._inclusive))
+
+    @override
     def __repr__(self):
         op = "<=" if self._inclusive else "<"
         return f"#{op}{self._bound}"
@@ -240,6 +291,14 @@ class IntTypeConstructor(TypeInfo[int]):
         return cs.load_int(self._n)
 
     @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, IntTypeConstructor) and self._n == other._n
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("int", self._n))
+
+    @override
     def __repr__(self):
         return f"int{self._n}"
 
@@ -267,6 +326,14 @@ class BitsTypeConstructor(TypeInfo[bitarray]):
         return cs.load_bits(self._n)
 
     @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, BitsTypeConstructor) and self._n == other._n
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("bits", self._n))
+
+    @override
     def __repr__(self):
         return f"bytes{self._n}"
 
@@ -292,6 +359,18 @@ class TupleTypeConstructor[X](TypeInfo[list[X]]):
         for _ in range(self._count):
             result.append(self._element_ti.load_from(cs))
         return result
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, TupleTypeConstructor)
+            and self._count == other._count
+            and self._element_ti == other._element_ti  # pyright: ignore[reportUnknownMemberType]
+        )
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("tuple", self._count))
 
     @override
     def __repr__(self) -> str:

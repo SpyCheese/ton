@@ -2,7 +2,7 @@
 
 import zlib
 
-from .ast_nodes import (
+from ..ast_nodes import (
     Add,
     Apply,
     CellRef,
@@ -20,7 +20,7 @@ from .ast_nodes import (
     NegatedIdentifier,
     TypeExpr,
 )
-from .sema_types import ResolvedType
+from .types import ResolvedType
 
 # ── CRC32 auto-tag computation ───────────────────────────────────────
 

@@ -10,20 +10,20 @@ Phases:
 7. Classify types (enum, typedef)
 """
 
-from .ast_nodes import Constructor, Schema
-from .lexer import Lexer
-from .parser import Parser
-from .sema_deser import build_deser_plan, classify_inference
-from .sema_match import build_match_tree
-from .sema_resolve import (
+from ..ast_nodes import Constructor, Schema
+from ..lexer import Lexer
+from ..parser import Parser
+from .deser import build_deser_plan, classify_inference
+from .match import build_match_tree
+from .resolve import (
     TypeRegistry,
     check_type_arities,
     insert_implicit_constraints,
     register_types,
     resolve_constructors,
 )
-from .sema_tags import assign_tags
-from .sema_types import (
+from .tags import assign_tags
+from .types import (
     AnonymousRecordType,
     CellRefType,
     ResolvedType,

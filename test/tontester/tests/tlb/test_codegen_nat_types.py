@@ -21,7 +21,7 @@ from generated.nat_types import (
     nothing,
     zero_width,
 )
-from tlb.object import TlbModelError, UintTypeConstructor
+from tlb.object import TlbModelError
 
 # ── Nat builtins ─────────────────────────────────────────────────────
 
@@ -75,7 +75,9 @@ class TestNatBuiltins:
 
     def test_lt_nested_roundtrip(self):
         """#< n nested inside Maybe — round-trips with just value."""
-        ti = UintTypeConstructor((4 - 1).bit_length())
+        from tlb.object import BoundedUintTypeConstructor
+
+        ti = BoundedUintTypeConstructor(4, inclusive=False)
         obj = lt_nested(4, x=just(ti, value=3))
         result = LtNestedType().load_from(obj.serialize().begin_parse(), 4)
         assert isinstance(result.x, just)

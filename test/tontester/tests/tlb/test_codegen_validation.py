@@ -3,19 +3,27 @@
 import pytest
 from bitarray import bitarray
 from generated.validation import (
+    Anon_cons,
     ConstrainedType,
     EqFieldType,
     FixedBitsType,
+    InlineGenericType,
     NatFieldType,
     OrderedType,
+    TypedParentType,
     ValParentType,
     ValType,
     VarBitsFieldType,
     constrained,
     eq_field,
     fixed_bits,
+    inline_generic,
+    just,
     nat_field,
+    nothing,
     ordered,
+    pair,
+    typed_parent,
     val_n,
     val_parent,
     val_zero,
@@ -201,6 +209,120 @@ class TestVarWidthBits:
         obj = fixed_bits(s=bitarray("1"))
         with pytest.raises(AssertionError):
             _ = obj.serialize()
+
+
+class TestInlineRecordAsGenericArg:
+    """Inline record [a:uint32 b:uint64] as argument to Maybe."""
+
+    def test_just_roundtrip(self):
+        from generated.validation import AnonType
+
+        inner = Anon_cons(a=10, b=20)
+        obj = inline_generic(x=just(AnonType(), value=inner))
+        result = InlineGenericType().load_from(obj.serialize().begin_parse())
+        assert isinstance(result.x, just)
+        assert result.x.value.a == 10
+        assert result.x.value.b == 20
+
+    def test_nothing_roundtrip(self):
+        obj = inline_generic(x=nothing())
+        result = InlineGenericType().load_from(obj.serialize().begin_parse())
+        assert isinstance(result.x, nothing)
+
+
+class TestTypeInfoEquality:
+    """TypeInfo __eq__ works correctly for runtime and generated types."""
+
+    def test_uint_equal(self):
+        from tlb.object import UintTypeConstructor
+
+        assert UintTypeConstructor(32) == UintTypeConstructor(32)
+        assert UintTypeConstructor(32) != UintTypeConstructor(64)
+
+    def test_bounded_uint_equal(self):
+        from tlb.object import BoundedUintTypeConstructor
+
+        assert BoundedUintTypeConstructor(100, inclusive=True) == BoundedUintTypeConstructor(
+            100, inclusive=True
+        )
+        assert BoundedUintTypeConstructor(100, inclusive=True) != BoundedUintTypeConstructor(
+            100, inclusive=False
+        )
+        assert BoundedUintTypeConstructor(100, inclusive=True) != BoundedUintTypeConstructor(
+            50, inclusive=True
+        )
+
+    def test_int_equal(self):
+        from tlb.object import IntTypeConstructor
+
+        assert IntTypeConstructor(8) == IntTypeConstructor(8)
+        assert IntTypeConstructor(8) != IntTypeConstructor(16)
+
+    def test_bits_equal(self):
+        from tlb.object import BitsTypeConstructor
+
+        assert BitsTypeConstructor(256) == BitsTypeConstructor(256)
+        assert BitsTypeConstructor(256) != BitsTypeConstructor(128)
+
+    def test_tuple_equal(self):
+        from tlb.object import TupleTypeConstructor, UintTypeConstructor
+
+        a = TupleTypeConstructor(3, UintTypeConstructor(8))
+        b = TupleTypeConstructor(3, UintTypeConstructor(8))
+        c = TupleTypeConstructor(3, UintTypeConstructor(16))
+        d = TupleTypeConstructor(4, UintTypeConstructor(8))
+        assert a == b
+        assert a != c
+        assert a != d
+
+    def test_generated_type_info_equal(self):
+        assert ValType() == ValType()
+        assert ConstrainedType() == ConstrainedType()
+        assert ValType() != ConstrainedType()
+
+    def test_instantiated_equal(self):
+        a = ValType.instantiate(4)
+        b = ValType.instantiate(4)
+        c = ValType.instantiate(5)
+        assert a == b
+        assert a != c
+
+    def test_cross_type_not_equal(self):
+        from tlb.object import IntTypeConstructor, UintTypeConstructor
+
+        assert UintTypeConstructor(32) != IntTypeConstructor(32)
+
+
+class TestCheckType:
+    """check_type verifies type params match during serialization."""
+
+    def test_typed_parent_roundtrip(self):
+        from tlb.object import UintTypeConstructor
+
+        inner = pair(UintTypeConstructor(32), UintTypeConstructor(64), first=10, second=20)
+        obj = typed_parent(inner=inner)
+        result = TypedParentType().load_from(obj.serialize().begin_parse())
+        assert result.inner.first == 10
+        assert result.inner.second == 20
+
+    def test_typed_parent_wrong_type_arg(self):
+        """Pair constructed with uint8 but parent expects uint32 — caught on serialize."""
+        from tlb.object import UintTypeConstructor
+
+        inner = pair(UintTypeConstructor(8), UintTypeConstructor(64), first=10, second=20)
+        obj = typed_parent(inner=inner)
+        with pytest.raises(AssertionError):
+            _ = obj.serialize()
+
+    def test_check_type_direct(self):
+        """check_type on pair directly."""
+        from tlb.object import IntTypeConstructor, UintTypeConstructor
+
+        p = pair(UintTypeConstructor(32), UintTypeConstructor(64), first=1, second=2)
+        p.check_type(0, UintTypeConstructor(32))
+        p.check_type(1, UintTypeConstructor(64))
+        with pytest.raises(AssertionError):
+            p.check_type(0, IntTypeConstructor(32))
 
 
 class TestDeserializeConstraints:

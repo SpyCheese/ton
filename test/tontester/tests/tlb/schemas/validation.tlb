@@ -24,3 +24,12 @@ fixed_bits$_ s:(bits 8) = FixedBits;
 
 // Variable-width bits field
 var_bits_field$_ {n:#} s:(bits n) = VarBitsField n;
+
+// Inline record as generic type argument
+nothing$0 {X:Type} = Maybe X;
+just$1 {X:Type} value:X = Maybe X;
+inline_generic$_ x:(Maybe [a:uint32 b:uint64]) = InlineGeneric;
+
+// Parent with concrete type arg for check_type testing
+pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;
+typed_parent$_ inner:(Pair uint32 uint64) = TypedParent;

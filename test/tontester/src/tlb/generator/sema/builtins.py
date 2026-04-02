@@ -1,8 +1,6 @@
 """Built-in TL-B types that exist before any user schema is processed."""
 
-from .sema_types import ParamKind, ResolvedType, TypeLevelParam
-
-_next_idx = 0
+from .types import ParamKind, ResolvedType, TypeLevelParam
 
 
 def _builtin(
@@ -16,7 +14,6 @@ def _builtin(
     kinds = param_kinds or []
     t = ResolvedType(
         name=name,
-        type_idx=_next_idx,
         arity=arity,
         type_level_params=[
             TypeLevelParam(position=i, kind=k, is_output=False) for i, k in enumerate(kinds)
@@ -24,7 +21,6 @@ def _builtin(
         produces_nat=produces_nat,
         is_builtin=True,
     )
-    _next_idx += 1
     return t
 
 
@@ -41,8 +37,6 @@ Bits_type = _builtin("bits", arity=1, param_kinds=[ParamKind.NAT])
 
 # Special types
 Any_type = _builtin("Any")
-
-BUILTIN_TYPES_NUM = _next_idx
 
 
 def create_builtin_registry() -> dict[str, ResolvedType]:

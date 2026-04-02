@@ -12,8 +12,8 @@ Three binding classes control which objects can be bound to which kind of name:
 
 import keyword
 
-from .identity_key import IdentityKey
-from .sema_types import (
+from ..identity_key import IdentityKey
+from ..sema.types import (
     NatParamDef,
     ResolvedConstructor,
     ResolvedField,
@@ -34,6 +34,7 @@ _FIELD_RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "serialize",
         "load_from",
         "get_output",
+        "check_type",
     }
 )
 
@@ -76,6 +77,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "TupleTypeConstructor",
         "TypeInfo",
         "UintTypeConstructor",
+        "_T",
     }
 )
 

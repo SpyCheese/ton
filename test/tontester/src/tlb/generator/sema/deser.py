@@ -1,7 +1,7 @@
 """Deserialization plan generation and inference capability classification."""
 
-from .ast_nodes import CompareOp
-from .sema_types import (
+from ..ast_nodes import CompareOp
+from .types import (
     AnonymousRecordType,
     BindOutputParam,
     BindParam,
@@ -36,6 +36,7 @@ from .sema_types import (
     TypeApply,
     TypeParamDef,
     TypeParamRef,
+    is_nat,
 )
 
 
@@ -189,7 +190,7 @@ def _solve_entry_expr(
 
     E.g. position 0 has expr (n + 1): solve NatTypeArg(0) = n + 1 → n = NatTypeArg(0) - 1.
     """
-    if not _is_resolved_nat(expr):
+    if not is_nat(expr):
         raise SemaError(
             f"constructor '{constructor.name}': non-nat expression at result position {position}"
         )
@@ -236,22 +237,8 @@ def _find_unknown_nat_param(expr: ResolvedNatExpr, known: set[ParamDef]) -> NatP
             return None
 
 
-def _is_resolved_nat(expr: ResolvedExpr) -> bool:
-    return isinstance(
-        expr,
-        NatLiteral
-        | NatParamRef
-        | NatFieldValue
-        | NatAdd
-        | NatSub
-        | NatMul
-        | NatGetBit
-        | NatTypeArg,
-    )
-
-
 def _as_nat(expr: ResolvedExpr) -> ResolvedNatExpr:
-    assert _is_resolved_nat(expr)
+    assert is_nat(expr)
     assert not isinstance(
         expr, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
     )

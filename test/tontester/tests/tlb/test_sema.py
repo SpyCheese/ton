@@ -1,7 +1,7 @@
 import pytest
 from tlb.generator.ast_nodes import CompareOp
 from tlb.generator.sema import analyze_text
-from tlb.generator.sema_types import (
+from tlb.generator.sema.types import (
     BindOutputParam,
     BindParam,
     CellRefType,
@@ -458,7 +458,9 @@ bit$_ (## 1) = Bit;
         steps = hml_short.deser_steps
 
         binds = [s for s in steps if isinstance(s, BindOutputParam)]
-        assert any(b.target_param.name == "n" and b.extraction.result_param_position == 0 for b in binds)
+        assert any(
+            b.target_param.name == "n" and b.extraction.result_param_position == 0 for b in binds
+        )
 
     def test_nat_param_values(self):
         """Nat param values are resolved nat expressions indexed by TLP position."""
@@ -598,9 +600,7 @@ bar$1 {n:#} x:uint32 = T n;
 
     def test_negated_param_solved_from_constraint(self):
         """{ ~prev_seq_no + 1 = seq_no } solves prev_seq_no = seq_no - 1."""
-        ts = types_by_name(
-            "foo$_ seq_no:# { prev_seq_no:# } { ~prev_seq_no + 1 = seq_no } = Foo;"
-        )
+        ts = types_by_name("foo$_ seq_no:# { prev_seq_no:# } { ~prev_seq_no + 1 = seq_no } = Foo;")
         con = ts["Foo"].constructors[0]
         f_seq = con.fields[0]
         p_prev = con.params[0]

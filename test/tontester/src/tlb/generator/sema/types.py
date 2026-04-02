@@ -4,10 +4,12 @@ All identifiers are resolved, nat vs type expressions are separated into
 distinct union types, and deserialization plans are computed.
 """
 
+import functools
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Protocol, TypeIs
 
-from .ast_nodes import CompareOp
+from ..ast_nodes import CompareOp
 
 
 class SemaError(Exception):
@@ -46,50 +48,77 @@ class TypeLevelParam:
     is_output: bool
 
 
-@dataclass
+@dataclass(frozen=True)
 class NatLiteral:
     value: int
+    references_params: bool = False
+    references_type_arg: bool = False
 
 
-@dataclass
+@dataclass(frozen=True)
 class NatParamRef:
     param: NatParamDef
+    references_params: bool = True
+    references_type_arg: bool = False
 
 
-@dataclass
+@dataclass(frozen=True)
 class NatFieldValue:
     """Runtime nat value of an explicit field (e.g. len:(#< n) → len is a nat)."""
 
     field: ResolvedField
+    references_params: bool = True
+    references_type_arg: bool = False
 
 
-@dataclass
-class NatAdd:
+class _NatBinOpMixin(Protocol):
+    left: ResolvedNatExpr
+    right: ResolvedNatExpr
+
+    @functools.cached_property
+    def references_params(self) -> bool:
+        return self.left.references_params or self.right.references_params
+
+    @functools.cached_property
+    def references_type_arg(self) -> bool:
+        return self.left.references_type_arg or self.right.references_type_arg
+
+
+@dataclass(frozen=True)
+class NatAdd(_NatBinOpMixin):
     left: ResolvedNatExpr
     right: ResolvedNatExpr
 
 
-@dataclass
-class NatSub:
+@dataclass(frozen=True)
+class NatSub(_NatBinOpMixin):
     """Only produced by constraint solving (e.g. m = n - l)."""
 
     left: ResolvedNatExpr
     right: ResolvedNatExpr
 
 
-@dataclass
-class NatMul:
+@dataclass(frozen=True)
+class NatMul(_NatBinOpMixin):
     left: ResolvedNatExpr
     right: ResolvedNatExpr
 
 
-@dataclass
+@dataclass(frozen=True)
 class NatGetBit:
     value: ResolvedNatExpr
     bit: ResolvedNatExpr
 
+    @functools.cached_property
+    def references_params(self) -> bool:
+        return self.value.references_params or self.bit.references_params
 
-@dataclass
+    @functools.cached_property
+    def references_type_arg(self) -> bool:
+        return self.value.references_type_arg or self.bit.references_type_arg
+
+
+@dataclass(frozen=True)
 class NatTypeArg:
     """Value of the nat type argument at the given result param position.
 
@@ -97,6 +126,8 @@ class NatTypeArg:
     """
 
     param: TypeLevelParam
+    references_params: bool = False
+    references_type_arg: bool = True
 
 
 type ResolvedNatExpr = (
@@ -104,37 +135,60 @@ type ResolvedNatExpr = (
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class TypeParamRef:
     param: TypeParamDef
+    references_type_params: bool = True
 
 
-@dataclass
+@dataclass(frozen=True)
 class TypeApply:
     type: ResolvedType
     arguments: list[ResolvedExpr]
 
+    @functools.cached_property
+    def references_type_params(self) -> bool:
+        for a in self.arguments:
+            if is_nat(a):
+                if a.references_params:
+                    return True
+            elif a.references_type_params:
+                return True
+        return False
 
-@dataclass
+
+@dataclass(frozen=True)
 class TupleType:
     """n * T — tuple of n values of type T."""
 
     count: ResolvedNatExpr
     element: ResolvedTypeExpr
 
+    @functools.cached_property
+    def references_type_params(self) -> bool:
+        return self.count.references_params or self.element.references_type_params
 
-@dataclass
+
+@dataclass(frozen=True)
 class CellRefType:
     """^T — value in a referenced cell."""
 
     inner: ResolvedTypeExpr
 
+    @functools.cached_property
+    def references_type_params(self) -> bool:
+        return self.inner.references_type_params
 
-@dataclass
+
+@dataclass(frozen=True)
 class AnonymousRecordType:
     """[field1:T1 field2:T2 ...] — inline anonymous record."""
 
     type: ResolvedType
+
+    @functools.cached_property
+    def references_type_params(self) -> bool:
+        return any(f.type_expr.references_type_params for f in self.type.constructors[0].fields)
 
 
 type ResolvedTypeExpr = TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
@@ -142,46 +196,19 @@ type ResolvedTypeExpr = TypeParamRef | TypeApply | TupleType | CellRefType | Ano
 type ResolvedExpr = ResolvedNatExpr | ResolvedTypeExpr
 
 
-def _nat_references_params(expr: ResolvedNatExpr) -> bool:
-    """Check whether a nat expression references any constructor parameters."""
-    match expr:
-        case NatParamRef() | NatFieldValue():
-            return True
-        case (
-            NatAdd(left=left, right=right)
-            | NatSub(left=left, right=right)
-            | NatMul(left=left, right=right)
-        ):
-            return _nat_references_params(left) or _nat_references_params(right)
-        case NatGetBit(value=value, bit=bit):
-            return _nat_references_params(value) or _nat_references_params(bit)
-        case _:
-            return False
-
-
-def references_type_params(expr: ResolvedTypeExpr) -> bool:
-    """Check whether a type expression references any constructor parameters (type or nat)."""
-    match expr:
-        case TypeParamRef():
-            return True
-        case TypeApply(arguments=arguments):
-            for a in arguments:
-                if isinstance(
-                    a, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
-                ):
-                    if references_type_params(a):
-                        return True
-                elif _nat_references_params(a):
-                    return True
-            return False
-        case CellRefType(inner=inner):
-            return references_type_params(inner)
-        case TupleType(element=element):
-            return references_type_params(element)
-        case AnonymousRecordType():
-            return any(
-                references_type_params(f.type_expr) for f in expr.type.constructors[0].fields
-            )
+def is_nat(expr: ResolvedExpr) -> TypeIs[ResolvedNatExpr]:
+    """Type guard: check whether a ResolvedExpr is a nat expression."""
+    return isinstance(
+        expr,
+        NatLiteral
+        | NatParamRef
+        | NatFieldValue
+        | NatAdd
+        | NatSub
+        | NatMul
+        | NatGetBit
+        | NatTypeArg,
+    )
 
 
 @dataclass(eq=False)
@@ -192,7 +219,7 @@ class ResolvedField:
     condition: ResolvedNatExpr | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class InferenceStep:
     """One step through an inference-capable generic type param."""
 
@@ -200,7 +227,7 @@ class InferenceStep:
     param_idx: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class OutputExtraction:
     """Full algorithm to extract a nat value from a deserialized field."""
 
@@ -209,12 +236,12 @@ class OutputExtraction:
     result_param_position: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class ReadField:
     field: ResolvedField
 
 
-@dataclass
+@dataclass(frozen=True)
 class BindParam:
     """Bind a Type param from a type argument (always identity assignment)."""
 
@@ -222,19 +249,19 @@ class BindParam:
     position: int  # type arg position
 
 
-@dataclass
+@dataclass(frozen=True)
 class BindOutputParam:
     target_param: NatParamDef
     extraction: OutputExtraction
 
 
-@dataclass
+@dataclass(frozen=True)
 class SolveConstraint:
     target_param: NatParamDef
     value: ResolvedNatExpr
 
 
-@dataclass
+@dataclass(frozen=True)
 class CheckConstraint:
     op: CompareOp
     left: ResolvedNatExpr
@@ -244,7 +271,7 @@ class CheckConstraint:
 type DeserStep = ReadField | BindParam | BindOutputParam | SolveConstraint | CheckConstraint
 
 
-@dataclass
+@dataclass(frozen=True)
 class ResolvedConstraint:
     """A resolved constraint expression (from { expr } in the source).
 
@@ -276,23 +303,25 @@ class ResolvedConstructor:
     nat_param_values: list[ResolvedNatExpr | None] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(frozen=True)
 class MatchTag:
     """Check/skip a known bit prefix (e.g. a 32-bit CRC tag)."""
 
     bits: str
     child: MatchTree
+    reads_bits: bool = True
 
 
-@dataclass
+@dataclass(frozen=True)
 class MatchBit:
     """Branch on the next serialized bit."""
 
     zero: MatchTree
     one: MatchTree
+    reads_bits: bool = True
 
 
-@dataclass
+@dataclass(frozen=True)
 class MatchConstraint:
     """Branch on a type-arg constraint."""
 
@@ -300,19 +329,24 @@ class MatchConstraint:
     if_true: MatchTree
     if_false: MatchTree
 
+    @functools.cached_property
+    def reads_bits(self) -> bool:
+        return self.if_true.reads_bits or self.if_false.reads_bits
 
-@dataclass
+
+@dataclass(frozen=True)
 class MatchConstructor:
     """Leaf — matched a constructor."""
 
     constructor: ResolvedConstructor
+    reads_bits: bool = False
 
 
-@dataclass
+@dataclass(frozen=True)
 class MatchFail:
     """No constructor matches — deserialization error."""
 
-    pass
+    reads_bits: bool = False
 
 
 type MatchTree = MatchTag | MatchBit | MatchConstraint | MatchConstructor | MatchFail
@@ -329,7 +363,6 @@ class InferenceInfo:
 @dataclass(eq=False)
 class ResolvedType:
     name: str
-    type_idx: int
     arity: int = 0
     type_level_params: list[TypeLevelParam] = field(default_factory=list)
     constructors: list[ResolvedConstructor] = field(default_factory=list)
