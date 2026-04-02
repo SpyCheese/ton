@@ -235,6 +235,40 @@ BoolTypeInfo = _BoolTypeInfo()
 
 
 @final
+class _UnaryTypeInfo(TypeInfo[int]):
+    """TypeInfo for simplified Unary ~n → int. Ser/deser as unary encoding."""
+
+    @override
+    def serialize_value(self, value: int, builder: Builder) -> None:
+        assert value >= 0
+        for _ in range(value):
+            _ = builder.store_uint(1, 1)
+        _ = builder.store_uint(0, 1)
+
+    @override
+    def load_from(self, cs: Slice) -> int:
+        n = 0
+        while cs.load_bit():
+            n += 1
+        return n
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _UnaryTypeInfo)
+
+    @override
+    def __hash__(self) -> int:
+        return hash("UnaryTypeInfo")
+
+    @override
+    def __repr__(self) -> str:
+        return "Unary"
+
+
+UnaryTypeInfo = _UnaryTypeInfo()
+
+
+@final
 class MaybeTypeInfo[X](TypeInfo[X | None]):
     """TypeInfo for simplified Maybe X → X | None. Stores inner TypeInfo."""
 

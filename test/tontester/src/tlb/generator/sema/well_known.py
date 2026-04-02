@@ -1,6 +1,6 @@
 """Detection of well-known TL-B type patterns."""
 
-from .types import ParamKind, ResolvedType, TypeParamRef, WellKnownType
+from .types import ParamKind, ResolvedType, TypeApply, TypeParamRef, WellKnownType
 
 
 def classify_well_known(rt: ResolvedType) -> None:
@@ -15,6 +15,8 @@ def classify_well_known(rt: ResolvedType) -> None:
         rt.well_known = WellKnownType.BOOL_TRUE
     elif _is_bool_false(rt):
         rt.well_known = WellKnownType.BOOL_FALSE
+    elif _is_unary(rt):
+        rt.well_known = WellKnownType.UNARY
 
 
 def _is_maybe(rt: ResolvedType) -> bool:
@@ -83,3 +85,28 @@ def _is_bool_false(rt: ResolvedType) -> bool:
     if len(rt.constructors) != 1 or not _no_params_no_fields(rt):
         return False
     return rt.constructors[0].tag_bits == "0"
+
+
+def _is_unary(rt: ResolvedType) -> bool:
+    """unary_zero$0 = Unary ~0; unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);"""
+    if rt.name != "Unary":
+        return False
+    if len(rt.constructors) != 2 or rt.arity != 1:
+        return False
+    tlp = rt.type_level_params[0]
+    if tlp.kind != ParamKind.NAT or not tlp.is_output:
+        return False
+    cons = sorted(rt.constructors, key=lambda c: c.tag_bits)
+    zero, succ = cons[0], cons[1]
+    if zero.name != "unary_zero" or succ.name != "unary_succ":
+        return False
+    if zero.tag_bits != "0" or succ.tag_bits != "1":
+        return False
+    if len(zero.fields) != 0:
+        return False
+    if len(succ.fields) != 1 or len(succ.params) != 1:
+        return False
+    field_type = succ.fields[0].type_expr
+    if not isinstance(field_type, TypeApply) or field_type.type is not rt:
+        return False
+    return True

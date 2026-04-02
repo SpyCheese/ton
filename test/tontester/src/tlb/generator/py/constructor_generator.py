@@ -263,7 +263,13 @@ class ConstructorGenerator:
                 expr = source_name
                 for inf_step in extraction.chain:
                     expr = self._emit_inference_access(inf_step, expr, sb)
-                expr = f"{expr}.get_output({extraction.result_param_position})"
+                if extraction.chain:
+                    strat = StrategyBuilder(self.ctx, self.scope).build(
+                        extraction.chain[-1].concrete_arg
+                    )
+                else:
+                    strat = self.strategies[IdentityKey(extraction.source_field)]
+                expr = strat.emit_get_output(expr, extraction.result_param_position)
                 sb.line(f"{var_name} = {expr}")
                 sb.line(f"if {var_name} < 0:")
                 with sb.block():

@@ -14,4 +14,5 @@ from .slice import SliceTypeStrategy as SliceTypeStrategy
 from .tuple import TupleStrategy as TupleStrategy
 from .type_param import TypeParamStrategy as TypeParamStrategy
 from .uint import UintStrategy as UintStrategy
+from .unary import UnaryStrategy as UnaryStrategy
 from .user_type import UserTypeStrategy as UserTypeStrategy

@@ -173,6 +173,9 @@ class StrategyBuilder:
             if t.well_known and self.ctx.simplify.is_enabled(t.well_known):
                 if t.well_known == WellKnownType.MAYBE:
                     return self._build_maybe(type_expr)
+                if t.well_known == WellKnownType.UNARY:
+                    from .unary import UnaryStrategy
+                    return UnaryStrategy(self.ctx)
                 if info := _ENUM_LITERAL_INFOS.get(t.well_known):
                     return EnumLiteralStrategy(info, self.ctx)
             return self._build_user_type(type_expr)

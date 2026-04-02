@@ -27,6 +27,7 @@ class WellKnownType(Enum):
     BOOL = auto()
     BOOL_TRUE = auto()
     BOOL_FALSE = auto()
+    UNARY = auto()
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,7 @@ class InferenceStep:
 
     type: ResolvedType
     param_idx: int
+    concrete_arg: ResolvedTypeExpr
 
 
 @dataclass(frozen=True)

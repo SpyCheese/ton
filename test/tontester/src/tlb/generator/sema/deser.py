@@ -290,7 +290,7 @@ def _scan_for_outputs(
         inf_idx = _inference_index_for_param(applied_type, arg_idx)
         if inf_idx is not None and inf_idx < len(applied_type.inference):
             if applied_type.inference[inf_idx].is_capable:
-                new_chain = chain + [InferenceStep(type=applied_type, param_idx=arg_idx)]
+                new_chain = chain + [InferenceStep(type=applied_type, param_idx=arg_idx, concrete_arg=arg)]
                 _scan_for_outputs(source_field, arg, constructor, known_params, steps, new_chain)
 
 

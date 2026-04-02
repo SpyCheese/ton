@@ -196,6 +196,7 @@ class PyContext:
                 "TupleTypeConstructor",
                 "TypeInfo",
                 "UintTypeConstructor",
+                "UnaryTypeInfo",
             ]
             if n in self.used_imports
         ]

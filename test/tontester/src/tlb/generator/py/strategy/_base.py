@@ -55,6 +55,10 @@ class TypeStrategy(ABC):
         """Whether this type can already represent None (e.g., Maybe, generic type params)."""
         return False
 
+    def emit_get_output(self, _field_expr: str, _position: int) -> str:
+        """Return a Python expression for the output param at the given TLP position."""
+        assert False, f"{type(self).__name__} does not support emit_get_output"
+
     def emit_serialize_assertions(self, _field_name: str, _sb: SourceBuilder) -> bool:
         """Emit assertions verifying sub-type consistency during serialize_to.
 

@@ -80,6 +80,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "TupleTypeConstructor",
         "TypeInfo",
         "UintTypeConstructor",
+        "UnaryTypeInfo",
         "UnitTypeInfo",
         "_T",
     }

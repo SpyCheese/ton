@@ -30,8 +30,14 @@ class UserTypeStrategy(TypeStrategy):
     """User-defined type, possibly generic. Self-contained — computes all
     rendering from the TypeApply and scope."""
 
-    def __init__(self, type_expr: TypeApply, ctx: PyContext, scope: NameScope,
-                 builder: StrategyBuilderProtocol) -> None:
+    def __init__(
+        self,
+        type_expr: TypeApply,
+        ctx: PyContext,
+        scope: NameScope,
+        builder: StrategyBuilderProtocol,
+    ) -> None:
+        self._type_expr = type_expr
         self._type_name = ctx.scope.lookup(type_expr.type)
         self._ctx = ctx
 
@@ -52,7 +58,13 @@ class UserTypeStrategy(TypeStrategy):
                 if (
                     isinstance(
                         arg,
-                        NatLiteral | NatParamRef | NatFieldValue | NatAdd | NatSub | NatMul | NatGetBit,
+                        NatLiteral
+                        | NatParamRef
+                        | NatFieldValue
+                        | NatAdd
+                        | NatSub
+                        | NatMul
+                        | NatGetBit,
                     )
                     and not arg.references_type_arg
                 ):
@@ -105,6 +117,12 @@ class UserTypeStrategy(TypeStrategy):
             sb.line(f"{target} = {info}().load_from({args})")
         else:
             sb.line(f"{target} = {info}().load_from({cs})")
+
+    @override
+    def emit_get_output(self, field_expr: str, position: int) -> str:
+        tlp = self._type_expr.type.type_level_params[position]
+        assert tlp.kind == ParamKind.NAT and tlp.is_output
+        return f"{field_expr}.get_output({position})"
 
     @override
     def emit_serialize_assertions(self, field_name: str, sb: SourceBuilder) -> bool:

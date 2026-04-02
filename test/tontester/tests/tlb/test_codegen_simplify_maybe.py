@@ -2,19 +2,25 @@
 
 from generated.simplify_maybe import (
     EnumFieldsType,
+    InferredUnaryType,
     MaybeRefType,
     MixedType,
     NestedMaybeType,
     SimpleMaybeType,
+    SizedType,
+    bit,
     enum_fields,
+    inferred_unary,
     just,
     maybe_ref,
     mixed,
     nested_maybe,
     nothing,
+    pair,
     simple_maybe,
+    sized,
 )
-from tlb.object import MaybeTypeInfo, Ref, UintTypeConstructor
+from tlb.object import MaybeTypeInfo, Ref, UintTypeConstructor, UnaryTypeInfo
 
 
 class TestSimpleMaybe:
@@ -119,6 +125,53 @@ class TestEnumLiterals:
         assert cs.load_uint(1) == 0  # a = False
         assert cs.load_uint(1) == 1  # c = True
         assert cs.load_uint(32) == 0
+
+
+class TestUnary:
+    """Unary ~n → int, with output param extraction."""
+
+    def test_sized_zero(self):
+        obj = sized(0, len=0, data=[])
+        result = SizedType().load_from(obj.serialize().begin_parse())
+        assert result.len == 0
+        assert result.n == 0
+        assert result.data == []
+
+    def test_sized_three(self):
+        obj = sized(3, len=3, data=[bit(field=1), bit(field=0), bit(field=1)])
+        result = SizedType().load_from(obj.serialize().begin_parse())
+        assert result.len == 3
+        assert result.n == 3
+        assert len(result.data) == 3
+
+    def test_inferred_through_pair(self):
+        """Output param inferred through Pair: x.first is the Unary value."""
+        inner = pair(UnaryTypeInfo, UintTypeConstructor(32), first=2, second=99)
+        obj = inferred_unary(2, x=inner, y=3)
+        result = InferredUnaryType().load_from(obj.serialize().begin_parse())
+        assert result.n == 2
+        assert result.x.first == 2
+        assert result.x.second == 99
+        assert result.y == 3
+
+    def test_inferred_zero(self):
+        inner = pair(UnaryTypeInfo, UintTypeConstructor(32), first=0, second=42)
+        obj = inferred_unary(0, x=inner, y=0)
+        result = InferredUnaryType().load_from(obj.serialize().begin_parse())
+        assert result.n == 0
+        assert result.y == 0
+
+    def test_serialized_bits(self):
+        """Unary 3 = 1110 (4 bits)."""
+        obj = sized(3, len=3, data=[bit(field=1), bit(field=0), bit(field=1)])
+        cs = obj.serialize().begin_parse()
+        assert cs.load_uint(1) == 1  # unary 1
+        assert cs.load_uint(1) == 1  # unary 1
+        assert cs.load_uint(1) == 1  # unary 1
+        assert cs.load_uint(1) == 0  # unary terminator
+        assert cs.load_uint(1) == 1  # data[0]
+        assert cs.load_uint(1) == 0  # data[1]
+        assert cs.load_uint(1) == 1  # data[2]
 
 
 class TestMaybeRef:
