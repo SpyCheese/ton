@@ -4,7 +4,6 @@ Each TypeStrategy knows how to emit store/load code for a particular
 type expression. Uses PyContext for import tracking and name scoping.
 """
 
-
 from abc import ABC, abstractmethod
 from typing import TypeIs, final, override
 
@@ -74,6 +73,11 @@ class NatExpr:
         """True if this is a compile-time constant (NatLiteral)."""
         return isinstance(self._expr, NatLiteral)
 
+    @property
+    def is_zero(self) -> bool:
+        """True if this is a compile-time constant 0."""
+        return isinstance(self._expr, NatLiteral) and self._expr.value == 0
+
     def _resolve(self, obj: ParamDef | TypeLevelParam | ResolvedField, use_local: bool) -> str:
         if use_local:
             return self._scope.lookup_local(obj)
@@ -117,6 +121,11 @@ class _DerivedNatExpr(NatExpr):
     @override
     def self_(self) -> str:
         return self._template.format(self._base.self_)
+
+    @property
+    @override
+    def is_constant(self) -> bool:
+        return False
 
 
 class TypeStrategy(ABC):
@@ -169,7 +178,9 @@ class UintStrategy(TypeStrategy):
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        if self.width.is_constant:
+        if self.width.is_zero:
+            sb.line("pass")
+        elif self.width.is_constant:
             sb.line(f"_ = {builder}.store_uint({value}, {self.width.self_})")
         else:
             sb.line(f"if {self.width.self_} > 0:")
@@ -178,7 +189,9 @@ class UintStrategy(TypeStrategy):
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        if self.width.is_constant:
+        if self.width.is_zero:
+            sb.line(f"{target} = 0")
+        elif self.width.is_constant:
             sb.line(f"{target} = {cs}.load_uint({self.width.local})")
         else:
             sb.line(
@@ -207,7 +220,9 @@ class IntStrategy(TypeStrategy):
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        if self.width.is_constant:
+        if self.width.is_zero:
+            sb.line("pass")
+        elif self.width.is_constant:
             sb.line(f"_ = {builder}.store_int({value}, {self.width.self_})")
         else:
             sb.line(f"if {self.width.self_} > 0:")
@@ -216,7 +231,9 @@ class IntStrategy(TypeStrategy):
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        if self.width.is_constant:
+        if self.width.is_zero:
+            sb.line(f"{target} = 0")
+        elif self.width.is_constant:
             sb.line(f"{target} = {cs}.load_int({self.width.local})")
         else:
             sb.line(
@@ -307,7 +324,15 @@ class UserTypeStrategy(TypeStrategy):
 
     @override
     def descriptor(self) -> str:
-        return self.type_name
+        if not self.ti_args:
+            return self.type_name
+        parts: list[str] = []
+        for a in self.ti_args:
+            sanitized = a
+            for ch in "()[], .":
+                sanitized = sanitized.replace(ch, "_")
+            parts.append(sanitized)
+        return f"{self.type_name}_{'_'.join(parts)}"
 
 
 @final
@@ -550,9 +575,7 @@ class StrategyBuilder:
                 return self._build_type_apply(type_expr)
 
             case TypeParamRef(param=param):
-                assert param.kind == ParamKind.TYPE, (
-                    f"nat param {param.name} used as type"
-                )
+                assert param.kind == ParamKind.TYPE, f"nat param {param.name} used as type"
                 ti_var = self.scope.lookup(param)
                 self.used_type_params.add(param)
                 return TypeParamStrategy(param, param.name, ti_var)
@@ -569,8 +592,8 @@ class StrategyBuilder:
                 element = self.build(element_expr, inside_generic_arg=inside_generic_arg)
                 return TupleStrategy(count, element, self.ctx)
 
-            case AnonymousRecordType():
-                return UserTypeStrategy(self.ctx.scope.lookup(type_expr.type))
+            case AnonymousRecordType(type=type):
+                return UserTypeStrategy(self.ctx.scope.lookup(type))
 
     def _build_type_apply(self, type_expr: TypeApply) -> TypeStrategy:
         t = type_expr.type
@@ -590,11 +613,21 @@ class StrategyBuilder:
             return UintStrategy(self._nat(type_expr.arguments[0]), self.ctx)
         if t is NatLeq_type:
             assert len(type_expr.arguments) == 1
+            nat = self._to_nat(type_expr.arguments[0])
+            if isinstance(nat, NatLiteral):
+                return UintStrategy(
+                    NatExpr(NatLiteral(nat.value.bit_length()), NameScope()), self.ctx
+                )
             return UintStrategy(
                 self._nat_derived(type_expr.arguments[0], "({}).bit_length()"), self.ctx
             )
         if t is NatLess_type:
             assert len(type_expr.arguments) == 1
+            nat = self._to_nat(type_expr.arguments[0])
+            if isinstance(nat, NatLiteral):
+                return UintStrategy(
+                    NatExpr(NatLiteral((nat.value - 1).bit_length()), NameScope()), self.ctx
+                )
             return UintStrategy(
                 self._nat_derived(type_expr.arguments[0], "({} - 1).bit_length()"), self.ctx
             )

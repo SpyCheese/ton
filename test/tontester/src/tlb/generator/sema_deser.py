@@ -1,6 +1,5 @@
 """Deserialization plan generation and inference capability classification."""
 
-
 from .ast_nodes import CompareOp
 from .sema_types import (
     AnonymousRecordType,
@@ -128,9 +127,6 @@ def build_deser_plan(constructor: ResolvedConstructor) -> list[DeserStep]:
         )
 
     constructor.deser_steps = steps
-    constructor.output_nat_params = {
-        s.target_param for s in steps if isinstance(s, BindOutputParam)
-    }
     _validate_deser_plan(constructor)
     return steps
 
@@ -224,14 +220,14 @@ def _find_unknown_nat_param(expr: ResolvedNatExpr, known: set[ParamDef]) -> Para
     match expr:
         case NatParamRef(param=param) if param not in known:
             return param
-        case NatAdd(left=left, right=right) | NatSub(left=left, right=right) | NatMul(left=left, right=right):
-            return _find_unknown_nat_param(left, known) or _find_unknown_nat_param(
-                right, known
-            )
+        case (
+            NatAdd(left=left, right=right)
+            | NatSub(left=left, right=right)
+            | NatMul(left=left, right=right)
+        ):
+            return _find_unknown_nat_param(left, known) or _find_unknown_nat_param(right, known)
         case NatGetBit(value=value, bit=bit):
-            return _find_unknown_nat_param(value, known) or _find_unknown_nat_param(
-                bit, known
-            )
+            return _find_unknown_nat_param(value, known) or _find_unknown_nat_param(bit, known)
         case _:
             return None
 
@@ -381,7 +377,11 @@ def _expr_references_param(expr: ResolvedNatExpr, param: ParamDef) -> bool:
     match expr:
         case NatParamRef(param=p):
             return p is param
-        case NatAdd(left=left, right=right) | NatSub(left=left, right=right) | NatMul(left=left, right=right):
+        case (
+            NatAdd(left=left, right=right)
+            | NatSub(left=left, right=right)
+            | NatMul(left=left, right=right)
+        ):
             return _expr_references_param(left, param) or _expr_references_param(right, param)
         case NatGetBit(value=value, bit=bit):
             return _expr_references_param(value, param) or _expr_references_param(bit, param)
@@ -460,7 +460,11 @@ def _assert_nat_deps_met(
             assert id(field) in known_fields, (
                 f"constructor '{constructor.name}': expression references unread field '{field.name}'"
             )
-        case NatAdd(left=left, right=right) | NatSub(left=left, right=right) | NatMul(left=left, right=right):
+        case (
+            NatAdd(left=left, right=right)
+            | NatSub(left=left, right=right)
+            | NatMul(left=left, right=right)
+        ):
             _assert_nat_deps_met(left, known_params, known_fields, constructor)
             _assert_nat_deps_met(right, known_params, known_fields, constructor)
         case NatGetBit(value=value, bit=bit):

@@ -4,7 +4,6 @@ Phase 1: Register all type names and determine arities/param kinds.
 Phase 2: Resolve each constructor's fields and expressions.
 """
 
-
 from .ast_nodes import (
     Add,
     Apply,

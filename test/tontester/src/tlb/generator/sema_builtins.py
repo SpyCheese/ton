@@ -1,6 +1,5 @@
 """Built-in TL-B types that exist before any user schema is processed."""
 
-
 from .sema_types import ParamKind, ResolvedType, TypeLevelParam
 
 _next_idx = 0

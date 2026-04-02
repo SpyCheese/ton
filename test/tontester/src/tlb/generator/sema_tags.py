@@ -1,6 +1,5 @@
 """CRC32 auto-tag computation."""
 
-
 import zlib
 
 from .ast_nodes import (

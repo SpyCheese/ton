@@ -4,7 +4,6 @@ All identifiers are resolved, nat vs type expressions are separated into
 distinct union types, and deserialization plans are computed.
 """
 
-
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
@@ -27,16 +26,25 @@ class ParamDef:
 
 
 @dataclass(frozen=True)
+class TypeVarBinding:
+    """Sentinel for a type variable name binding (the bare X in class foo[X])."""
+
+    pass
+
+
+@dataclass(frozen=True)
 class TypeLevelParam:
     """Sentinel for a type-level parameter position.
 
     Used as a scope binding key so that NatTypeArg(position) can resolve
     to the correct Python variable name. One per position on the type.
+    For TYPE params, type_var is a binding key for the bare type variable name.
     """
 
     position: int
     kind: ParamKind
     is_output: bool
+    type_var: TypeVarBinding = field(default_factory=TypeVarBinding)
 
 
 @dataclass
@@ -140,7 +148,11 @@ def _nat_references_params(expr: ResolvedNatExpr) -> bool:
     match expr:
         case NatParamRef() | NatFieldValue():
             return True
-        case NatAdd(left=left, right=right) | NatSub(left=left, right=right) | NatMul(left=left, right=right):
+        case (
+            NatAdd(left=left, right=right)
+            | NatSub(left=left, right=right)
+            | NatMul(left=left, right=right)
+        ):
             return _nat_references_params(left) or _nat_references_params(right)
         case NatGetBit(value=value, bit=bit):
             return _nat_references_params(value) or _nat_references_params(bit)
@@ -168,7 +180,9 @@ def references_type_params(expr: ResolvedTypeExpr) -> bool:
         case TupleType(element=element):
             return references_type_params(element)
         case AnonymousRecordType():
-            return any(references_type_params(f.type_expr) for f in expr.type.constructors[0].fields)
+            return any(
+                references_type_params(f.type_expr) for f in expr.type.constructors[0].fields
+            )
 
 
 @dataclass(eq=False)
@@ -261,7 +275,6 @@ class ResolvedConstructor:
     source_order: list[FieldOrConstraint] = field(default_factory=list)
     deser_steps: list[DeserStep] = field(default_factory=list)
     output_values: list[ResolvedNatExpr] = field(default_factory=list)
-    output_nat_params: set[ParamDef] = field(default_factory=set)
 
 
 @dataclass

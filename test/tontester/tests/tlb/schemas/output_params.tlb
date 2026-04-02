@@ -21,3 +21,8 @@ label$_ {m:#} n:(#<= m) s:(n * Bit) = Label ~n m;
 // HashmapNode (n+1) X means the constructor's n = type_arg_0 - 1
 hm_node_leaf#_ {X:Type} value:X = HmNode 0 X;
 hm_node_fork#_ {n:#} {X:Type} left:^(HmNode n X) right:^(HmNode n X) = HmNode (n + 1) X;
+
+// Inference chain with keyword field name (regression: field renamed but chain used raw name)
+kw_wrapper$_ {X:Type} {Y:Type} return:X second:Y = KwWrapper X Y;
+kw_inferred$_ {n:#} x:(KwWrapper (Unary ~n) uint32) = KwInferred ~n;
+

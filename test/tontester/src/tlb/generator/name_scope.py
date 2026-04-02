@@ -5,7 +5,6 @@ and previously registered names. Maps sema objects (ResolvedType,
 ResolvedConstructor, ParamDef, ResolvedField) to unique Python identifiers.
 """
 
-
 import keyword
 
 from .sema_types import (
@@ -14,55 +13,64 @@ from .sema_types import (
     ResolvedField,
     ResolvedType,
     TypeLevelParam,
+    TypeVarBinding,
 )
 
 _PYTHON_KEYWORDS: frozenset[str] = frozenset(keyword.kwlist) | frozenset(keyword.softkwlist)
 
-_RESERVED: frozenset[str] = (
-    _PYTHON_KEYWORDS
-    | frozenset(
-        {
-            "int",
-            "str",
-            "bool",
-            "list",
-            "dict",
-            "set",
-            "tuple",
-            "type",
-            "None",
-            "True",
-            "False",
-            "print",
-            "len",
-            "range",
-            "isinstance",
-            "super",
-            "object",
-            "Exception",
-            "ValueError",
-            "TypeError",
-            "bitarray",
-            "BitsTypeConstructor",
-            "Builder",
-            "Cell",
-            "cls",
-            "cs",
-            "InstantiableTypeInfo",
-            "IntTypeConstructor",
-            "Ref",
-            "RefType",
-            "Slice",
-            "TLBRecord",
-            "TlbModelError",
-            "TupleTypeConstructor",
-            "TypeInfo",
-            "UintTypeConstructor",
-        }
-    )
+_FIELD_RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
+    {
+        "serialize_to",
+        "serialize",
+        "load_from",
+        "get_output",
+    }
 )
 
-type Bindable = ResolvedType | ResolvedConstructor | ResolvedField | ParamDef | TypeLevelParam
+_RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
+    {
+        "int",
+        "str",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "type",
+        "None",
+        "True",
+        "False",
+        "print",
+        "len",
+        "range",
+        "isinstance",
+        "super",
+        "object",
+        "Exception",
+        "ValueError",
+        "TypeError",
+        "bitarray",
+        "BitsTypeConstructor",
+        "Builder",
+        "Cell",
+        "cls",
+        "cs",
+        "InstantiableTypeInfo",
+        "IntTypeConstructor",
+        "Ref",
+        "RefType",
+        "Slice",
+        "TLBRecord",
+        "TlbModelError",
+        "TupleTypeConstructor",
+        "TypeInfo",
+        "UintTypeConstructor",
+    }
+)
+
+type Bindable = (
+    ResolvedType | ResolvedConstructor | ResolvedField | ParamDef | TypeLevelParam | TypeVarBinding
+)
 
 
 class NameScope:
@@ -119,7 +127,7 @@ class NameScope:
         """
         field_name = preferred
         suffix = 1
-        while field_name in _PYTHON_KEYWORDS or field_name in self._used:
+        while field_name in _FIELD_RESERVED or field_name in self._used:
             field_name = f"{preferred}_{suffix}"
             suffix += 1
         self._used.add(field_name)

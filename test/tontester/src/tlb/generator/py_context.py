@@ -4,11 +4,22 @@ Owns the import tracker, name scope, and ref wrapper registry.
 Both py_codegen and py_emit depend on this, avoiding circular imports.
 """
 
-
 from collections.abc import Callable
+from typing import Protocol
 
+from .identity_key import IdentityKey
 from .name_scope import NameScope
+from .sema_types import ParamDef, ResolvedConstructor, ResolvedType
 from .source_builder import SourceBuilder
+
+
+class ConstructorInfo(Protocol):
+    """Protocol for constructor codegen data needed by cross-type lookups."""
+
+    scope: NameScope
+    type_params: list[ParamDef]
+
+    def type_var_name(self, p: ParamDef) -> str: ...
 
 
 class PyContext:
@@ -19,6 +30,8 @@ class PyContext:
     _next_tmp: int
     ref_wrappers: dict[tuple[str, bool], str]
     ref_wrapper_code: list[str]
+    _type_scopes: dict[IdentityKey[ResolvedType], NameScope]
+    _constructors: dict[IdentityKey[ResolvedConstructor], ConstructorInfo]
 
     def __init__(self) -> None:
         self.scope = NameScope()
@@ -26,6 +39,20 @@ class PyContext:
         self._next_tmp = 0
         self.ref_wrappers = {}
         self.ref_wrapper_code = []
+        self._type_scopes = {}
+        self._constructors = {}
+
+    def set_type_scope(self, t: ResolvedType, scope: NameScope) -> None:
+        self._type_scopes[IdentityKey(t)] = scope
+
+    def register_constructor(self, c: ResolvedConstructor, gen: ConstructorInfo) -> None:
+        self._constructors[IdentityKey(c)] = gen
+
+    def get_type_scope(self, t: ResolvedType) -> NameScope:
+        return self._type_scopes[IdentityKey(t)]
+
+    def get_constructor(self, c: ResolvedConstructor) -> ConstructorInfo:
+        return self._constructors[IdentityKey(c)]
 
     def use(self, *names: str) -> None:
         """Mark imports as needed."""

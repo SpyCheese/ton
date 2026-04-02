@@ -11,3 +11,7 @@ tick_tock$_ tick:Bool tock:Bool = TickTock;
 
 // Double cell ref
 double_ref$_ x:^^uint8 = DoubleRef;
+
+// Distinct ref wrappers for same type with different nat args
+nw$_ {n:#} x:(## n) = Nw n;
+two_refs$_ a:^(Nw 8) b:^(Nw 16) = TwoRefs;

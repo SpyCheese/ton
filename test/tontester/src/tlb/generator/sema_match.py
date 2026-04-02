@@ -10,7 +10,6 @@ Algorithm:
 Errors if any constructor's expansion runs out of tag bits (ambiguous).
 """
 
-
 from .ast_nodes import CompareOp
 from .sema_types import (
     CellRefType,
@@ -160,9 +159,7 @@ def _dispatch_on_bits(
     )
 
 
-def _expand_all(
-    states: list[_ExpState], cons_by_id: dict[int, ResolvedConstructor]
-) -> None:
+def _expand_all(states: list[_ExpState], cons_by_id: dict[int, ResolvedConstructor]) -> None:
     """Expand typedef chains until all expansions have unconsumed tag bits.
 
     When an (inner_constructor, offset) has consumed all tag bits, follow
@@ -226,9 +223,7 @@ def _check_all_have_bits(
                 )
 
 
-def _common_prefix(
-    states: list[_ExpState], cons_by_id: dict[int, ResolvedConstructor]
-) -> str:
+def _common_prefix(states: list[_ExpState], cons_by_id: dict[int, ResolvedConstructor]) -> str:
     """Find the longest common bit prefix across all expansions."""
     all_bits: list[str] = []
     for s in states:

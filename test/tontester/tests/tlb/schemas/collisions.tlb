@@ -19,3 +19,10 @@ foo$_ y:uint64 = Bar;
 // Field name collides with load_from parameters
 cs_field$_ a:# cs:# b:# = CsField;
 cls_field$_ cls:# = ClsField;
+
+// Field name collides with TLBRecord methods
+method_field$_ serialize_to:uint32 b:uint32 = MethodField;
+
+// Nat param named after Python builtin (len)
+len_type$_ {len:#} x:(## len) = LenType len;
+len_user$_ t:(LenType 8) = LenUser;

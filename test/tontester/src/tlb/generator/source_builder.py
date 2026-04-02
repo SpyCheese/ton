@@ -1,6 +1,5 @@
 """Source code builder with indentation tracking."""
 
-
 from collections.abc import Generator
 from contextlib import contextmanager
 
