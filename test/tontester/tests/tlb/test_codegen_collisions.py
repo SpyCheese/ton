@@ -7,6 +7,7 @@ from generated.collisions import (
     CsFieldType,
     FooType,
     IntType,
+    KwGenericType,
     PassType,
     bar,
     class_1,
@@ -15,9 +16,11 @@ from generated.collisions import (
     foo,
     foo_1,
     int_1,
+    kw_generic,
     pass_1,
     return_1,
 )
+from tlb.object import UintTypeConstructor
 
 # ── Name collisions ──────────────────────────────────────────────────
 
@@ -77,3 +80,10 @@ class TestNameCollisions:
         obj = cls_field(cls=42)
         result = ClsFieldType().load_from(obj.serialize().begin_parse())
         assert result.cls == 42
+
+    def test_type_param_named_int(self):
+        """Type param named 'int' (collides with Python builtin) round-trips."""
+        ti = UintTypeConstructor(32)
+        obj = kw_generic(_tint=ti, value=42)
+        result = KwGenericType[int]().load_from(obj.serialize().begin_parse(), ti)
+        assert result.value == 42

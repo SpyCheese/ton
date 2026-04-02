@@ -26,3 +26,6 @@ method_field$_ serialize_to:uint32 b:uint32 = MethodField;
 // Nat param named after Python builtin (len)
 len_type$_ {len:#} x:(## len) = LenType len;
 len_user$_ t:(LenType 8) = LenUser;
+
+// Type param named after Python keyword/builtin
+kw_generic$_ {int:Type} value:int = KwGeneric int;

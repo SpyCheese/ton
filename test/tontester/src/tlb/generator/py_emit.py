@@ -577,8 +577,9 @@ class StrategyBuilder:
 
             case TypeParamRef(param=param):
                 ti_var = self.scope.lookup(param)
+                type_var = self.scope.lookup(param.type_level_param.type_var)
                 self.used_type_params.add(param)
-                return TypeParamStrategy(param, param.name, ti_var)
+                return TypeParamStrategy(param, type_var, ti_var)
 
             case CellRefType(inner=inner_expr):
                 is_concrete = not references_type_params(inner_expr)
