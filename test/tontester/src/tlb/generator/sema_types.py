@@ -206,7 +206,7 @@ class OutputExtraction:
 
     source_field: ResolvedField
     chain: list[InferenceStep]
-    final_output_idx: int
+    result_param_position: int
 
 
 @dataclass
@@ -273,7 +273,7 @@ class ResolvedConstructor:
     result_param_exprs: dict[int, ResolvedExpr] = field(default_factory=dict)
     source_order: list[FieldOrConstraint] = field(default_factory=list)
     deser_steps: list[DeserStep] = field(default_factory=list)
-    output_values: list[ResolvedNatExpr] = field(default_factory=list)
+    nat_param_values: list[ResolvedNatExpr | None] = field(default_factory=list)
 
 
 @dataclass

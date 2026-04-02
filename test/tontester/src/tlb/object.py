@@ -154,7 +154,7 @@ AnyType = _AnyType()
 @final
 class UintTypeConstructor(TypeInfo[int]):
     def __init__(self, n: int):
-        assert n > 0
+        assert n >= 0
         self._n: int = n
 
     @property
@@ -163,10 +163,16 @@ class UintTypeConstructor(TypeInfo[int]):
 
     @override
     def serialize_value(self, value: int, builder: Builder):
-        _ = builder.store_uint(value, self._n)
+        assert value >= 0, f"uint{self._n}: negative value {value}"
+        if self._n == 0:
+            assert value == 0, f"uint0: only 0 is valid, got {value}"
+        else:
+            _ = builder.store_uint(value, self._n)
 
     @override
     def load_from(self, cs: Slice):
+        if self._n == 0:
+            return 0
         return cs.load_uint(self._n)
 
     @override
@@ -177,6 +183,7 @@ class UintTypeConstructor(TypeInfo[int]):
 @final
 class BoundedUintTypeConstructor(TypeInfo[int]):
     def __init__(self, bound: int, *, inclusive: bool):
+        assert bound >= 0
         self._bound = bound
         self._inclusive = inclusive
         if inclusive:
@@ -212,7 +219,7 @@ class BoundedUintTypeConstructor(TypeInfo[int]):
 @final
 class IntTypeConstructor(TypeInfo[int]):
     def __init__(self, n: int):
-        assert n > 0
+        assert n >= 0
         self._n: int = n
 
     @property
@@ -221,10 +228,15 @@ class IntTypeConstructor(TypeInfo[int]):
 
     @override
     def serialize_value(self, value: int, builder: Builder):
-        _ = builder.store_int(value, self._n)
+        if self._n == 0:
+            assert value == 0, f"int0: only 0 is valid, got {value}"
+        else:
+            _ = builder.store_int(value, self._n)
 
     @override
     def load_from(self, cs: Slice):
+        if self._n == 0:
+            return 0
         return cs.load_int(self._n)
 
     @override
@@ -235,7 +247,7 @@ class IntTypeConstructor(TypeInfo[int]):
 @final
 class BitsTypeConstructor(TypeInfo[bitarray]):
     def __init__(self, n: int):
-        assert n > 0
+        assert n >= 0
         self._n: int = n
 
     @property
@@ -244,11 +256,14 @@ class BitsTypeConstructor(TypeInfo[bitarray]):
 
     @override
     def serialize_value(self, value: bitarray, builder: Builder):
-        assert len(value) == self._n
-        _ = builder.store_bits(value)
+        assert len(value) == self._n, f"bits{self._n}: expected {self._n} bits, got {len(value)}"
+        if self._n > 0:
+            _ = builder.store_bits(value)
 
     @override
     def load_from(self, cs: Slice) -> bitarray:
+        if self._n == 0:
+            return bitarray()
         return cs.load_bits(self._n)
 
     @override
@@ -259,11 +274,15 @@ class BitsTypeConstructor(TypeInfo[bitarray]):
 @final
 class TupleTypeConstructor[X](TypeInfo[list[X]]):
     def __init__(self, count: int, element_ti: TypeInfo[X]) -> None:
+        assert count >= 0
         self._count = count
         self._element_ti = element_ti
 
     @override
     def serialize_value(self, value: list[X], builder: Builder) -> None:
+        assert len(value) == self._count, (
+            f"tuple: expected {self._count} elements, got {len(value)}"
+        )
         for i in range(self._count):
             self._element_ti.serialize_value(value[i], builder)
 

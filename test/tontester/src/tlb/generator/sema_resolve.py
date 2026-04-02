@@ -255,21 +255,30 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
             rc = _resolve_constraint(f, scope, registry, params)
             source_order.append(rc)
 
-    # These CAN reference fields (e.g. hml_long's ~n where n is an explicit field)
-    output_values: list[ResolvedNatExpr] = []
-    for i in [p.position for p in parent_type.type_level_params if p.is_output]:
-        rp = c.result_params[i]
-        expr = _resolve_nat_expr(rp.expr, scope, registry)
-        output_values.append(expr)
-
     result_param_exprs: dict[int, ResolvedExpr] = {}
+    nat_param_values: list[ResolvedNatExpr | None] = []
     for i, rp in enumerate(c.result_params):
-        if not parent_type.type_level_params[i].is_output:
+        tlp = parent_type.type_level_params[i]
+        if tlp.is_output:
+            # Output params CAN reference fields (e.g. hml_long's ~n)
+            nat_param_values.append(_resolve_nat_expr(rp.expr, scope, registry))
+        elif tlp.kind == ParamKind.NAT:
             expr = _resolve_expr(rp.expr, scope, registry)
             _check_no_field_refs_in_expr(
                 expr, f"result param at position {i} of constructor '{c.name}'"
             )
             result_param_exprs[i] = expr
+            assert not isinstance(
+                expr, TypeApply | TypeParamRef | CellRefType | TupleType | AnonymousRecordType
+            )
+            nat_param_values.append(expr)
+        else:
+            expr = _resolve_expr(rp.expr, scope, registry)
+            _check_no_field_refs_in_expr(
+                expr, f"result param at position {i} of constructor '{c.name}'"
+            )
+            result_param_exprs[i] = expr
+            nat_param_values.append(None)
 
     tag_bits = c.tag.bits
     tag_len = len(tag_bits)
@@ -284,7 +293,7 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
         fields=fields,
         result_param_exprs=result_param_exprs,
         source_order=source_order,
-        output_values=output_values,
+        nat_param_values=nat_param_values,
     )
 
 

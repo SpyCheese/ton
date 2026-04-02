@@ -282,22 +282,20 @@ def _scan_for_outputs(
 
     applied_type = type_expr.type
 
-    if any(p.is_output for p in applied_type.type_level_params):
-        for arg_idx, arg in enumerate(type_expr.arguments):
-            if not isinstance(arg, NatParamRef):
-                continue
-            if arg.param in known_params:
-                continue
-
-            output_idx = _output_index_for_arg(applied_type, arg_idx)
-            if output_idx is not None:
-                extraction = OutputExtraction(
-                    source_field=source_field,
-                    chain=list(chain),
-                    final_output_idx=output_idx,
-                )
-                steps.append(BindOutputParam(target_param=arg.param, extraction=extraction))
-                known_params.add(arg.param)
+    for arg_idx, arg in enumerate(type_expr.arguments):
+        if not isinstance(arg, NatParamRef):
+            continue
+        if arg.param in known_params:
+            continue
+        tlp = applied_type.type_level_params[arg_idx]
+        if tlp.is_output:
+            extraction = OutputExtraction(
+                source_field=source_field,
+                chain=list(chain),
+                result_param_position=arg_idx,
+            )
+            steps.append(BindOutputParam(target_param=arg.param, extraction=extraction))
+            known_params.add(arg.param)
 
     for arg_idx, arg in enumerate(type_expr.arguments):
         if not isinstance(arg, TypeApply):
@@ -307,17 +305,6 @@ def _scan_for_outputs(
             if applied_type.inference[inf_idx].is_capable:
                 new_chain = chain + [InferenceStep(type=applied_type, param_idx=arg_idx)]
                 _scan_for_outputs(source_field, arg, constructor, known_params, steps, new_chain)
-
-
-def _output_index_for_arg(resolved_type: ResolvedType, arg_position: int) -> int | None:
-    """Map an argument position to an output param index (if it's an output)."""
-    idx = 0
-    for tlp in resolved_type.type_level_params:
-        if tlp.is_output:
-            if tlp.position == arg_position:
-                return idx
-            idx += 1
-    return None
 
 
 def _inference_index_for_param(resolved_type: ResolvedType, arg_position: int) -> int | None:
@@ -444,8 +431,9 @@ def _validate_deser_plan(constructor: ResolvedConstructor) -> None:
                 )
                 known_params.add(step.target_param)
 
-    for ov in constructor.output_values:
-        _assert_nat_deps_met(ov, known_params, known_fields, constructor)
+    for nv in constructor.nat_param_values:
+        if nv is not None:
+            _assert_nat_deps_met(nv, known_params, known_fields, constructor)
 
 
 def _assert_nat_deps_met(

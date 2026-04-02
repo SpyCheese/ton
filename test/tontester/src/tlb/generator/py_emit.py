@@ -163,9 +163,8 @@ class UintStrategy(TypeStrategy):
         elif self.width.is_constant:
             sb.line(f"_ = {builder}.store_uint({value}, {self.width.self_})")
         else:
-            sb.line(f"if {self.width.self_} > 0:")
-            with sb.block():
-                sb.line(f"_ = {builder}.store_uint({value}, {self.width.self_})")
+            self.ctx.use("UintTypeConstructor")
+            sb.line(f"UintTypeConstructor({self.width.self_}).serialize_value({value}, {builder})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
@@ -174,9 +173,8 @@ class UintStrategy(TypeStrategy):
         elif self.width.is_constant:
             sb.line(f"{target} = {cs}.load_uint({self.width.local})")
         else:
-            sb.line(
-                f"{target} = {cs}.load_uint({self.width.local}) if {self.width.local} > 0 else 0"
-            )
+            self.ctx.use("UintTypeConstructor")
+            sb.line(f"{target} = UintTypeConstructor({self.width.local}).load_from({cs})")
 
     @override
     def load_uses_cs(self) -> bool:
@@ -259,9 +257,8 @@ class IntStrategy(TypeStrategy):
         elif self.width.is_constant:
             sb.line(f"_ = {builder}.store_int({value}, {self.width.self_})")
         else:
-            sb.line(f"if {self.width.self_} > 0:")
-            with sb.block():
-                sb.line(f"_ = {builder}.store_int({value}, {self.width.self_})")
+            self.ctx.use("IntTypeConstructor")
+            sb.line(f"IntTypeConstructor({self.width.self_}).serialize_value({value}, {builder})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
@@ -270,9 +267,8 @@ class IntStrategy(TypeStrategy):
         elif self.width.is_constant:
             sb.line(f"{target} = {cs}.load_int({self.width.local})")
         else:
-            sb.line(
-                f"{target} = {cs}.load_int({self.width.local}) if {self.width.local} > 0 else 0"
-            )
+            self.ctx.use("IntTypeConstructor")
+            sb.line(f"{target} = IntTypeConstructor({self.width.local}).load_from({cs})")
 
     @override
     def load_uses_cs(self) -> bool:
@@ -301,11 +297,20 @@ class BitsStrategy(TypeStrategy):
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        sb.line(f"_ = {builder}.store_bits({value})")
+        if self.width.is_constant:
+            sb.line(f"assert len({value}) == {self.width.self_}")
+            sb.line(f"_ = {builder}.store_bits({value})")
+        else:
+            self.ctx.use("BitsTypeConstructor")
+            sb.line(f"BitsTypeConstructor({self.width.self_}).serialize_value({value}, {builder})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        sb.line(f"{target} = {cs}.load_bits({self.width.local})")
+        if self.width.is_constant:
+            sb.line(f"{target} = {cs}.load_bits({self.width.local})")
+        else:
+            self.ctx.use("BitsTypeConstructor")
+            sb.line(f"{target} = BitsTypeConstructor({self.width.local}).load_from({cs})")
 
     @override
     def descriptor(self) -> str:

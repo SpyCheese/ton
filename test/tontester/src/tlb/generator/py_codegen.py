@@ -20,15 +20,24 @@ from .sema_types import (
     MatchFail,
     MatchTag,
     MatchTree,
+    NatAdd,
+    NatFieldValue,
+    NatGetBit,
+    NatLiteral,
+    NatMul,
     NatParamDef,
+    NatParamRef,
+    NatSub,
     NatTypeArg,
     ParamDef,
     ParamKind,
     ReadField,
     ResolvedConstructor,
     ResolvedField,
+    ResolvedNatExpr,
     ResolvedType,
     SolveConstraint,
+    TypeApply,
     TypeLevelParam,
     TypeParamDef,
     TypeParamRef,
@@ -42,6 +51,18 @@ _COMPARE_OP_STR: dict[CompareOp, str] = {
     CompareOp.GT: ">",
     CompareOp.GE: ">=",
 }
+
+
+def _nat_references_type_arg(expr: ResolvedNatExpr) -> bool:
+    match expr:
+        case NatTypeArg():
+            return True
+        case NatAdd(left=l, right=r) | NatSub(left=l, right=r) | NatMul(left=l, right=r):
+            return _nat_references_type_arg(l) or _nat_references_type_arg(r)
+        case NatGetBit(value=v, bit=b):
+            return _nat_references_type_arg(v) or _nat_references_type_arg(b)
+        case _:
+            return False
 
 
 def generate_python(types: list[ResolvedType]) -> str:
@@ -215,6 +236,9 @@ class TypeGenerator:
             sb.line("@override")
             sb.line(f"def load_from(self, {params_str}) -> {type_name}{generic_suffix}:")
             with sb.block():
+                for tlp in entry_params:
+                    if tlp.kind == ParamKind.NAT:
+                        sb.line(f"assert {self.scope.lookup(tlp)} >= 0")
                 assert self.t.match_tree is not None
                 probe_name = "probe"
                 if self._tree_needs_probe(self.t.match_tree):
@@ -281,7 +305,7 @@ class ConstructorGenerator:
                 case TypeParamDef():
                     _ = self.scope.bind_field(p, f"_t{p.name}")
                 case NatParamDef():
-                    _ = self.scope.bind_private_field(p, p.name)
+                    _ = self.scope.bind_field(p, p.name)
 
         for f in self.c.fields:
             _ = self.scope.bind_field(f, f.name or "field")
@@ -315,8 +339,6 @@ class ConstructorGenerator:
             sb.line("@dataclass")
             sb.line(f"class {self.cls_name}(TLBRecord):")
 
-        nat_params = [p for p in self.c.params if isinstance(p, NatParamDef)]
-
         with sb.block():
             for p in self.c.params:
                 match p:
@@ -324,26 +346,18 @@ class ConstructorGenerator:
                         if p in self.type_params:
                             sb.line(f"{self.scope.lookup(p)}: TypeInfo[{self.type_var_name(p)}]")
                     case NatParamDef():
-                        sb.line(f"{self.scope.lookup_private(p)}: int")
+                        sb.line(f"{self.scope.lookup(p)}: int")
             for f in self.c.fields:
                 py_type = self.strategies[IdentityKey(f)].py_type()
                 if f.condition is not None:
                     py_type = f"{py_type} | None"
                 sb.line(f"{self.scope.lookup(f)}: {py_type}")
 
-            if nat_params:
-                sb.blank()
-                for p in nat_params:
-                    sb.line("@property")
-                    sb.line(f"def {self.scope.lookup(p)}(self) -> int:")
-                    with sb.block():
-                        sb.line(f"return self.{self.scope.lookup_private(p)}")
-
             sb.blank()
             self._generate_serialize_to(sb)
             sb.blank()
             self._generate_load_from(sb)
-            if self.c.output_values:
+            if any(v is not None for v in self.c.nat_param_values):
                 sb.blank()
                 self._generate_get_output(sb)
 
@@ -354,8 +368,10 @@ class ConstructorGenerator:
         sb.line("@override")
         sb.line("def serialize_to(self, builder: Builder) -> None:")
         with sb.block():
+            has_assertions = self._emit_serialize_assertions(sb)
             if not self.c.fields and self.c.tag_len == 0:
-                sb.line("pass")
+                if not has_assertions:
+                    sb.line("pass")
                 return
             if self.c.tag_bits:
                 tag_val = int(self.c.tag_bits, 2)
@@ -372,6 +388,57 @@ class ConstructorGenerator:
                 else:
                     strat.emit_store(f"self.{name}", "builder", sb)
 
+    def _emit_serialize_assertions(self, sb: SourceBuilder) -> bool:
+        """Emit assertions that validate internal state before serialization.
+
+        Returns True if any assertions were emitted.
+        """
+        emitted = False
+        for p in self.c.params:
+            if isinstance(p, NatParamDef):
+                sb.line(f"assert self.{self.scope.lookup(p)} >= 0")
+                emitted = True
+        for step in self.c.deser_steps:
+            if not isinstance(step, CheckConstraint):
+                continue
+            if _nat_references_type_arg(step.left) or _nat_references_type_arg(step.right):
+                continue
+            left = NatExpr(step.left, self.scope).self_
+            right = NatExpr(step.right, self.scope).self_
+            op_str = _COMPARE_OP_STR[step.op]
+            sb.line(f"assert {left} {op_str} {right}")
+            emitted = True
+        for f in self.c.fields:
+            if self._emit_field_type_arg_assertions(f, sb):
+                emitted = True
+        return emitted
+
+    def _emit_field_type_arg_assertions(
+        self, f: ResolvedField, sb: SourceBuilder
+    ) -> bool:
+        """Assert that a field's sub-type nat params match expected values."""
+        if not isinstance(f.type_expr, TypeApply):
+            return False
+        t = f.type_expr.type
+        if t.is_builtin or not any(v is not None for v in t.constructors[0].nat_param_values):
+            return False
+        field_name = self.scope.lookup(f)
+        emitted = False
+        for tlp, arg in zip(t.type_level_params, f.type_expr.arguments, strict=True):
+            if tlp.kind != ParamKind.NAT:
+                continue
+            if not isinstance(
+                arg,
+                NatLiteral | NatParamRef | NatFieldValue | NatAdd | NatSub | NatMul | NatGetBit,
+            ):
+                continue
+            if _nat_references_type_arg(arg):
+                continue
+            expected = NatExpr(arg, self.scope).self_
+            sb.line(f"assert self.{field_name}.get_output({tlp.position}) == {expected}")
+            emitted = True
+        return emitted
+
     def _generate_load_from(self, sb: SourceBuilder) -> None:
         cs_used = self.c.tag_len > 0 or any(
             self.strategies[IdentityKey(s.field)].load_uses_cs()
@@ -380,6 +447,7 @@ class ConstructorGenerator:
         )
         cs_name = "cs" if cs_used else "_cs"
         params = [f"{cs_name}: Slice"]
+        assertions: list[str] = []
 
         for tlp in self.c.parent_type.type_level_params:
             if tlp.is_output:
@@ -387,6 +455,7 @@ class ConstructorGenerator:
             name = self.type_scope.lookup(tlp)
             if tlp.kind == ParamKind.NAT:
                 params.append(f"{name}: int")
+                assertions.append(f"assert {name} >= 0")
             else:
                 expr = self.c.result_param_exprs.get(tlp.position)
                 assert isinstance(expr, TypeParamRef)
@@ -404,6 +473,8 @@ class ConstructorGenerator:
             sb.line(f"def load_from(cls, {params_str}) -> {self.cls_name}:")
 
         with sb.block():
+            for assertion in assertions:
+                sb.line(assertion)
             if self.c.tag_bits:
                 self.ctx.use("TlbModelError")
                 tag_val = int(self.c.tag_bits, 2)
@@ -466,7 +537,7 @@ class ConstructorGenerator:
                 expr = source_name
                 for inf_step in extraction.chain:
                     expr = self._emit_inference_access(inf_step, expr, sb)
-                expr = f"{expr}.get_output({extraction.final_output_idx})"
+                expr = f"{expr}.get_output({extraction.result_param_position})"
                 sb.line(f"{var_name} = {expr}")
                 sb.line(f"if {var_name} < 0:")
                 with sb.block():
@@ -525,19 +596,23 @@ class ConstructorGenerator:
         return tmp
 
     def _generate_get_output(self, sb: SourceBuilder) -> None:
-        """Generate get_output() override for constructors with output params."""
+        """Generate get_output() override returning nat type-level param values by TLP position."""
         sb.line("@override")
         sb.line("def get_output(self, idx: int) -> int:")
         with sb.block():
-            for i, val in enumerate(self.c.output_values):
+            first = True
+            for i, val in enumerate(self.c.nat_param_values):
+                if val is None:
+                    continue
                 expr = NatExpr(val, self.scope).self_
-                if i == 0:
+                if first:
                     sb.line(f"if idx == {i}:")
+                    first = False
                 else:
                     sb.line(f"elif idx == {i}:")
                 with sb.block():
                     sb.line(f"return {expr}")
-            sb.line("raise ValueError(f'no output param at index {idx}')")
+            sb.line("raise ValueError(f'no nat param at index {idx}')")
 
 
 class MatchTreeGenerator:

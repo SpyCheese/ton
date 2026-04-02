@@ -458,21 +458,21 @@ bit$_ (## 1) = Bit;
         steps = hml_short.deser_steps
 
         binds = [s for s in steps if isinstance(s, BindOutputParam)]
-        assert any(b.target_param.name == "n" and b.extraction.final_output_idx == 0 for b in binds)
+        assert any(b.target_param.name == "n" and b.extraction.result_param_position == 0 for b in binds)
 
-    def test_output_values(self):
-        """Output values are resolved nat expressions."""
+    def test_nat_param_values(self):
+        """Nat param values are resolved nat expressions indexed by TLP position."""
         ts = types_by_name(
             "unary_zero$0 = Unary ~0;\nunary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
         )
         zero = ts["Unary"].constructors[0]
-        assert len(zero.output_values) == 1
-        assert isinstance(zero.output_values[0], NatLiteral)
-        assert zero.output_values[0].value == 0
+        assert len(zero.nat_param_values) == 1
+        assert isinstance(zero.nat_param_values[0], NatLiteral)
+        assert zero.nat_param_values[0].value == 0
 
         succ = ts["Unary"].constructors[1]
-        assert len(succ.output_values) == 1
-        assert isinstance(succ.output_values[0], NatAdd)
+        assert len(succ.nat_param_values) == 1
+        assert isinstance(succ.nat_param_values[0], NatAdd)
 
     def test_inference_through_generic(self):
         """Output param inferred through an inference-capable generic type."""
@@ -490,7 +490,7 @@ foo$_ {n:#} x:(Pair (Unary ~n) uint32) y:(## n) = Foo ~n;
         assert binds[0].target_param.name == "n"
         assert len(binds[0].extraction.chain) == 1
         assert binds[0].extraction.chain[0].type is ts["Pair"]
-        assert binds[0].extraction.final_output_idx == 0
+        assert binds[0].extraction.result_param_position == 0
 
     def test_inference_double_nesting(self):
         """Output param inferred through two levels of generic types."""
@@ -507,7 +507,7 @@ bar$_ {n:#} x:(Pair (Pair (Unary ~n) uint32) uint64) y:(## n) = Bar ~n;
         assert len(binds) == 1
         assert binds[0].target_param.name == "n"
         assert len(binds[0].extraction.chain) == 2
-        assert binds[0].extraction.final_output_idx == 0
+        assert binds[0].extraction.result_param_position == 0
 
     def test_no_inference_through_maybe(self):
         """Maybe is NOT inference-capable, so using it to infer an output param is an error."""
@@ -527,6 +527,91 @@ baz$_ {n:#} x:(Maybe (Unary ~n)) = Baz ~n;
 foo$0 {n:#} x:uint32 = T ~n;
 bar$1 {n:#} x:uint32 = T n;
 """)
+
+    def test_nat_less_nonconst_implicit_constraint(self):
+        """#< n with non-constant n generates an implicit n > 0 constraint."""
+        _, types = analyze_text("foo$_ {n:#} x:(#< n) = Foo n;")
+        con = types[0].constructors[0]
+        n_param = con.params[0]
+        assert isinstance(n_param, NatParamDef)
+        assert con.deser_steps == [
+            SolveConstraint(
+                target_param=n_param,
+                value=NatTypeArg(param=types[0].type_level_params[0]),
+            ),
+            CheckConstraint(
+                op=CompareOp.GT,
+                left=NatParamRef(n_param),
+                right=NatLiteral(0),
+            ),
+            ReadField(field=con.fields[0]),
+        ]
+
+    def test_nat_less_nonconst_nested_in_generic(self):
+        """#< n nested inside a generic type still gets the implicit n > 0 constraint."""
+        _, types = analyze_text(
+            "nothing$0 {X:Type} = Maybe X;\n"
+            + "just$1 {X:Type} value:X = Maybe X;\n"
+            + "foo$_ {n:#} x:(Maybe (#< n)) = Foo n;"
+        )
+        foo_type = next(t for t in types if t.name == "Foo")
+        con = foo_type.constructors[0]
+        n_param = con.params[0]
+        assert isinstance(n_param, NatParamDef)
+        check_steps = [
+            s for s in con.deser_steps if isinstance(s, CheckConstraint) and s.op == CompareOp.GT
+        ]
+        assert len(check_steps) == 1
+        assert check_steps[0].left == NatParamRef(n_param)
+        assert check_steps[0].right == NatLiteral(0)
+
+    def test_field_constraint_leq(self):
+        """Constraint { flags <= 1 } on an explicit field becomes a CheckConstraint."""
+        ts = types_by_name("foo$_ flags:(## 8) { flags <= 1 } x:uint32 = Foo;")
+        con = ts["Foo"].constructors[0]
+        f_flags = con.fields[0]
+        f_x = con.fields[1]
+        assert con.deser_steps == [
+            ReadField(field=f_flags),
+            CheckConstraint(op=CompareOp.LE, left=NatFieldValue(f_flags), right=NatLiteral(1)),
+            ReadField(field=f_x),
+        ]
+
+    def test_field_constraint_geq(self):
+        """Constraint { vert_seq_no >= vert_seqno_incr } on fields."""
+        ts = types_by_name(
+            "foo$_ vert_seqno_incr:(## 1) seq_no:# vert_seq_no:# "
+            + "{ vert_seq_no >= vert_seqno_incr } = Foo;"
+        )
+        con = ts["Foo"].constructors[0]
+        f_incr = con.fields[0]
+        f_seq = con.fields[1]
+        f_vert = con.fields[2]
+        assert con.deser_steps == [
+            ReadField(field=f_incr),
+            ReadField(field=f_seq),
+            ReadField(field=f_vert),
+            CheckConstraint(
+                op=CompareOp.GE, left=NatFieldValue(f_vert), right=NatFieldValue(f_incr)
+            ),
+        ]
+
+    def test_negated_param_solved_from_constraint(self):
+        """{ ~prev_seq_no + 1 = seq_no } solves prev_seq_no = seq_no - 1."""
+        ts = types_by_name(
+            "foo$_ seq_no:# { prev_seq_no:# } { ~prev_seq_no + 1 = seq_no } = Foo;"
+        )
+        con = ts["Foo"].constructors[0]
+        f_seq = con.fields[0]
+        p_prev = con.params[0]
+        assert isinstance(p_prev, NatParamDef)
+        assert con.deser_steps == [
+            ReadField(field=f_seq),
+            SolveConstraint(
+                target_param=p_prev,
+                value=NatSub(left=NatFieldValue(f_seq), right=NatLiteral(1)),
+            ),
+        ]
 
 
 # ── Multiple types interaction ────────────────────────────────────────
@@ -626,43 +711,6 @@ class TestSemaErrors:
                 + "foo$_ {T:Type} x:(Maybe (#< T)) = Foo T;"
             )
 
-    def test_nat_less_nonconst_implicit_constraint(self):
-        """#< n with non-constant n generates an implicit n > 0 constraint."""
-        _, types = analyze_text("foo$_ {n:#} x:(#< n) = Foo n;")
-        con = types[0].constructors[0]
-        n_param = con.params[0]
-        assert isinstance(n_param, NatParamDef)
-        assert con.deser_steps == [
-            SolveConstraint(
-                target_param=n_param,
-                value=NatTypeArg(param=types[0].type_level_params[0]),
-            ),
-            CheckConstraint(
-                op=CompareOp.GT,
-                left=NatParamRef(n_param),
-                right=NatLiteral(0),
-            ),
-            ReadField(field=con.fields[0]),
-        ]
-
-    def test_nat_less_nonconst_nested_in_generic(self):
-        """#< n nested inside a generic type still gets the implicit n > 0 constraint."""
-        _, types = analyze_text(
-            "nothing$0 {X:Type} = Maybe X;\n"
-            + "just$1 {X:Type} value:X = Maybe X;\n"
-            + "foo$_ {n:#} x:(Maybe (#< n)) = Foo n;"
-        )
-        foo_type = next(t for t in types if t.name == "Foo")
-        con = foo_type.constructors[0]
-        n_param = con.params[0]
-        assert isinstance(n_param, NatParamDef)
-        check_steps = [
-            s for s in con.deser_steps if isinstance(s, CheckConstraint) and s.op == CompareOp.GT
-        ]
-        assert len(check_steps) == 1
-        assert check_steps[0].left == NatParamRef(n_param)
-        assert check_steps[0].right == NatLiteral(0)
-
     def test_wrong_arity(self):
         """Applying a type with wrong number of arguments."""
         with pytest.raises(SemaError, match="expects 1 arguments, got 2"):
@@ -683,8 +731,9 @@ class TestSemaErrors:
             foo$_ {m:#} n:(#<= m) = T ~n m;
         """)
         con = ts["T"].constructors[0]
-        assert len(con.output_values) == 1
-        assert isinstance(con.output_values[0], NatFieldValue)
+        assert len(con.nat_param_values) == 2
+        assert isinstance(con.nat_param_values[0], NatFieldValue)
+        assert isinstance(con.nat_param_values[1], NatParamRef)
 
     def test_uncomputable_param(self):
         """Param that can't be bound from type args, fields, or constraints."""
