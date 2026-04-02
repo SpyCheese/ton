@@ -31,6 +31,8 @@ class WellKnownType(Enum):
     BIT = auto()
     HASHMAP_E = auto()
     HASHMAP = auto()
+    VAR_UINTEGER = auto()
+    VAR_INTEGER = auto()
 
 
 @dataclass(frozen=True)

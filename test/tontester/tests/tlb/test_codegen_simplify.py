@@ -1,15 +1,19 @@
-"""Tests for Maybe simplification (--simplify=maybe)."""
+"""Tests for type simplifications."""
 
+import pytest
 from bitarray import bitarray
 from generated.simplify import (
+    CoinsType,
     DictFieldType,
     EnumFieldsType,
     InferredUnaryType,
     MaybeRefType,
     MixedType,
     NestedMaybeType,
+    SignedValType,
     SimpleMaybeType,
     SizedType,
+    coins,
     dict_field,
     enum_fields,
     inferred_unary,
@@ -19,6 +23,7 @@ from generated.simplify import (
     nested_maybe,
     nothing,
     pair,
+    signed_val,
     simple_maybe,
     sized,
 )
@@ -251,3 +256,88 @@ class TestHashmapSimplification:
         cs = obj.serialize().begin_parse()
         assert cs.load_uint(1) == 0  # hme_empty tag
         assert cs.load_uint(16) == 0xABCD
+
+
+    def test_wrong_key_bits_caught(self):
+        """HashmapDict with wrong key_bits is caught on serialize."""
+        wrong_dict: HashmapDict[int] = HashmapDict(16, UintTypeConstructor(32))
+        obj = dict_field(data=wrong_dict, extra=0)
+        with pytest.raises(AssertionError):
+            _ = obj.serialize()
+
+    def test_wrong_value_ti_caught(self):
+        """HashmapDict with wrong value TypeInfo is caught on serialize."""
+        from tlb.object import IntTypeConstructor
+
+        wrong_dict: HashmapDict[int] = HashmapDict(8, IntTypeConstructor(32))
+        obj = dict_field(data=wrong_dict, extra=0)
+        with pytest.raises(AssertionError):
+            _ = obj.serialize()
+
+
+class TestVarUInteger:
+    """VarUInteger n → int."""
+
+    def test_zero(self):
+        obj = coins(amount=0)
+        result = CoinsType().load_from(obj.serialize().begin_parse())
+        assert result.amount == 0
+
+    def test_small(self):
+        obj = coins(amount=255)
+        result = CoinsType().load_from(obj.serialize().begin_parse())
+        assert result.amount == 255
+
+    def test_large(self):
+        obj = coins(amount=10**18)
+        result = CoinsType().load_from(obj.serialize().begin_parse())
+        assert result.amount == 10**18
+
+    def test_serialized_zero(self):
+        """VarUInteger 16 with amount=0: len=0 (4 bits), no value bytes."""
+        cs = coins(amount=0).serialize().begin_parse()
+        assert cs.load_uint(4) == 0  # len
+        assert cs.remaining_bits == 0
+
+    def test_serialized_small(self):
+        """VarUInteger 16 with amount=255: len=1, value=1 byte."""
+        cs = coins(amount=255).serialize().begin_parse()
+        assert cs.load_uint(4) == 1  # len = 1 byte
+        assert cs.load_uint(8) == 255
+
+    def test_serialized_two_bytes(self):
+        """VarUInteger 16 with amount=256: len=2, value=2 bytes."""
+        cs = coins(amount=256).serialize().begin_parse()
+        assert cs.load_uint(4) == 2
+        assert cs.load_uint(16) == 256
+
+
+class TestVarInteger:
+    """VarInteger n → int (signed)."""
+
+    def test_zero(self):
+        obj = signed_val(x=0)
+        result = SignedValType().load_from(obj.serialize().begin_parse())
+        assert result.x == 0
+
+    def test_positive(self):
+        obj = signed_val(x=127)
+        result = SignedValType().load_from(obj.serialize().begin_parse())
+        assert result.x == 127
+
+    def test_negative(self):
+        obj = signed_val(x=-42)
+        result = SignedValType().load_from(obj.serialize().begin_parse())
+        assert result.x == -42
+
+    def test_serialized_negative(self):
+        """VarInteger 4 with x=-1: len=1, value=0xFF (signed -1 in 8 bits)."""
+        cs = signed_val(x=-1).serialize().begin_parse()
+        assert cs.load_uint(2) == 1  # #< 4 → 2 bits, len=1
+        assert cs.load_int(8) == -1
+
+    def test_serialized_positive(self):
+        """VarInteger 4 with x=256: len=2, value=256 in 16 bits."""
+        cs = signed_val(x=256).serialize().begin_parse()
+        assert cs.load_uint(2) == 2  # len=2
+        assert cs.load_int(16) == 256

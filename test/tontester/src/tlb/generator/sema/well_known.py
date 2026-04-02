@@ -23,6 +23,10 @@ def classify_well_known(rt: ResolvedType) -> None:
         rt.well_known = WellKnownType.HASHMAP_E
     elif _is_hashmap(rt):
         rt.well_known = WellKnownType.HASHMAP
+    elif _is_var_uinteger(rt):
+        rt.well_known = WellKnownType.VAR_UINTEGER
+    elif _is_var_integer(rt):
+        rt.well_known = WellKnownType.VAR_INTEGER
 
 
 def _is_maybe(rt: ResolvedType) -> bool:
@@ -165,3 +169,25 @@ def _is_hashmap(rt: ResolvedType) -> bool:
     if len(tlps) != 2 or tlps[0].kind != ParamKind.NAT or tlps[1].kind != ParamKind.TYPE:
         return False
     return rt.constructors[0].name == "hm_edge"
+
+
+def _is_var_uinteger(rt: ResolvedType) -> bool:
+    """var_uint$_ {n:#} len:(#< n) value:(uint (len * 8)) = VarUInteger n;"""
+    if rt.name != "VarUInteger":
+        return False
+    if rt.arity != 1 or len(rt.constructors) != 1:
+        return False
+    if len(rt.type_level_params) != 1 or rt.type_level_params[0].kind != ParamKind.NAT:
+        return False
+    return rt.constructors[0].name == "var_uint"
+
+
+def _is_var_integer(rt: ResolvedType) -> bool:
+    """var_int$_ {n:#} len:(#< n) value:(int (len * 8)) = VarInteger n;"""
+    if rt.name != "VarInteger":
+        return False
+    if rt.arity != 1 or len(rt.constructors) != 1:
+        return False
+    if len(rt.type_level_params) != 1 or rt.type_level_params[0].kind != ParamKind.NAT:
+        return False
+    return rt.constructors[0].name == "var_int"

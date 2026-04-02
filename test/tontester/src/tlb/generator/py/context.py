@@ -197,6 +197,8 @@ class PyContext:
                 "TypeInfo",
                 "UintTypeConstructor",
                 "UnaryTypeInfo",
+                "VarIntTypeConstructor",
+                "VarUIntTypeConstructor",
             ]
             if n in self.used_imports
         ]

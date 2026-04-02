@@ -155,6 +155,14 @@ class HashmapDict[V]:
         self._root_parsed = False
         self._overlay: SortedDict[int, V | _Deleted] = SortedDict()
 
+    @property
+    def key_bits(self) -> int:
+        return self._key_bits
+
+    @property
+    def value_ti(self) -> TypeInfo[V]:
+        return self._value_ti
+
     def _get_root(self) -> hm_edge[V] | None:
         if not self._root_parsed:
             if self._cell is not None:

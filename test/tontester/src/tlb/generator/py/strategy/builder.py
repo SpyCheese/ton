@@ -195,6 +195,12 @@ class StrategyBuilder:
                         type_expr, self.ctx, self.scope, self,
                         allow_empty=(t.well_known == WellKnownType.HASHMAP_E),
                     )
+                if t.well_known in (WellKnownType.VAR_UINTEGER, WellKnownType.VAR_INTEGER):
+                    from .varint import VarIntStrategy
+                    return VarIntStrategy(
+                        type_expr, self.ctx, self.scope,
+                        signed=(t.well_known == WellKnownType.VAR_INTEGER),
+                    )
                 if info := _ENUM_LITERAL_INFOS.get(t.well_known):
                     return EnumLiteralStrategy(info, self.ctx)
             return self._build_user_type(type_expr)

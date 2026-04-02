@@ -83,6 +83,8 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "UintTypeConstructor",
         "UnaryTypeInfo",
         "UnitTypeInfo",
+        "VarIntTypeConstructor",
+        "VarUIntTypeConstructor",
         "_T",
     }
 )

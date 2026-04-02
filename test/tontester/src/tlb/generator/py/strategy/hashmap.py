@@ -68,6 +68,13 @@ class HashmapStrategy(TypeStrategy):
         return f"{self.py_type()}.type_info({self._key_bits_self.self_}, {self._val_ti_self}, allow_empty={self._allow_empty})"
 
     @override
+    def emit_serialize_assertions(self, field_name: str, sb: SourceBuilder) -> bool:
+        key_expr = self._key_bits_self.self_
+        sb.line(f"assert {field_name}.key_bits == {key_expr}")
+        sb.line(f"assert {field_name}.value_ti == {self._val_ti_self}")
+        return True
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
         sb.line(f"{value}.serialize_to({builder})")
 

@@ -269,6 +269,79 @@ UnaryTypeInfo = _UnaryTypeInfo()
 
 
 @final
+class VarUIntTypeConstructor(TypeInfo[int]):
+    """TypeInfo for VarUInteger n — variable-length unsigned integer."""
+
+    def __init__(self, n: int) -> None:
+        assert n > 0
+        self._n = n
+
+    @override
+    def serialize_value(self, value: int, builder: Builder) -> None:
+        assert value >= 0
+        byte_len = (value.bit_length() + 7) // 8
+        assert byte_len < self._n
+        BoundedUintTypeConstructor(self._n, inclusive=False).serialize_value(byte_len, builder)
+        if byte_len > 0:
+            _ = builder.store_uint(value, byte_len * 8)
+
+    @override
+    def load_from(self, cs: Slice) -> int:
+        byte_len = BoundedUintTypeConstructor(self._n, inclusive=False).load_from(cs)
+        if byte_len == 0:
+            return 0
+        return cs.load_uint(byte_len * 8)
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, VarUIntTypeConstructor) and self._n == other._n
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("VarUInt", self._n))
+
+    @override
+    def __repr__(self) -> str:
+        return f"VarUInteger({self._n})"
+
+
+@final
+class VarIntTypeConstructor(TypeInfo[int]):
+    """TypeInfo for VarInteger n — variable-length signed integer."""
+
+    def __init__(self, n: int) -> None:
+        assert n > 0
+        self._n = n
+
+    @override
+    def serialize_value(self, value: int, builder: Builder) -> None:
+        byte_len = (value.bit_length() + 8) // 8  # +1 for sign bit
+        assert byte_len < self._n
+        BoundedUintTypeConstructor(self._n, inclusive=False).serialize_value(byte_len, builder)
+        if byte_len > 0:
+            _ = builder.store_int(value, byte_len * 8)
+
+    @override
+    def load_from(self, cs: Slice) -> int:
+        byte_len = BoundedUintTypeConstructor(self._n, inclusive=False).load_from(cs)
+        if byte_len == 0:
+            return 0
+        return cs.load_int(byte_len * 8)
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, VarIntTypeConstructor) and self._n == other._n
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("VarInt", self._n))
+
+    @override
+    def __repr__(self) -> str:
+        return f"VarInteger({self._n})"
+
+
+@final
 class MaybeTypeInfo[X](TypeInfo[X | None]):
     """TypeInfo for simplified Maybe X → X | None. Stores inner TypeInfo."""
 

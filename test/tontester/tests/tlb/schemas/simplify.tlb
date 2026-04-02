@@ -49,3 +49,9 @@ nested_maybe$_ x:(Maybe (Maybe uint32)) = NestedMaybe;
 
 // Maybe with ^Type
 maybe_ref$_ x:(Maybe ^uint32) = MaybeRef;
+
+// VarUInteger/VarInteger simplification
+var_uint$_ {n:#} len:(#< n) value:(uint (len * 8)) = VarUInteger n;
+var_int$_ {n:#} len:(#< n) value:(int (len * 8)) = VarInteger n;
+coins$_ amount:(VarUInteger 16) = Coins;
+signed_val$_ x:(VarInteger 4) = SignedVal;
