@@ -179,6 +179,8 @@ class ConstructorGenerator:
         t = f.type_expr.type
         if t.is_builtin:
             return False
+        if t.well_known is not None and self.ctx.simplify.is_enabled(t.well_known):
+            return False
         field_name = self.scope.lookup(f)
         emitted = False
         for tlp, arg in zip(t.type_level_params, f.type_expr.arguments, strict=True):

@@ -44,6 +44,11 @@ class TypeStrategy(ABC):
         """Whether emit_load actually reads from the cs slice."""
         return True
 
+    @property
+    def is_nullable(self) -> bool:
+        """Whether this type can already represent None (e.g., Maybe, generic type params)."""
+        return False
+
     @abstractmethod
     def descriptor(self) -> str:
         """A unique string identifying this strategy for dedup purposes."""

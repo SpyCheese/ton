@@ -62,6 +62,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "TypeError",
         "bitarray",
         "BitsTypeConstructor",
+        "BoolTypeInfo",
         "BoundedUintTypeConstructor",
         "Builder",
         "Cell",
@@ -70,6 +71,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "cs",
         "InstantiableTypeInfo",
         "IntTypeConstructor",
+        "MaybeTypeInfo",
         "Ref",
         "RefType",
         "Slice",
@@ -78,6 +80,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "TupleTypeConstructor",
         "TypeInfo",
         "UintTypeConstructor",
+        "UnitTypeInfo",
         "_T",
     }
 )

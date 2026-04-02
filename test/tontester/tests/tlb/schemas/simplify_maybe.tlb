@@ -1,0 +1,24 @@
+// Test schema for type simplifications
+nothing$0 {X:Type} = Maybe X;
+just$1 {X:Type} value:X = Maybe X;
+
+// Enum literal types
+bool_false$0 = Bool;
+bool_true$1 = Bool;
+unit$_ = Unit;
+true$1 = True;
+
+// Using simplified enums as fields
+enum_fields$_ a:Bool b:Unit c:True x:uint32 = EnumFields;
+
+// Simple Maybe field
+simple_maybe$_ x:(Maybe uint32) = SimpleMaybe;
+
+// Maybe in a record with other fields
+mixed$_ a:uint32 b:(Maybe uint64) c:int8 = Mixed;
+
+// Nested Maybe — should NOT simplify the outer (inner is nullable)
+nested_maybe$_ x:(Maybe (Maybe uint32)) = NestedMaybe;
+
+// Maybe with ^Type
+maybe_ref$_ x:(Maybe ^uint32) = MaybeRef;

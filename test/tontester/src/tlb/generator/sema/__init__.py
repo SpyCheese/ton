@@ -31,6 +31,7 @@ from .types import (
     TupleType,
     TypeApply,
 )
+from .well_known import classify_well_known
 
 
 def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
@@ -67,6 +68,7 @@ def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
 
     for rt in user_types:
         _classify_type(rt)
+        classify_well_known(rt)
 
     user_types = _toposort(user_types)
 

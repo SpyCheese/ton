@@ -5,14 +5,16 @@ the resolved sema IR. Uses the runtime support library in tlb.object.
 """
 
 from ..sema.types import ResolvedType
+from ..simplify_config import SimplifyConfig
 from .context import PyContext
 from .source_builder import SourceBuilder
 from .type_generator import TypeGenerator
 
 
-def generate_python(types: list[ResolvedType]) -> str:
+def generate_python(types: list[ResolvedType], simplify: SimplifyConfig | None = None) -> str:
     """Generate Python source code for a list of resolved types."""
-    ctx = PyContext()
+    config = simplify or SimplifyConfig.none()
+    ctx = PyContext(simplify=config)
 
     for t in types:
         if t.is_builtin or not t.constructors:

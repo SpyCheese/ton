@@ -183,6 +183,92 @@ AnyType = _AnyType()
 
 
 @final
+class _UnitTypeInfo(TypeInfo[None]):
+    @override
+    def serialize_value(self, value: None, builder: Builder) -> None:
+        pass
+
+    @override
+    def load_from(self, cs: Slice) -> None:
+        return None
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _UnitTypeInfo)
+
+    @override
+    def __hash__(self) -> int:
+        return hash("UnitTypeInfo")
+
+    @override
+    def __repr__(self) -> str:
+        return "Unit"
+
+
+UnitTypeInfo = _UnitTypeInfo()
+
+
+@final
+class _BoolTypeInfo(TypeInfo[bool]):
+    @override
+    def serialize_value(self, value: bool, builder: Builder) -> None:
+        _ = builder.store_uint(int(value), 1)
+
+    @override
+    def load_from(self, cs: Slice) -> bool:
+        return bool(cs.load_uint(1))
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _BoolTypeInfo)
+
+    @override
+    def __hash__(self) -> int:
+        return hash("BoolTypeInfo")
+
+    @override
+    def __repr__(self) -> str:
+        return "Bool"
+
+
+BoolTypeInfo = _BoolTypeInfo()
+
+
+@final
+class MaybeTypeInfo[X](TypeInfo[X | None]):
+    """TypeInfo for simplified Maybe X → X | None. Stores inner TypeInfo."""
+
+    def __init__(self, inner: TypeInfo[X]) -> None:
+        self._inner = inner
+
+    @override
+    def serialize_value(self, value: X | None, builder: Builder) -> None:
+        if value is not None:
+            _ = builder.store_uint(1, 1)
+            self._inner.serialize_value(value, builder)
+        else:
+            _ = builder.store_uint(0, 1)
+
+    @override
+    def load_from(self, cs: Slice) -> X | None:
+        if cs.load_bit():
+            return self._inner.load_from(cs)
+        return None
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, MaybeTypeInfo) and self._inner == other._inner  # pyright: ignore[reportUnknownMemberType]
+
+    @override
+    def __hash__(self) -> int:
+        return hash(("MaybeTypeInfo", self._inner))
+
+    @override
+    def __repr__(self) -> str:
+        return f"Maybe({self._inner!r})"
+
+
+@final
 class _CellRefType(TypeInfo[Cell]):
     """TypeInfo for ^Cell — opaque cell reference. Stores/loads entire cells."""
 

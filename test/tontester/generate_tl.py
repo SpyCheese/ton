@@ -2,15 +2,18 @@ from pathlib import Path
 
 from tlb.generator.py import generate_python
 from tlb.generator.sema import analyze_text
+from tlb.generator.simplify_config import SimplifyConfig
 
 import tl
 
 
-def generate_tlb_python(schema_path: Path, out_path: Path) -> None:
+def generate_tlb_python(
+    schema_path: Path, out_path: Path, simplify: SimplifyConfig | None = None
+) -> None:
     """Generate Python code from a TL-B schema file."""
     text = schema_path.read_text()
     _, types = analyze_text(text)
-    code = generate_python(types)
+    code = generate_python(types, simplify=simplify)
     _ = out_path.write_text(code)
     print(f"  {schema_path.name} -> {out_path.name}")
 
@@ -39,9 +42,11 @@ if __name__ == "__main__":
     tlb_schemas = repo_root / "test/tontester/tests/tlb/schemas"
     tlb_out = repo_root / "test/tontester/tests/tlb/generated"
     tlb_out.mkdir(parents=True, exist_ok=True)
+    simplify_all = SimplifyConfig.all()
     for schema_file in sorted(tlb_schemas.glob("*.tlb")):
         out_file = tlb_out / (schema_file.stem + ".py")
-        generate_tlb_python(schema_file, out_file)
+        config = simplify_all if schema_file.stem == "simplify_maybe" else None
+        generate_tlb_python(schema_file, out_file, simplify=config)
 
     # Generate block.tlb
     block_tlb = repo_root / "crypto/block/block.tlb"

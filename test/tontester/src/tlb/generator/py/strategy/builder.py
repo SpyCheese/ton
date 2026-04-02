@@ -23,6 +23,7 @@ from ...sema.types import (
     TypeApply,
     TypeParamDef,
     TypeParamRef,
+    WellKnownType,
     is_nat,
 )
 from ..context import PyContext
@@ -33,12 +34,45 @@ from .bits import BitsStrategy
 from .bounded_uint import BoundedUintStrategy
 from .cell import CellRefBuiltinStrategy
 from .cell_ref import CellRefStrategy, GenericCellRefStrategy
+from .enum_literal import EnumLiteralInfo, EnumLiteralStrategy
 from .int import IntStrategy
+from .maybe import MaybeStrategy
 from .slice import SliceTypeStrategy
 from .tuple import TupleStrategy
 from .type_param import TypeParamStrategy
 from .uint import UintStrategy
 from .user_type import UserTypeStrategy
+
+_ENUM_LITERAL_INFOS: dict[WellKnownType, EnumLiteralInfo] = {
+    WellKnownType.UNIT: EnumLiteralInfo(
+        py_type_str="None",
+        type_info_name="UnitTypeInfo",
+        tag_bits=0,
+        tag_len=0,
+        values={0: "None"},
+    ),
+    WellKnownType.BOOL: EnumLiteralInfo(
+        py_type_str="bool",
+        type_info_name="BoolTypeInfo",
+        tag_bits=1,
+        tag_len=1,
+        values={0: "False", 1: "True"},
+    ),
+    WellKnownType.BOOL_TRUE: EnumLiteralInfo(
+        py_type_str="Literal[True]",
+        type_info_name="BoolTypeInfo",
+        tag_bits=1,
+        tag_len=1,
+        values={1: "True"},
+    ),
+    WellKnownType.BOOL_FALSE: EnumLiteralInfo(
+        py_type_str="Literal[False]",
+        type_info_name="BoolTypeInfo",
+        tag_bits=1,
+        tag_len=1,
+        values={0: "False"},
+    ),
+}
 
 
 class StrategyBuilder:
@@ -138,9 +172,33 @@ class StrategyBuilder:
         if t is CellRef_type:
             return CellRefBuiltinStrategy(self.ctx)
         if not t.is_builtin:
+            if t.well_known == WellKnownType.MAYBE and self.ctx.simplify.is_enabled(
+                WellKnownType.MAYBE
+            ):
+                return self._build_maybe(type_expr)
+            if t.well_known is not None and self.ctx.simplify.is_enabled(t.well_known):
+                info = _ENUM_LITERAL_INFOS.get(t.well_known)
+                if info is not None:
+                    return EnumLiteralStrategy(info, self.ctx)
             return self._build_user_type(type_expr)
 
         assert False, f"unhandled builtin type: {t.name}"
+
+    def _build_maybe(self, type_expr: TypeApply) -> TypeStrategy:
+        """Build strategy for simplified Maybe X → X | None.
+
+        Falls back to UserTypeStrategy if the inner type is nullable
+        (e.g., Maybe (Maybe X) would collapse None | None).
+        """
+        assert len(type_expr.arguments) == 1
+        inner_arg = type_expr.arguments[0]
+        assert isinstance(
+            inner_arg, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
+        )
+        inner = self.build(inner_arg, inside_generic_arg=True)
+        if inner.is_nullable:
+            return self._build_user_type(type_expr)
+        return MaybeStrategy(inner, self.ctx)
 
     def _build_user_type(self, type_expr: TypeApply) -> UserTypeStrategy:
         """Build strategy for a user-defined type, handling all arg kinds."""

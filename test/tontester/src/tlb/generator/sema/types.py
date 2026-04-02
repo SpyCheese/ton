@@ -21,6 +21,14 @@ class ParamKind(Enum):
     TYPE = auto()
 
 
+class WellKnownType(Enum):
+    MAYBE = auto()
+    UNIT = auto()
+    BOOL = auto()
+    BOOL_TRUE = auto()
+    BOOL_FALSE = auto()
+
+
 @dataclass(frozen=True)
 class NatParamDef:
     name: str
@@ -376,3 +384,4 @@ class ResolvedType:
 
     match_tree: MatchTree | None = None
     inference: list[InferenceInfo] = field(default_factory=list)
+    well_known: WellKnownType | None = None

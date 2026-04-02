@@ -41,6 +41,11 @@ class TypeParamStrategy(TypeStrategy):
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
         sb.line(f"{target} = {self.ti_var}.load_from({cs})")
 
+    @property
+    @override
+    def is_nullable(self) -> bool:
+        return True
+
     @override
     def descriptor(self) -> str:
         return f"typeparam_{self.param.name}"

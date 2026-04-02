@@ -9,6 +9,7 @@ from typing import Protocol
 
 from ..identity_key import IdentityKey
 from ..sema.types import ResolvedConstructor, ResolvedType, TypeParamDef
+from ..simplify_config import SimplifyConfig
 from .name_scope import NameScope
 from .source_builder import SourceBuilder
 
@@ -26,6 +27,7 @@ class PyContext:
     """Shared state for a single file generation run."""
 
     scope: NameScope
+    simplify: SimplifyConfig
     used_imports: set[str]
     _next_tmp: int
     ref_wrappers: dict[tuple[str, bool], str]
@@ -33,8 +35,9 @@ class PyContext:
     _type_scopes: dict[IdentityKey[ResolvedType], NameScope]
     _constructors: dict[IdentityKey[ResolvedConstructor], ConstructorInfo]
 
-    def __init__(self) -> None:
+    def __init__(self, simplify: SimplifyConfig | None = None) -> None:
         self.scope = NameScope()
+        self.simplify = simplify or SimplifyConfig.none()
         self.used_imports = set()
         self._next_tmp = 0
         self.ref_wrappers = {}
@@ -164,7 +167,7 @@ class PyContext:
     def emit_imports(self, sb: SourceBuilder) -> None:
         if "dataclass" in self.used_imports:
             sb.line("from dataclasses import dataclass")
-        typing_parts = [n for n in ["final", "override"] if n in self.used_imports]
+        typing_parts = [n for n in ["Literal", "final", "override"] if n in self.used_imports]
         if typing_parts:
             sb.line(f"from typing import {', '.join(typing_parts)}")
         sb.blank()
@@ -182,7 +185,10 @@ class PyContext:
                 "BoundedUintTypeConstructor",
                 "CellRefType",
                 "InstantiableTypeInfo",
+                "BoolTypeInfo",
                 "IntTypeConstructor",
+                "MaybeTypeInfo",
+                "UnitTypeInfo",
                 "Ref",
                 "RefType",
                 "TLBRecord",
