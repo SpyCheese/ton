@@ -29,6 +29,8 @@ class WellKnownType(Enum):
     BOOL_FALSE = auto()
     UNARY = auto()
     BIT = auto()
+    HASHMAP_E = auto()
+    HASHMAP = auto()
 
 
 @dataclass(frozen=True)

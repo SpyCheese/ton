@@ -189,6 +189,12 @@ class StrategyBuilder:
                 if t.well_known == WellKnownType.UNARY:
                     from .unary import UnaryStrategy
                     return UnaryStrategy(self.ctx)
+                if t.well_known in (WellKnownType.HASHMAP_E, WellKnownType.HASHMAP):
+                    from .hashmap import HashmapStrategy
+                    return HashmapStrategy(
+                        type_expr, self.ctx, self.scope, self,
+                        allow_empty=(t.well_known == WellKnownType.HASHMAP_E),
+                    )
                 if info := _ENUM_LITERAL_INFOS.get(t.well_known):
                     return EnumLiteralStrategy(info, self.ctx)
             return self._build_user_type(type_expr)

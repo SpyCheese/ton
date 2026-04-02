@@ -30,7 +30,7 @@ class TypeInfo[T, *Args](Protocol):
 
 
 @final
-class _InstantiatedGenericType[T, *Args](TypeInfo[T]):
+class InstantiatedGenericType[T, *Args](TypeInfo[T]):
     def __init__(self, generic: TypeInfo[T, *Args], *args: *Args):
         self._generic = generic
         self._args = args
@@ -50,7 +50,7 @@ class _InstantiatedGenericType[T, *Args](TypeInfo[T]):
     @override
     def __eq__(self, other: object) -> bool:
         return (
-            isinstance(other, _InstantiatedGenericType)
+            isinstance(other, InstantiatedGenericType)
             and self._generic == other._generic  # pyright: ignore[reportUnknownMemberType]
             and self._args == other._args  # pyright: ignore[reportUnknownMemberType]
         )
@@ -68,7 +68,7 @@ class _InstantiatedGenericType[T, *Args](TypeInfo[T]):
 class InstantiableTypeInfo[T, *Args](TypeInfo[T, *Args], Protocol):
     @classmethod
     def instantiate(cls, *args: *Args) -> TypeInfo[T]:
-        return _InstantiatedGenericType(cls(), *args)
+        return InstantiatedGenericType(cls(), *args)
 
 
 class TLBRecord(ABC):

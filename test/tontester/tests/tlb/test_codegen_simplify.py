@@ -1,7 +1,8 @@
 """Tests for Maybe simplification (--simplify=maybe)."""
 
 from bitarray import bitarray
-from generated.simplify_maybe import (
+from generated.simplify import (
+    DictFieldType,
     EnumFieldsType,
     InferredUnaryType,
     MaybeRefType,
@@ -9,6 +10,7 @@ from generated.simplify_maybe import (
     NestedMaybeType,
     SimpleMaybeType,
     SizedType,
+    dict_field,
     enum_fields,
     inferred_unary,
     just,
@@ -20,6 +22,7 @@ from generated.simplify_maybe import (
     simple_maybe,
     sized,
 )
+from tlb.hashmap import HashmapDict
 from tlb.object import MaybeTypeInfo, Ref, UintTypeConstructor, UnaryTypeInfo
 
 
@@ -185,3 +188,66 @@ class TestMaybeRef:
         obj = maybe_ref(x=None)
         result = MaybeRefType().load_from(obj.serialize().begin_parse())
         assert result.x is None
+
+
+class TestHashmapSimplification:
+    """HashmapE n X → HashmapDict[X] field."""
+
+    def _make_dict_field(self, entries: dict[int, int], extra: int = 0) -> dict_field:
+        from pytoniq_core import Builder, HashMap
+
+        d: HashmapDict[int] = HashmapDict(8, UintTypeConstructor(32))
+        if entries:
+            hm = HashMap(8)
+            for k, v in entries.items():
+                _ = hm.set_int_key(k, Builder().store_uint(v, 32).end_cell().begin_parse())  # pyright: ignore[reportUnknownMemberType]
+            cell = hm.serialize()
+            assert cell is not None
+            d = HashmapDict(8, UintTypeConstructor(32), cell)
+        return dict_field(data=d, extra=extra)
+
+    def test_empty_roundtrip(self):
+        obj = self._make_dict_field({}, extra=42)
+        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        assert result.data.is_empty()
+        assert result.extra == 42
+
+    def test_nonempty_roundtrip(self):
+        obj = self._make_dict_field({1: 100, 5: 500, 255: 999}, extra=7)
+        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        assert result.data[1] == 100
+        assert result.data[5] == 500
+        assert result.data[255] == 999
+        assert result.extra == 7
+
+    def test_lazy_access(self):
+        """Dict is lazy — entries are only parsed on access."""
+        obj = self._make_dict_field({42: 123})
+        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        assert not result.data._root_parsed  # pyright: ignore[reportPrivateUsage]
+        assert result.data[42] == 123
+        assert result.data._root_parsed  # pyright: ignore[reportPrivateUsage]
+
+    def test_mutation_roundtrip(self):
+        obj = self._make_dict_field({1: 100, 2: 200}, extra=1)
+        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        result.data[3] = 300
+        del result.data[1]
+
+        b = result.serialize()
+        result2 = DictFieldType().load_from(b.begin_parse())
+        assert result2.data.to_dict() == {2: 200, 3: 300}
+        assert result2.extra == 1
+
+    def test_iteration_sorted(self):
+        obj = self._make_dict_field({255: 3, 0: 1, 128: 2})
+        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        keys = list(result.data.keys())
+        assert keys == sorted(keys)
+
+    def test_serialized_bits(self):
+        """Empty dict serializes as single 0 bit, followed by extra field."""
+        obj = self._make_dict_field({}, extra=0xABCD)
+        cs = obj.serialize().begin_parse()
+        assert cs.load_uint(1) == 0  # hme_empty tag
+        assert cs.load_uint(16) == 0xABCD

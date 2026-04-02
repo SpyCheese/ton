@@ -19,6 +19,10 @@ def classify_well_known(rt: ResolvedType) -> None:
         rt.well_known = WellKnownType.UNARY
     elif _is_bit(rt):
         rt.well_known = WellKnownType.BIT
+    elif _is_hashmap_e(rt):
+        rt.well_known = WellKnownType.HASHMAP_E
+    elif _is_hashmap(rt):
+        rt.well_known = WellKnownType.HASHMAP
 
 
 def _is_maybe(rt: ResolvedType) -> bool:
@@ -127,3 +131,37 @@ def _is_bit(rt: ResolvedType) -> bool:
         return False
     arg = target.arguments[0]
     return isinstance(arg, NatLiteral) and arg.value == 1
+
+
+def _is_hashmap_e(rt: ResolvedType) -> bool:
+    """hme_empty$0 {n:#} {X:Type} = HashmapE n X;
+    hme_root$1 {n:#} {X:Type} root:^(Hashmap n X) = HashmapE n X;"""
+    if rt.name != "HashmapE":
+        return False
+    if rt.arity != 2 or len(rt.constructors) != 2:
+        return False
+    tlps = rt.type_level_params
+    if len(tlps) != 2 or tlps[0].kind != ParamKind.NAT or tlps[1].kind != ParamKind.TYPE:
+        return False
+    cons = sorted(rt.constructors, key=lambda c: c.tag_bits)
+    empty, root = cons[0], cons[1]
+    if empty.name != "hme_empty" or root.name != "hme_root":
+        return False
+    if empty.tag_bits != "0" or root.tag_bits != "1":
+        return False
+    if len(empty.fields) != 0 or len(root.fields) != 1:
+        return False
+    return True
+
+
+def _is_hashmap(rt: ResolvedType) -> bool:
+    """hm_edge#_ {n:#} {X:Type} {l:#} {m:#} label:(HmLabel ~l n)
+              {n = (~m) + l} node:(HashmapNode m X) = Hashmap n X;"""
+    if rt.name != "Hashmap":
+        return False
+    if rt.arity != 2 or len(rt.constructors) != 1:
+        return False
+    tlps = rt.type_level_params
+    if len(tlps) != 2 or tlps[0].kind != ParamKind.NAT or tlps[1].kind != ParamKind.TYPE:
+        return False
+    return rt.constructors[0].name == "hm_edge"

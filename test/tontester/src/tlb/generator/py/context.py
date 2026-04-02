@@ -202,3 +202,5 @@ class PyContext:
         ]
         if tlb_obj:
             sb.line(f"from tlb.object import {', '.join(tlb_obj)}")
+        if "HashmapDict" in self.used_imports:
+            sb.line("from tlb.hashmap import HashmapDict")
