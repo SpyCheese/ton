@@ -37,6 +37,7 @@ Bits_type = _builtin("bits", arity=1, param_kinds=[ParamKind.NAT])
 
 # Special types
 Any_type = _builtin("Any")
+CellRef_type = _builtin("^Cell")  # Opaque cell reference (never parsed)
 
 
 def create_builtin_registry() -> dict[str, ResolvedType]:
@@ -52,9 +53,10 @@ def create_builtin_registry() -> dict[str, ResolvedType]:
         UInt_type,
         Bits_type,
         Any_type,
+        CellRef_type,
     ]:
         registry[t.name] = t
-    registry["Cell"] = Any_type  # Cell is an alias for Any
+    registry["Cell"] = Any_type  # Bare Cell treated as Any
 
     # Fixed-width shorthands: uint1..uint256, int1..int257, bits1..bits1023
     for n in range(1, 257):

@@ -3,6 +3,7 @@
 from ...sema.builtins import (
     Any_type,
     Bits_type,
+    CellRef_type,
     Int_type,
     Nat_type,
     NatLeq_type,
@@ -30,6 +31,7 @@ from ..nat_expr import NatExpr
 from ._base import TypeStrategy
 from .bits import BitsStrategy
 from .bounded_uint import BoundedUintStrategy
+from .cell import CellRefBuiltinStrategy
 from .cell_ref import CellRefStrategy, GenericCellRefStrategy
 from .int import IntStrategy
 from .slice import SliceTypeStrategy
@@ -133,6 +135,8 @@ class StrategyBuilder:
                 return BitsStrategy(NatExpr(NatLiteral(int(name[4:])), NameScope()), self.ctx)
         if t is Any_type:
             return SliceTypeStrategy(self.ctx)
+        if t is CellRef_type:
+            return CellRefBuiltinStrategy(self.ctx)
         if not t.is_builtin:
             return self._build_user_type(type_expr)
 

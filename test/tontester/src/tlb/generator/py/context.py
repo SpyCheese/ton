@@ -180,6 +180,7 @@ class PyContext:
                 "AnyType",
                 "BitsTypeConstructor",
                 "BoundedUintTypeConstructor",
+                "CellRefType",
                 "InstantiableTypeInfo",
                 "IntTypeConstructor",
                 "Ref",

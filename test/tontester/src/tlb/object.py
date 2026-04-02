@@ -183,6 +183,34 @@ AnyType = _AnyType()
 
 
 @final
+class _CellRefType(TypeInfo[Cell]):
+    """TypeInfo for ^Cell — opaque cell reference. Stores/loads entire cells."""
+
+    @override
+    def serialize_value(self, value: Cell, builder: Builder) -> None:
+        _ = builder.store_ref(value)
+
+    @override
+    def load_from(self, cs: Slice) -> Cell:
+        return cs.load_ref()
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _CellRefType)
+
+    @override
+    def __hash__(self) -> int:
+        return hash("CellRefType")
+
+    @override
+    def __repr__(self) -> str:
+        return "^Cell"
+
+
+CellRefType = _CellRefType()
+
+
+@final
 class UintTypeConstructor(TypeInfo[int]):
     def __init__(self, n: int):
         assert n >= 0

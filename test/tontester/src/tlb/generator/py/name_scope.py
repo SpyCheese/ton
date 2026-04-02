@@ -65,6 +65,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "BoundedUintTypeConstructor",
         "Builder",
         "Cell",
+        "CellRefType",
         "cls",
         "cs",
         "InstantiableTypeInfo",

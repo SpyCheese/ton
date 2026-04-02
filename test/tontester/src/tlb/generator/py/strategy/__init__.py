@@ -4,6 +4,7 @@ from ._base import TypeStrategy as TypeStrategy
 from .bits import BitsStrategy as BitsStrategy
 from .bounded_uint import BoundedUintStrategy as BoundedUintStrategy
 from .builder import StrategyBuilder as StrategyBuilder
+from .cell import CellRefBuiltinStrategy as CellRefBuiltinStrategy
 from .cell_ref import CellRefStrategy as CellRefStrategy
 from .cell_ref import GenericCellRefStrategy as GenericCellRefStrategy
 from .int import IntStrategy as IntStrategy

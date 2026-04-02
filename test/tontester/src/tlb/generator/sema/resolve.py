@@ -25,7 +25,7 @@ from ..ast_nodes import (
     Schema,
     TypeExpr,
 )
-from .builtins import NatLess_type, create_builtin_registry
+from .builtins import CellRef_type, NatLess_type, create_builtin_registry
 from .types import (
     AnonymousRecordType,
     CellRefType,
@@ -497,6 +497,9 @@ def _resolve_expr(expr: TypeExpr, scope: _Scope, registry: TypeRegistry) -> Reso
             raise SemaError(
                 "conditional (?) can only appear at field level, not nested in type expressions"
             )
+
+        case CellRef(inner=Identifier(name="Cell")):
+            return TypeApply(type=CellRef_type, arguments=[])
 
         case CellRef(inner=inner):
             return CellRefType(inner=_resolve_type_expr(inner, scope, registry))

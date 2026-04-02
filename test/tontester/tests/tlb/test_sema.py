@@ -86,14 +86,12 @@ class TestExpressionResolution:
         assert len(field_type.arguments) == 1
 
     def test_cell_ref(self):
-        """^Cell resolves to CellRefType(Any) — Cell is an alias for Any."""
+        """^Cell resolves to TypeApply(CellRef_type) — opaque cell reference builtin."""
         ts = types_by_name("foo$_ x:^Cell = Foo;")
         field_type = ts["Foo"].constructors[0].fields[0].type_expr
-        assert isinstance(field_type, CellRefType)
-        inner = field_type.inner
-        assert isinstance(inner, TypeApply)
-        assert inner.type.name == "Any"
-        assert inner.arguments == []
+        assert isinstance(field_type, TypeApply)
+        assert field_type.type.name == "^Cell"
+        assert field_type.arguments == []
 
     def test_cell_ref_on_nat_producing_type(self):
         """^uint32 is valid — cell reference to a nat-valued type."""

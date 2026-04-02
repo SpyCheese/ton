@@ -3,6 +3,7 @@
 from generated.cellref import (
     DoubleRefType,
     NestedRefType,
+    OpaqueRefType,
     Ref_Ref_uint8,
     Ref_TickTock,
     Ref_uint8,
@@ -12,6 +13,7 @@ from generated.cellref import (
     SimpleRefType,
     double_ref,
     nested_ref,
+    opaque_ref,
     ref_to_record,
     simple_ref,
 )
@@ -131,6 +133,47 @@ class TestCellRef:
         obj = simple_ref(x=Ref_uint32(cell))
         result = SimpleRefType().load_from(obj.serialize().begin_parse())
         assert result.x.ref == 777
+
+    def test_opaque_cell_ref_roundtrip(self):
+        """^Cell: opaque cell reference stored and loaded without parsing."""
+        from pytoniq_core import Builder
+
+        b = Builder()
+        _ = b.store_uint(0xDEAD, 16)
+        _ = b.store_uint(0xBEEF, 16)
+        child_cell = b.end_cell()
+
+        obj = opaque_ref(data=42, child=child_cell)
+        result = OpaqueRefType().load_from(obj.serialize().begin_parse())
+        assert result.data == 42
+        # child is a raw Cell, not parsed
+        cs = result.child.begin_parse()
+        assert cs.load_uint(16) == 0xDEAD
+        assert cs.load_uint(16) == 0xBEEF
+
+    def test_opaque_cell_ref_special_cell(self):
+        """^Cell accepts special cells without error (opaque, never parsed)."""
+        from bitarray import bitarray
+        from pytoniq_core import Builder, Cell
+        from pytoniq_core.boc.exotic import CellTypes
+
+        pb = Builder()
+        _ = pb.store_uint(1, 8)  # pruned branch tag
+        _ = pb.store_uint(1, 8)  # level mask
+        _ = pb.store_bits(bitarray("0" * 256))
+        _ = pb.store_uint(0, 16)
+        raw = pb.end_cell()
+        cs = raw.begin_parse()
+        special_cell = Cell(
+            cs.load_bits(cs.remaining_bits),
+            [],
+            cell_type=CellTypes.pruned_branch,
+        )
+
+        obj = opaque_ref(data=1, child=special_cell)
+        result = OpaqueRefType().load_from(obj.serialize().begin_parse())
+        assert result.data == 1
+        assert result.child.begin_parse().is_special()
 
     def test_generic_ref_set_cell(self):
         """Ref[X].set_cell replaces the value with a raw cell."""
