@@ -9,6 +9,7 @@ from .ast_nodes import (
     Apply,
     CellRef,
     Compare,
+    CompareOp,
     Conditional,
     Constraint,
     Constructor,
@@ -24,7 +25,7 @@ from .ast_nodes import (
     Schema,
     TypeExpr,
 )
-from .sema_builtins import BUILTIN_TYPES_NUM, create_builtin_registry
+from .sema_builtins import BUILTIN_TYPES_NUM, NatLess_type, create_builtin_registry
 from .sema_types import (
     AnonymousRecordType,
     CellRefType,
@@ -287,6 +288,57 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
     )
 
 
+def insert_implicit_constraints(user_types: list[ResolvedType]) -> None:
+    """Insert implicit constraints into source_order for all constructors.
+
+    Must run after check_type_arities (which validates param kinds).
+    """
+    for t in user_types:
+        for c in t.constructors:
+            c.source_order = _insert_implicit_constraints(c.source_order)
+
+
+def _insert_implicit_constraints(
+    source_order: list[ResolvedField | ResolvedConstraint],
+) -> list[ResolvedField | ResolvedConstraint]:
+    """Rebuild source_order inserting implicit constraints before fields that need them.
+
+    #< n requires n > 0 (no values exist below 0, and (0-1).bit_length() is wrong).
+    """
+    result: list[ResolvedField | ResolvedConstraint] = []
+    for item in source_order:
+        if isinstance(item, ResolvedField):
+            _collect_nat_less_constraints(item.type_expr, result)
+        result.append(item)
+    return result
+
+
+def _collect_nat_less_constraints(
+    expr: ResolvedTypeExpr, out: list[ResolvedField | ResolvedConstraint]
+) -> None:
+    """Recursively scan a type expression for #< n with non-constant n."""
+    match expr:
+        case TypeApply(type=t, arguments=args) if t is NatLess_type:
+            arg = args[0]
+            assert not isinstance(
+                arg, TypeApply | TypeParamRef | CellRefType | TupleType | AnonymousRecordType
+            )
+            if not isinstance(arg, NatLiteral):
+                out.append(
+                    ResolvedConstraint(op=CompareOp.GT, left=arg, right=NatLiteral(0))
+                )
+        case TypeApply(arguments=args):
+            for a in args:
+                if isinstance(a, TypeApply | TupleType | CellRefType | AnonymousRecordType):
+                    _collect_nat_less_constraints(a, out)
+        case TupleType(element=element):
+            _collect_nat_less_constraints(element, out)
+        case CellRefType(inner=inner):
+            _collect_nat_less_constraints(inner, out)
+        case AnonymousRecordType() | TypeParamRef():
+            pass
+
+
 def _resolve_field(f: ExplicitField, scope: _Scope, registry: TypeRegistry) -> ResolvedField:
     condition: ResolvedNatExpr | None = None
     raw_expr = f.type_expr
@@ -365,6 +417,16 @@ def _check_type_apply_arity(expr: ResolvedTypeExpr) -> None:
         actual = len(expr.arguments)
         if actual != expected:
             raise SemaError(f"type '{expr.type.name}' expects {expected} arguments, got {actual}")
+        for tlp, arg in zip(expr.type.type_level_params, expr.arguments, strict=True):
+            if tlp.kind == ParamKind.NAT and isinstance(arg, TypeParamRef):
+                raise SemaError(
+                    f"type '{expr.type.name}' expects a nat argument at position "
+                    + f"{tlp.position}, got Type parameter '{arg.param.name}'"
+                )
+        if expr.type is NatLess_type:
+            arg = expr.arguments[0]
+            if isinstance(arg, NatLiteral) and arg.value == 0:
+                raise SemaError("#< 0 is invalid: no values exist below 0")
         for arg in expr.arguments:
             if isinstance(arg, TypeApply | TupleType | CellRefType | AnonymousRecordType):
                 _check_type_apply_arity(arg)

@@ -15,7 +15,13 @@ from .lexer import Lexer
 from .parser import Parser
 from .sema_deser import build_deser_plan, classify_inference
 from .sema_match import build_match_tree
-from .sema_resolve import TypeRegistry, check_type_arities, register_types, resolve_constructors
+from .sema_resolve import (
+    TypeRegistry,
+    check_type_arities,
+    insert_implicit_constraints,
+    register_types,
+    resolve_constructors,
+)
 from .sema_tags import assign_tags
 from .sema_types import (
     AnonymousRecordType,
@@ -39,6 +45,7 @@ def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
 
     user_types = registry.all_user_types()
     check_type_arities(user_types)
+    insert_implicit_constraints(user_types)
 
     ast_by_type: dict[str, list[Constructor]] = {}
     for c in schema.constructors:

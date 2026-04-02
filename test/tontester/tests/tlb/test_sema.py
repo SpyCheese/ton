@@ -1,5 +1,6 @@
 import pytest
 from tlb.generator.sema import analyze_text
+from tlb.generator.ast_nodes import CompareOp
 from tlb.generator.sema_types import (
     BindOutputParam,
     BindParam,
@@ -600,6 +601,68 @@ class TestSemaErrors:
     def test_duplicate_field_name(self):
         with pytest.raises(SemaError, match="duplicate field name"):
             _ = analyze_text("foo$_ a:uint32 a:uint64 = T;")
+
+    def test_nat_less_zero(self):
+        """#< 0 is invalid — no values exist below 0."""
+        with pytest.raises(SemaError, match="#< 0 is invalid"):
+            _ = analyze_text("foo$_ n:(#< 0) = T;")
+
+    def test_nat_less_type_param(self):
+        """#< requires a nat argument, not a type."""
+        with pytest.raises(SemaError, match="expects a nat argument"):
+            _ = analyze_text("foo$_ {T:Type} n:(#< T) = Foo T;")
+
+    def test_nat_leq_type_param(self):
+        """#<= requires a nat argument, not a type."""
+        with pytest.raises(SemaError, match="expects a nat argument"):
+            _ = analyze_text("foo$_ {T:Type} n:(#<= T) = Foo T;")
+
+    def test_nat_less_type_param_nested(self):
+        """#< with Type param nested inside a generic is still rejected."""
+        with pytest.raises(SemaError, match="expects a nat argument"):
+            _ = analyze_text(
+                "nothing$0 {X:Type} = Maybe X;\n"
+                + "just$1 {X:Type} value:X = Maybe X;\n"
+                + "foo$_ {T:Type} x:(Maybe (#< T)) = Foo T;"
+            )
+
+    def test_nat_less_nonconst_implicit_constraint(self):
+        """#< n with non-constant n generates an implicit n > 0 constraint."""
+        _, types = analyze_text("foo$_ {n:#} x:(#< n) = Foo n;")
+        con = types[0].constructors[0]
+        n_param = con.params[0]
+        assert isinstance(n_param, NatParamDef)
+        assert con.deser_steps == [
+            SolveConstraint(
+                target_param=n_param,
+                value=NatTypeArg(param=types[0].type_level_params[0]),
+            ),
+            CheckConstraint(
+                op=CompareOp.GT,
+                left=NatParamRef(n_param),
+                right=NatLiteral(0),
+            ),
+            ReadField(field=con.fields[0]),
+        ]
+
+    def test_nat_less_nonconst_nested_in_generic(self):
+        """#< n nested inside a generic type still gets the implicit n > 0 constraint."""
+        _, types = analyze_text(
+            "nothing$0 {X:Type} = Maybe X;\n"
+            + "just$1 {X:Type} value:X = Maybe X;\n"
+            + "foo$_ {n:#} x:(Maybe (#< n)) = Foo n;"
+        )
+        foo_type = next(t for t in types if t.name == "Foo")
+        con = foo_type.constructors[0]
+        n_param = con.params[0]
+        assert isinstance(n_param, NatParamDef)
+        check_steps = [
+            s for s in con.deser_steps
+            if isinstance(s, CheckConstraint) and s.op == CompareOp.GT
+        ]
+        assert len(check_steps) == 1
+        assert check_steps[0].left == NatParamRef(n_param)
+        assert check_steps[0].right == NatLiteral(0)
 
     def test_wrong_arity(self):
         """Applying a type with wrong number of arguments."""

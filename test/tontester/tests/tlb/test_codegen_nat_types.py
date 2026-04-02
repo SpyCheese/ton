@@ -1,19 +1,27 @@
 """Tests for generated Python code from TL-B nat_types schema."""
 
+import pytest
 from generated.nat_types import (
     Hash32Type,
     HashWidthType,
     LeqTestType,
+    LtNestedType,
+    LtParamType,
     LtTestType,
     MultiNatType,
     ZeroWidthType,
     hash32,
     hash_width,
+    just,
     leq_test,
+    lt_nested,
+    lt_param,
     lt_test,
     multi_nat,
+    nothing,
     zero_width,
 )
+from tlb.object import TlbModelError, UintTypeConstructor
 
 # ── Nat builtins ─────────────────────────────────────────────────────
 
@@ -53,3 +61,33 @@ class TestNatBuiltins:
 
     def test_zero_width_bit_count(self):
         assert zero_width(n=0).serialize().begin_parse().remaining_bits == 0
+
+    def test_lt_param_roundtrip(self):
+        obj = lt_param(4, x=3)
+        result = LtParamType().load_from(obj.serialize().begin_parse(), 4)
+        assert result.x == 3
+        assert result.n == 4
+
+    def test_lt_param_zero_rejected(self):
+        """#< n with n=0 is rejected at runtime by the implicit constraint."""
+        with pytest.raises(TlbModelError, match="constraint failed"):
+            _ = LtParamType().load_from(lt_param(1, x=0).serialize().begin_parse(), 0)
+
+    def test_lt_nested_roundtrip(self):
+        """#< n nested inside Maybe — round-trips with just value."""
+        ti = UintTypeConstructor((4 - 1).bit_length())
+        obj = lt_nested(4, x=just(ti, value=3))
+        result = LtNestedType().load_from(obj.serialize().begin_parse(), 4)
+        assert isinstance(result.x, just)
+        assert result.x.value == 3
+
+    def test_lt_nested_nothing(self):
+        """#< n nested inside Maybe — round-trips with nothing."""
+        obj = lt_nested(4, x=nothing())
+        result = LtNestedType().load_from(obj.serialize().begin_parse(), 4)
+        assert isinstance(result.x, nothing)
+
+    def test_lt_nested_zero_rejected(self):
+        """#< n nested inside Maybe — n=0 rejected before reading."""
+        with pytest.raises(TlbModelError, match="constraint failed"):
+            _ = LtNestedType().load_from(lt_nested(1, x=nothing()).serialize().begin_parse(), 0)
