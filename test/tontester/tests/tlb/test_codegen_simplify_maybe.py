@@ -1,5 +1,6 @@
 """Tests for Maybe simplification (--simplify=maybe)."""
 
+from bitarray import bitarray
 from generated.simplify_maybe import (
     EnumFieldsType,
     InferredUnaryType,
@@ -8,7 +9,6 @@ from generated.simplify_maybe import (
     NestedMaybeType,
     SimpleMaybeType,
     SizedType,
-    bit,
     enum_fields,
     inferred_unary,
     just,
@@ -131,18 +131,18 @@ class TestUnary:
     """Unary ~n → int, with output param extraction."""
 
     def test_sized_zero(self):
-        obj = sized(0, len=0, data=[])
+        obj = sized(0, len=0, data=bitarray())
         result = SizedType().load_from(obj.serialize().begin_parse())
         assert result.len == 0
         assert result.n == 0
-        assert result.data == []
+        assert result.data == bitarray()
 
     def test_sized_three(self):
-        obj = sized(3, len=3, data=[bit(field=1), bit(field=0), bit(field=1)])
+        obj = sized(3, len=3, data=bitarray("101"))
         result = SizedType().load_from(obj.serialize().begin_parse())
         assert result.len == 3
         assert result.n == 3
-        assert len(result.data) == 3
+        assert result.data == bitarray("101")
 
     def test_inferred_through_pair(self):
         """Output param inferred through Pair: x.first is the Unary value."""
@@ -162,16 +162,14 @@ class TestUnary:
         assert result.y == 0
 
     def test_serialized_bits(self):
-        """Unary 3 = 1110 (4 bits)."""
-        obj = sized(3, len=3, data=[bit(field=1), bit(field=0), bit(field=1)])
+        """Unary 3 = 1110 (4 bits), then 3 data bits."""
+        obj = sized(3, len=3, data=bitarray("101"))
         cs = obj.serialize().begin_parse()
         assert cs.load_uint(1) == 1  # unary 1
         assert cs.load_uint(1) == 1  # unary 1
         assert cs.load_uint(1) == 1  # unary 1
         assert cs.load_uint(1) == 0  # unary terminator
-        assert cs.load_uint(1) == 1  # data[0]
-        assert cs.load_uint(1) == 0  # data[1]
-        assert cs.load_uint(1) == 1  # data[2]
+        assert cs.load_bits(3) == bitarray("101")  # data
 
 
 class TestMaybeRef:

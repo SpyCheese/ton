@@ -70,6 +70,13 @@ _ENUM_LITERAL_INFOS: dict[WellKnownType, EnumLiteralInfo] = {
         tag_len=1,
         values={0: "False"},
     ),
+    WellKnownType.BIT: EnumLiteralInfo(
+        py_type_str="bool",
+        type_info_name="BoolTypeInfo",
+        tag_bits=1,
+        tag_len=1,
+        values={0: "False", 1: "True"},
+    ),
 }
 
 
@@ -126,6 +133,12 @@ class StrategyBuilder:
                 return GenericCellRefStrategy(inner, self.ctx)
 
             case TupleType(count=count_expr, element=element_expr):
+                if (
+                    isinstance(element_expr, TypeApply)
+                    and element_expr.type.well_known == WellKnownType.BIT
+                    and self.ctx.simplify.is_enabled(WellKnownType.BIT)
+                ):
+                    return BitsStrategy(NatExpr(count_expr, self.scope), self.ctx)
                 count = NatExpr(count_expr, self.scope)
                 element = self.build(element_expr, inside_generic_arg=inside_generic_arg)
                 return TupleStrategy(count, element, self.ctx)

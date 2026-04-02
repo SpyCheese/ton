@@ -28,6 +28,7 @@ class WellKnownType(Enum):
     BOOL_TRUE = auto()
     BOOL_FALSE = auto()
     UNARY = auto()
+    BIT = auto()
 
 
 @dataclass(frozen=True)

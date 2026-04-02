@@ -1,6 +1,6 @@
 """Detection of well-known TL-B type patterns."""
 
-from .types import ParamKind, ResolvedType, TypeApply, TypeParamRef, WellKnownType
+from .types import NatLiteral, ParamKind, ResolvedType, TypeApply, TypeParamRef, WellKnownType
 
 
 def classify_well_known(rt: ResolvedType) -> None:
@@ -17,6 +17,8 @@ def classify_well_known(rt: ResolvedType) -> None:
         rt.well_known = WellKnownType.BOOL_FALSE
     elif _is_unary(rt):
         rt.well_known = WellKnownType.UNARY
+    elif _is_bit(rt):
+        rt.well_known = WellKnownType.BIT
 
 
 def _is_maybe(rt: ResolvedType) -> bool:
@@ -110,3 +112,18 @@ def _is_unary(rt: ResolvedType) -> bool:
     if not isinstance(field_type, TypeApply) or field_type.type is not rt:
         return False
     return True
+
+
+def _is_bit(rt: ResolvedType) -> bool:
+    """bit$_ (## 1) = Bit;"""
+    if rt.name != "Bit":
+        return False
+    if not rt.is_typedef:
+        return False
+    target = rt.typedef_target
+    if not isinstance(target, TypeApply):
+        return False
+    if target.type.name != "##" or len(target.arguments) != 1:
+        return False
+    arg = target.arguments[0]
+    return isinstance(arg, NatLiteral) and arg.value == 1
