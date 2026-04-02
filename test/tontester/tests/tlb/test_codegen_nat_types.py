@@ -6,11 +6,13 @@ from generated.nat_types import (
     LeqTestType,
     LtTestType,
     MultiNatType,
+    ZeroWidthType,
     hash32,
     hash_width,
     leq_test,
     lt_test,
     multi_nat,
+    zero_width,
 )
 
 # ── Nat builtins ─────────────────────────────────────────────────────
@@ -44,3 +46,10 @@ class TestNatBuiltins:
     def test_multi_nat_roundtrip(self):
         r = MultiNatType().load_from(multi_nat(a=7, b=5, c=42).serialize().begin_parse())
         assert (r.a, r.b, r.c) == (7, 5, 42)
+
+    def test_zero_width_roundtrip(self):
+        r = ZeroWidthType().load_from(zero_width(n=0).serialize().begin_parse())
+        assert r.n == 0
+
+    def test_zero_width_bit_count(self):
+        assert zero_width(n=0).serialize().begin_parse().remaining_bits == 0

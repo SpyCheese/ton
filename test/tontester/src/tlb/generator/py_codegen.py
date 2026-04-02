@@ -362,7 +362,11 @@ class ConstructorGenerator:
                     strat.emit_store(f"self.{name}", "builder", sb)
 
     def _generate_load_from(self, sb: SourceBuilder) -> None:
-        cs_used = any(isinstance(s, ReadField) for s in self.c.deser_steps) or self.c.tag_len > 0
+        cs_used = self.c.tag_len > 0 or any(
+            self.strategies[IdentityKey(s.field)].load_uses_cs()
+            for s in self.c.deser_steps
+            if isinstance(s, ReadField)
+        )
         cs_name = "cs" if cs_used else "_cs"
         params = [f"{cs_name}: Slice"]
 

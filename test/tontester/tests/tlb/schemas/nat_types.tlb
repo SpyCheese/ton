@@ -9,3 +9,6 @@ lt_test$_ n:(#< 16) = LtTest;
 
 // Multiple nat fields
 multi_nat$_ a:(## 3) b:(#<= 7) c:# = MultiNat;
+
+// Zero-width nat (regression: store_uint crashes with width 0)
+zero_width$_ n:(#<= 0) = ZeroWidth;

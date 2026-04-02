@@ -156,6 +156,10 @@ class TypeStrategy(ABC):
         """Emit statement(s) to load from `cs` into variable `target`."""
         ...
 
+    def load_uses_cs(self) -> bool:
+        """Whether emit_load actually reads from the cs slice."""
+        return True
+
     @abstractmethod
     def descriptor(self) -> str:
         """A unique string identifying this strategy for dedup purposes."""
@@ -200,6 +204,10 @@ class UintStrategy(TypeStrategy):
             )
 
     @override
+    def load_uses_cs(self) -> bool:
+        return not self.width.is_zero
+
+    @override
     def descriptor(self) -> str:
         return f"uint{self.width.local}"
 
@@ -240,6 +248,10 @@ class IntStrategy(TypeStrategy):
             sb.line(
                 f"{target} = {cs}.load_int({self.width.local}) if {self.width.local} > 0 else 0"
             )
+
+    @override
+    def load_uses_cs(self) -> bool:
+        return not self.width.is_zero
 
     @override
     def descriptor(self) -> str:
