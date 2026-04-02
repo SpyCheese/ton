@@ -281,7 +281,7 @@ class ConstructorGenerator:
                 case TypeParamDef():
                     _ = self.scope.bind_field(p, f"_t{p.name}")
                 case NatParamDef():
-                    _ = self.scope.bind_field(p, p.name)
+                    _ = self.scope.bind_private_field(p, p.name)
 
         for f in self.c.fields:
             _ = self.scope.bind_field(f, f.name or "field")
@@ -315,6 +315,8 @@ class ConstructorGenerator:
             sb.line("@dataclass")
             sb.line(f"class {self.cls_name}(TLBRecord):")
 
+        nat_params = [p for p in self.c.params if isinstance(p, NatParamDef)]
+
         with sb.block():
             for p in self.c.params:
                 match p:
@@ -322,12 +324,20 @@ class ConstructorGenerator:
                         if p in self.type_params:
                             sb.line(f"{self.scope.lookup(p)}: TypeInfo[{self.type_var_name(p)}]")
                     case NatParamDef():
-                        sb.line(f"{self.scope.lookup(p)}: int")
+                        sb.line(f"{self.scope.lookup_private(p)}: int")
             for f in self.c.fields:
                 py_type = self.strategies[IdentityKey(f)].py_type()
                 if f.condition is not None:
                     py_type = f"{py_type} | None"
                 sb.line(f"{self.scope.lookup(f)}: {py_type}")
+
+            if nat_params:
+                sb.blank()
+                for p in nat_params:
+                    sb.line("@property")
+                    sb.line(f"def {self.scope.lookup(p)}(self) -> int:")
+                    with sb.block():
+                        sb.line(f"return self.{self.scope.lookup_private(p)}")
 
             sb.blank()
             self._generate_serialize_to(sb)

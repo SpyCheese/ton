@@ -7,11 +7,13 @@ ResolvedConstructor, TypeParamDef, NatParamDef, ResolvedField) to unique Python 
 Three binding classes control which objects can be bound to which kind of name:
 - BindableForName: primary names (types, constructors, type-level params)
 - BindableForField: field/param names with local-safe variants
+- BindableForPrivateField: nat param names with private field + public property + local variable
 - BindableForGeneric: type variable names (secondary binding on TypeLevelParam)
 """
 
 import keyword
 
+from .identity_key import IdentityKey
 from .sema_types import (
     NatParamDef,
     ResolvedConstructor,
@@ -22,7 +24,8 @@ from .sema_types import (
 )
 
 type BindableForName = ResolvedType | ResolvedConstructor | TypeLevelParam
-type BindableForField = ResolvedField | TypeParamDef | NatParamDef
+type BindableForField = ResolvedField | TypeParamDef
+type BindableForPrivateField = NatParamDef
 type BindableForGeneric = TypeLevelParam
 
 _PYTHON_KEYWORDS: frozenset[str] = frozenset(keyword.kwlist) | frozenset(keyword.softkwlist)
@@ -77,7 +80,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
     }
 )
 
-type Bindable = BindableForName | BindableForField
+type Bindable = BindableForName | BindableForField | BindableForPrivateField
 
 
 class NameScope:
@@ -89,15 +92,17 @@ class NameScope:
     """
 
     _used: set[str]
-    _bindings: dict[int, str]
-    _local_bindings: dict[int, str]
-    _generic_bindings: dict[int, str]
+    _bindings: dict[IdentityKey[Bindable], str]
+    _local_bindings: dict[IdentityKey[Bindable], str]
+    _private_bindings: dict[IdentityKey[BindableForPrivateField], str]
+    _generic_bindings: dict[IdentityKey[BindableForGeneric], str]
     _parent: NameScope | None
 
     def __init__(self, parent: NameScope | None = None) -> None:
         self._used = set()
         self._bindings = {}
         self._local_bindings = {}
+        self._private_bindings = {}
         self._generic_bindings = {}
         self._parent = parent
 
@@ -123,14 +128,14 @@ class NameScope:
         """Register a primary name for a sema object. Returns the actual name used."""
         name = self._make_unique(preferred)
         self._used.add(name)
-        self._bindings[id(obj)] = name
+        self._bindings[IdentityKey(obj)] = name
         return name
 
     def bind_generic(self, obj: BindableForGeneric, preferred: str) -> str:
         """Register a type variable name for a TypeLevelParam. Returns the actual name used."""
         name = self._make_unique(preferred)
         self._used.add(name)
-        self._generic_bindings[id(obj)] = name
+        self._generic_bindings[IdentityKey(obj)] = name
         return name
 
     def bind_field(self, obj: BindableForField, preferred: str) -> str:
@@ -147,23 +152,63 @@ class NameScope:
             field_name = f"{preferred}_{suffix}"
             suffix += 1
         self._used.add(field_name)
-        self._bindings[id(obj)] = field_name
+        self._bindings[IdentityKey(obj)] = field_name
 
         local_name = field_name
+        key = IdentityKey(obj)
         suffix = 1
         while local_name in _RESERVED or local_name in self._local_bindings.values():
             local_name = f"{preferred}_{suffix}"
             suffix += 1
-        self._local_bindings[id(obj)] = local_name
+        self._local_bindings[key] = local_name
         return field_name
 
-    def lookup_local(self, obj: BindableForField | BindableForName) -> str:
+    def bind_private_field(self, obj: BindableForPrivateField, preferred: str) -> str:
+        """Register a private field with a public property and local variable name.
+
+        The public property name (returned, used for self.X in property access)
+        avoids only Python keywords and sibling collisions. The private field name
+        (retrieved via lookup_private) is the property name prefixed with '_'.
+        The local variable name (retrieved via lookup_local) additionally avoids
+        _RESERVED names.
+        """
+        field_name = preferred
+        suffix = 1
+        while field_name in _FIELD_RESERVED or field_name in self._used:
+            field_name = f"{preferred}_{suffix}"
+            suffix += 1
+        self._used.add(field_name)
+        self._bindings[IdentityKey(obj)] = field_name
+
+        private_name = f"_{field_name}"
+        self._used.add(private_name)
+        self._private_bindings[IdentityKey(obj)] = private_name
+
+        local_name = field_name
+        key = IdentityKey[BindableForPrivateField](obj)
+        suffix = 1
+        while local_name in _RESERVED or local_name in self._local_bindings.values():
+            local_name = f"{preferred}_{suffix}"
+            suffix += 1
+        self._local_bindings[key] = local_name
+        return field_name
+
+    def lookup_private(self, obj: BindableForPrivateField) -> str:
+        """Get the private field name (underscore-prefixed) for a sema object."""
+        key = IdentityKey(obj)
+        if key in self._private_bindings:
+            return self._private_bindings[key]
+        if self._parent is not None:
+            return self._parent.lookup_private(obj)
+        raise KeyError(f"no private binding for {obj!r}")
+
+    def lookup_local(self, obj: BindableForField | BindableForPrivateField | BindableForName) -> str:
         """Get the local variable name for a sema object.
 
         For field-bound objects, returns the local-safe name (avoiding cs/cls etc.).
         For other objects, falls back to the regular binding.
         """
-        key = id(obj)
+        key = IdentityKey(obj)
         if key in self._local_bindings:
             return self._local_bindings[key]
         if key in self._bindings:
@@ -180,7 +225,7 @@ class NameScope:
 
     def lookup(self, obj: Bindable) -> str:
         """Get the Python name for a sema object. Must have been bound."""
-        key = id(obj)
+        key = IdentityKey(obj)
         if key in self._bindings:
             return self._bindings[key]
         if self._parent is not None:
@@ -189,7 +234,7 @@ class NameScope:
 
     def lookup_generic(self, obj: BindableForGeneric) -> str:
         """Get the type variable name for a TypeLevelParam."""
-        key = id(obj)
+        key = IdentityKey(obj)
         if key in self._generic_bindings:
             return self._generic_bindings[key]
         if self._parent is not None:
