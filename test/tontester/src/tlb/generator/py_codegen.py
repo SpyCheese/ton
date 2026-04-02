@@ -106,7 +106,7 @@ class TypeGenerator:
                     if isinstance(expr, TypeParamRef):
                         nice_name = expr.param.name
                         break
-                type_var = self.scope.bind(tlp.type_var, nice_name)
+                type_var = self.scope.bind_generic(tlp, nice_name)
                 _ = self.scope.bind(tlp, f"_t{type_var}")
                 self.type_vars.append(type_var)
             else:
@@ -290,7 +290,7 @@ class ConstructorGenerator:
 
     def type_var_name(self, p: TypeParamDef) -> str:
         """Get the scope-bound type variable name for a TypeParamDef."""
-        return self.type_scope.lookup(p.type_level_param.type_var)
+        return self.type_scope.lookup_generic(p.type_level_param)
 
     def generate(self, sb: SourceBuilder) -> None:
         self.ctx.use("final", "dataclass", "TLBRecord", "Builder", "Slice", "override")
@@ -381,7 +381,7 @@ class ConstructorGenerator:
                 expr = self.c.result_param_exprs.get(tlp.position)
                 assert isinstance(expr, TypeParamRef)
                 if expr.param in self.type_params:
-                    type_var = self.type_scope.lookup(tlp.type_var)
+                    type_var = self.type_scope.lookup_generic(tlp)
                     params.append(f"{name}: TypeInfo[{type_var}]")
 
         params_str = ", ".join(params)

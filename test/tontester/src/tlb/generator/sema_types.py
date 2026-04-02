@@ -34,25 +34,16 @@ type ParamDef = TypeParamDef | NatParamDef
 
 
 @dataclass(frozen=True)
-class TypeVarBinding:
-    """Sentinel for a type variable name binding (the bare X in class foo[X])."""
-
-    pass
-
-
-@dataclass(frozen=True)
 class TypeLevelParam:
     """Sentinel for a type-level parameter position.
 
     Used as a scope binding key so that NatTypeArg(position) can resolve
     to the correct Python variable name. One per position on the type.
-    For TYPE params, type_var is a binding key for the bare type variable name.
     """
 
     position: int
     kind: ParamKind
     is_output: bool
-    type_var: TypeVarBinding = field(default_factory=TypeVarBinding)
 
 
 @dataclass

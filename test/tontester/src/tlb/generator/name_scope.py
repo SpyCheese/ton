@@ -3,6 +3,11 @@
 Tracks registered names, avoids collisions with Python keywords, builtins,
 and previously registered names. Maps sema objects (ResolvedType,
 ResolvedConstructor, TypeParamDef, NatParamDef, ResolvedField) to unique Python identifiers.
+
+Three binding classes control which objects can be bound to which kind of name:
+- BindableForName: primary names (types, constructors, type-level params)
+- BindableForField: field/param names with local-safe variants
+- BindableForGeneric: type variable names (secondary binding on TypeLevelParam)
 """
 
 import keyword
@@ -14,8 +19,11 @@ from .sema_types import (
     ResolvedField,
     ResolvedType,
     TypeLevelParam,
-    TypeVarBinding,
 )
+
+type BindableForName = ResolvedType | ResolvedConstructor | TypeLevelParam
+type BindableForField = ResolvedField | TypeParamDef | NatParamDef
+type BindableForGeneric = TypeLevelParam
 
 _PYTHON_KEYWORDS: frozenset[str] = frozenset(keyword.kwlist) | frozenset(keyword.softkwlist)
 
@@ -69,9 +77,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
     }
 )
 
-type Bindable = (
-    ResolvedType | ResolvedConstructor | ResolvedField | TypeParamDef | NatParamDef | TypeLevelParam | TypeVarBinding
-)
+type Bindable = BindableForName | BindableForField
 
 
 class NameScope:
@@ -85,12 +91,14 @@ class NameScope:
     _used: set[str]
     _bindings: dict[int, str]
     _local_bindings: dict[int, str]
+    _generic_bindings: dict[int, str]
     _parent: NameScope | None
 
     def __init__(self, parent: NameScope | None = None) -> None:
         self._used = set()
         self._bindings = {}
         self._local_bindings = {}
+        self._generic_bindings = {}
         self._parent = parent
 
     def _is_taken(self, name: str) -> bool:
@@ -111,14 +119,21 @@ class NameScope:
             suffix += 1
         return candidate
 
-    def bind(self, obj: Bindable, preferred: str) -> str:
-        """Register a name for a sema object. Returns the actual name used."""
+    def bind(self, obj: BindableForName, preferred: str) -> str:
+        """Register a primary name for a sema object. Returns the actual name used."""
         name = self._make_unique(preferred)
         self._used.add(name)
         self._bindings[id(obj)] = name
         return name
 
-    def bind_field(self, obj: Bindable, preferred: str) -> str:
+    def bind_generic(self, obj: BindableForGeneric, preferred: str) -> str:
+        """Register a type variable name for a TypeLevelParam. Returns the actual name used."""
+        name = self._make_unique(preferred)
+        self._used.add(name)
+        self._generic_bindings[id(obj)] = name
+        return name
+
+    def bind_field(self, obj: BindableForField, preferred: str) -> str:
         """Register a field name and a corresponding local variable name.
 
         The field name (returned, used for self.X) avoids only Python keywords
@@ -142,7 +157,7 @@ class NameScope:
         self._local_bindings[id(obj)] = local_name
         return field_name
 
-    def lookup_local(self, obj: Bindable) -> str:
+    def lookup_local(self, obj: BindableForField | BindableForName) -> str:
         """Get the local variable name for a sema object.
 
         For field-bound objects, returns the local-safe name (avoiding cs/cls etc.).
@@ -171,6 +186,15 @@ class NameScope:
         if self._parent is not None:
             return self._parent.lookup(obj)
         raise KeyError(f"no binding for {obj!r}")
+
+    def lookup_generic(self, obj: BindableForGeneric) -> str:
+        """Get the type variable name for a TypeLevelParam."""
+        key = id(obj)
+        if key in self._generic_bindings:
+            return self._generic_bindings[key]
+        if self._parent is not None:
+            return self._parent.lookup_generic(obj)
+        raise KeyError(f"no generic binding for {obj!r}")
 
     def child(self) -> NameScope:
         """Create a child scope that inherits this scope's names."""
