@@ -2,53 +2,96 @@
 
 from typing import final, override
 
+from ...sema.types import (
+    AnonymousRecordType,
+    CellRefType,
+    NatAdd,
+    NatFieldValue,
+    NatGetBit,
+    NatLiteral,
+    NatMul,
+    NatParamRef,
+    NatSub,
+    ParamKind,
+    TupleType,
+    TypeApply,
+    TypeParamRef,
+    is_nat,
+)
+from ..context import PyContext
+from ..name_scope import NameScope
+from ..nat_expr import NatExpr
 from ..source_builder import SourceBuilder
-from ._base import TypeStrategy
+from ._base import StrategyBuilderProtocol, TypeStrategy
 
 
 @final
 class UserTypeStrategy(TypeStrategy):
-    """User-defined type, possibly generic.
+    """User-defined type, possibly generic. Self-contained — computes all
+    rendering from the TypeApply and scope."""
 
-    ti_args: runtime expressions for each type/nat arg (TypeInfo exprs or int exprs).
-    type_var_args: Python type annotations for type args only (for generic subscription).
-    """
+    def __init__(self, type_expr: TypeApply, ctx: PyContext, scope: NameScope,
+                 builder: StrategyBuilderProtocol) -> None:
+        self._type_name = ctx.scope.lookup(type_expr.type)
+        self._ctx = ctx
 
-    def __init__(
-        self,
-        type_name: str,
-        ti_args: list[str] | None = None,
-        ti_args_self: list[str] | None = None,
-        type_var_args: list[str] | None = None,
-    ) -> None:
-        self.type_name = type_name
-        self.ti_args = ti_args or []
-        self.ti_args_self = ti_args_self or self.ti_args
-        self.type_var_args = type_var_args or []
+        self._ti_args: list[str] = []
+        self._ti_args_self: list[str] = []
+        self._type_var_args: list[str] = []
+        self._nat_assertions: list[tuple[int, str]] = []
+        self._type_assertions: list[tuple[int, str]] = []
+
+        t = type_expr.type
+        for tlp, arg in zip(t.type_level_params, type_expr.arguments, strict=True):
+            if tlp.is_output:
+                continue
+            if tlp.kind == ParamKind.NAT:
+                assert is_nat(arg)
+                self._ti_args.append(NatExpr(arg, scope).local)
+                self._ti_args_self.append(NatExpr(arg, scope).self_)
+                if (
+                    isinstance(
+                        arg,
+                        NatLiteral | NatParamRef | NatFieldValue | NatAdd | NatSub | NatMul | NatGetBit,
+                    )
+                    and not arg.references_type_arg
+                ):
+                    self._nat_assertions.append((tlp.position, NatExpr(arg, scope).self_))
+            else:
+                assert isinstance(
+                    arg, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
+                )
+                arg_strategy = builder.build(arg, inside_generic_arg=True)
+                self._ti_args.append(arg_strategy.type_info_expr())
+                self._ti_args_self.append(arg_strategy.type_info_expr_self())
+                self._type_var_args.append(arg_strategy.py_type())
+                self._type_assertions.append((tlp.position, arg_strategy.type_info_expr_self()))
+
+    def _info_name(self) -> str:
+        info_name = f"{self._type_name}Type"
+        if self._type_var_args:
+            info_name = f"{info_name}[{', '.join(self._type_var_args)}]"
+        return info_name
 
     @override
     def py_type(self) -> str:
-        if self.type_var_args:
-            return f"{self.type_name}[{', '.join(self.type_var_args)}]"
-        return self.type_name
+        if self._type_var_args:
+            return f"{self._type_name}[{', '.join(self._type_var_args)}]"
+        return self._type_name
 
     @override
     def type_info_expr(self) -> str:
-        info_name = f"{self.type_name}Type"
-        if self.type_var_args:
-            info_name = f"{info_name}[{', '.join(self.type_var_args)}]"
-        if self.ti_args:
-            return f"{info_name}.instantiate({', '.join(self.ti_args)})"
-        return f"{info_name}()"
+        info = self._info_name()
+        if self._ti_args:
+            return f"{info}.instantiate({', '.join(self._ti_args)})"
+        return f"{info}()"
 
     @override
     def type_info_expr_self(self) -> str:
-        info_name = f"{self.type_name}Type"
-        if self.type_var_args:
-            info_name = f"{info_name}[{', '.join(self.type_var_args)}]"
-        if self.ti_args_self:
-            return f"{info_name}.instantiate({', '.join(self.ti_args_self)})"
-        return f"{info_name}()"
+        info = self._info_name()
+        if self._ti_args_self:
+            return f"{info}.instantiate({', '.join(self._ti_args_self)})"
+        return f"{info}()"
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
@@ -56,23 +99,32 @@ class UserTypeStrategy(TypeStrategy):
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        info_name = f"{self.type_name}Type"
-        if self.type_var_args:
-            info_name = f"{info_name}[{', '.join(self.type_var_args)}]"
-        if self.ti_args:
-            args = ", ".join([cs] + self.ti_args)
-            sb.line(f"{target} = {info_name}().load_from({args})")
+        info = self._info_name()
+        if self._ti_args:
+            args = ", ".join([cs] + self._ti_args)
+            sb.line(f"{target} = {info}().load_from({args})")
         else:
-            sb.line(f"{target} = {info_name}().load_from({cs})")
+            sb.line(f"{target} = {info}().load_from({cs})")
+
+    @override
+    def emit_serialize_assertions(self, field_name: str, sb: SourceBuilder) -> bool:
+        emitted = False
+        for pos, expected in self._nat_assertions:
+            sb.line(f"assert {field_name}.get_output({pos}) == {expected}")
+            emitted = True
+        for pos, ti_expr in self._type_assertions:
+            sb.line(f"{field_name}.check_type({pos}, {ti_expr})")
+            emitted = True
+        return emitted
 
     @override
     def descriptor(self) -> str:
-        if not self.ti_args:
-            return self.type_name
+        if not self._ti_args:
+            return self._type_name
         parts: list[str] = []
-        for a in self.ti_args:
+        for a in self._ti_args:
             sanitized = a
             for ch in "()[], .":
                 sanitized = sanitized.replace(ch, "_")
             parts.append(sanitized)
-        return f"{self.type_name}_{'_'.join(parts)}"
+        return f"{self._type_name}_{'_'.join(parts)}"

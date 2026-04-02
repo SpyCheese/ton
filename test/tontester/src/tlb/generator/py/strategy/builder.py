@@ -15,7 +15,6 @@ from ...sema.types import (
     AnonymousRecordType,
     CellRefType,
     NatLiteral,
-    ParamKind,
     ResolvedExpr,
     ResolvedNatExpr,
     ResolvedTypeExpr,
@@ -41,7 +40,6 @@ from .slice import SliceTypeStrategy
 from .tuple import TupleStrategy
 from .type_param import TypeParamStrategy
 from .uint import UintStrategy
-from .user_type import UserTypeStrategy
 
 _ENUM_LITERAL_INFOS: dict[WellKnownType, EnumLiteralInfo] = {
     WellKnownType.UNIT: EnumLiteralInfo(
@@ -132,8 +130,8 @@ class StrategyBuilder:
                 element = self.build(element_expr, inside_generic_arg=inside_generic_arg)
                 return TupleStrategy(count, element, self.ctx)
 
-            case AnonymousRecordType(type=type):
-                return UserTypeStrategy(self.ctx.scope.lookup(type))
+            case AnonymousRecordType(type=anon_type):
+                return self._build_user_type(TypeApply(type=anon_type, arguments=[]))
 
     def _build_type_apply(self, type_expr: TypeApply) -> TypeStrategy:
         t = type_expr.type
@@ -172,23 +170,25 @@ class StrategyBuilder:
         if t is CellRef_type:
             return CellRefBuiltinStrategy(self.ctx)
         if not t.is_builtin:
-            if t.well_known == WellKnownType.MAYBE and self.ctx.simplify.is_enabled(
-                WellKnownType.MAYBE
-            ):
-                return self._build_maybe(type_expr)
-            if t.well_known is not None and self.ctx.simplify.is_enabled(t.well_known):
-                info = _ENUM_LITERAL_INFOS.get(t.well_known)
-                if info is not None:
+            if t.well_known and self.ctx.simplify.is_enabled(t.well_known):
+                if t.well_known == WellKnownType.MAYBE:
+                    return self._build_maybe(type_expr)
+                if info := _ENUM_LITERAL_INFOS.get(t.well_known):
                     return EnumLiteralStrategy(info, self.ctx)
             return self._build_user_type(type_expr)
 
         assert False, f"unhandled builtin type: {t.name}"
 
+    def _build_user_type(self, type_expr: TypeApply) -> TypeStrategy:
+        from .user_type import UserTypeStrategy
+
+        return UserTypeStrategy(type_expr, self.ctx, self.scope, builder=self)
+
     def _build_maybe(self, type_expr: TypeApply) -> TypeStrategy:
         """Build strategy for simplified Maybe X → X | None.
 
         Falls back to UserTypeStrategy if the inner type is nullable
-        (e.g., Maybe (Maybe X) would collapse None | None).
+        (e.g., Maybe (Maybe X) would otherwise collapse None | None).
         """
         assert len(type_expr.arguments) == 1
         inner_arg = type_expr.arguments[0]
@@ -199,29 +199,3 @@ class StrategyBuilder:
         if inner.is_nullable:
             return self._build_user_type(type_expr)
         return MaybeStrategy(inner, self.ctx)
-
-    def _build_user_type(self, type_expr: TypeApply) -> UserTypeStrategy:
-        """Build strategy for a user-defined type, handling all arg kinds."""
-        t = type_expr.type
-        ti_args: list[str] = []
-        ti_args_self: list[str] = []
-        type_var_args: list[str] = []
-
-        for tlp, arg in zip(t.type_level_params, type_expr.arguments, strict=True):
-            if tlp.is_output:
-                continue
-            param_kind = tlp.kind
-            if param_kind == ParamKind.NAT:
-                assert is_nat(arg)
-                ti_args.append(NatExpr(arg, self.scope).local)
-                ti_args_self.append(NatExpr(arg, self.scope).self_)
-            else:
-                assert isinstance(
-                    arg, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
-                )
-                arg_strategy = self.build(arg, inside_generic_arg=True)
-                ti_args.append(arg_strategy.type_info_expr())
-                ti_args_self.append(arg_strategy.type_info_expr_self())
-                type_var_args.append(arg_strategy.py_type())
-
-        return UserTypeStrategy(self.ctx.scope.lookup(t), ti_args, ti_args_self, type_var_args)

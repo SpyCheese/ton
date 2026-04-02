@@ -1,8 +1,14 @@
 """TypeStrategy ABC."""
 
 from abc import ABC, abstractmethod
+from typing import Protocol
 
+from ...sema.types import ResolvedTypeExpr
 from ..source_builder import SourceBuilder
+
+
+class StrategyBuilderProtocol(Protocol):
+    def build(self, type_expr: ResolvedTypeExpr, *, inside_generic_arg: bool = False) -> TypeStrategy: ...
 
 
 class TypeStrategy(ABC):
@@ -47,6 +53,14 @@ class TypeStrategy(ABC):
     @property
     def is_nullable(self) -> bool:
         """Whether this type can already represent None (e.g., Maybe, generic type params)."""
+        return False
+
+    def emit_serialize_assertions(self, _field_name: str, _sb: SourceBuilder) -> bool:
+        """Emit assertions verifying sub-type consistency during serialize_to.
+
+        field_name is the self.X accessor for this field. Returns True if
+        any assertions were emitted. Default: no assertions (for primitives).
+        """
         return False
 
     @abstractmethod

@@ -85,6 +85,11 @@ class GenericCellRefStrategy(TypeStrategy):
         return f"RefType[{self.inner.py_type()}].instantiate({self.inner.type_info_expr()})"
 
     @override
+    def type_info_expr_self(self) -> str:
+        self.ctx.use("RefType")
+        return f"RefType[{self.inner.py_type()}].instantiate({self.inner.type_info_expr_self()})"
+
+    @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
         sb.line(f"{value}.serialize_to({builder})")
 

@@ -2,19 +2,11 @@
 
 from ..identity_key import IdentityKey
 from ..sema.types import (
-    AnonymousRecordType,
     BindOutputParam,
     BindParam,
     CheckConstraint,
     InferenceStep,
-    NatAdd,
-    NatFieldValue,
-    NatGetBit,
-    NatLiteral,
-    NatMul,
     NatParamDef,
-    NatParamRef,
-    NatSub,
     NatTypeArg,
     ParamDef,
     ParamKind,
@@ -22,7 +14,6 @@ from ..sema.types import (
     ResolvedConstructor,
     ResolvedField,
     SolveConstraint,
-    TypeApply,
     TypeParamDef,
     TypeParamRef,
 )
@@ -168,41 +159,10 @@ class ConstructorGenerator:
             sb.line(f"assert {render_constraint(step, self.scope, use_self=True)}")
             emitted = True
         for f in self.c.fields:
-            if self._emit_field_type_arg_assertions(f, sb):
+            strat = self.strategies[IdentityKey(f)]
+            field_name = self.scope.lookup(f)
+            if strat.emit_serialize_assertions(f"self.{field_name}", sb):
                 emitted = True
-        return emitted
-
-    def _emit_field_type_arg_assertions(self, f: ResolvedField, sb: SourceBuilder) -> bool:
-        """Assert that a field's sub-type params match expected values."""
-        if not isinstance(f.type_expr, TypeApply):
-            return False
-        t = f.type_expr.type
-        if t.is_builtin:
-            return False
-        if t.well_known is not None and self.ctx.simplify.is_enabled(t.well_known):
-            return False
-        field_name = self.scope.lookup(f)
-        emitted = False
-        for tlp, arg in zip(t.type_level_params, f.type_expr.arguments, strict=True):
-            if tlp.kind == ParamKind.NAT:
-                if not isinstance(
-                    arg,
-                    NatLiteral | NatParamRef | NatFieldValue | NatAdd | NatSub | NatMul | NatGetBit,
-                ):
-                    continue
-                if arg.references_type_arg:
-                    continue
-                expected = NatExpr(arg, self.scope).self_
-                sb.line(f"assert self.{field_name}.get_output({tlp.position}) == {expected}")
-                emitted = True
-            else:
-                if isinstance(arg, TypeParamRef | TypeApply | AnonymousRecordType):
-                    arg_strategy = StrategyBuilder(self.ctx, self.scope).build(
-                        arg, inside_generic_arg=True
-                    )
-                    ti_expr = arg_strategy.type_info_expr_self()
-                    sb.line(f"self.{field_name}.check_type({tlp.position}, {ti_expr})")
-                    emitted = True
         return emitted
 
     def _generate_load_from(self, sb: SourceBuilder) -> None:
