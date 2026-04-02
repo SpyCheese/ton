@@ -26,3 +26,6 @@ hm_node_fork#_ {n:#} {X:Type} left:^(HmNode n X) right:^(HmNode n X) = HmNode (n
 kw_wrapper$_ {X:Type} {Y:Type} return:X second:Y = KwWrapper X Y;
 kw_inferred$_ {n:#} x:(KwWrapper (Unary ~n) uint32) = KwInferred ~n;
 
+mc_left$0 {X:Type} {Y:Type} first:X other:Y = McPair X Y;
+mc_right$1 {X:Type} {Y:Type} val:X extra:Y = McPair X Y;
+mc_inferred$_ {n:#} x:(McPair (Unary ~n) uint32) y:(## n) = McInferred ~n;

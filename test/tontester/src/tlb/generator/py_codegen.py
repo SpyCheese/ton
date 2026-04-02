@@ -13,6 +13,7 @@ from .sema_types import (
     BindOutputParam,
     BindParam,
     CheckConstraint,
+    InferenceStep,
     MatchBit,
     MatchConstraint,
     MatchConstructor,
@@ -454,11 +455,7 @@ class ConstructorGenerator:
                 source_name = self.scope.lookup_local(extraction.source_field)
                 expr = source_name
                 for inf_step in extraction.chain:
-                    field = inf_step.type.inference[inf_step.param_idx].constructor_field
-                    for inf_cons, inf_field in field.items():
-                        inf_scope = self.ctx.get_constructor(inf_cons).scope
-                        expr = f"{expr}.{inf_scope.lookup(inf_field)}"
-                        break
+                    expr = self._emit_inference_access(inf_step, expr, sb)
                 expr = f"{expr}.get_output({extraction.final_output_idx})"
                 sb.line(f"{var_name} = {expr}")
                 sb.line(f"if {var_name} < 0:")
@@ -488,6 +485,36 @@ class ConstructorGenerator:
                 var_name = self.scope.lookup_local(target_param)
                 if type_name != var_name:
                     sb.line(f"{var_name} = {type_name}")
+
+    def _emit_inference_access(
+        self, inf_step: InferenceStep, expr: str, sb: SourceBuilder
+    ) -> str:
+        """Emit code to access the inference field on a (possibly multi-constructor) type.
+
+        Returns the expression for the accessed field value.
+        """
+        cons_fields = inf_step.type.inference[inf_step.param_idx].constructor_field
+        field_names: set[str] = set()
+        for inf_cons, inf_field in cons_fields.items():
+            inf_scope = self.ctx.get_constructor(inf_cons).scope
+            field_names.add(inf_scope.lookup(inf_field))
+        if len(field_names) == 1:
+            return f"{expr}.{next(iter(field_names))}"
+        tmp = self.ctx.tmp("_inf")
+        items = list(cons_fields.items())
+        for i, (inf_cons, inf_field) in enumerate(items):
+            cons_name = self.ctx.scope.lookup(inf_cons)
+            inf_scope = self.ctx.get_constructor(inf_cons).scope
+            field_name = inf_scope.lookup(inf_field)
+            if i == 0:
+                sb.line(f"if isinstance({expr}, {cons_name}):")
+            elif i < len(items) - 1:
+                sb.line(f"elif isinstance({expr}, {cons_name}):")
+            else:
+                sb.line("else:")
+            with sb.block():
+                sb.line(f"{tmp} = {expr}.{field_name}")
+        return tmp
 
     def _generate_get_output(self, sb: SourceBuilder) -> None:
         """Generate get_output() override for constructors with output params."""

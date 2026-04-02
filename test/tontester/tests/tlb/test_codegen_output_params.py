@@ -5,6 +5,7 @@ from generated.output_params import (
     HmNodeType,
     InferredType,
     LabelType,
+    McInferredType,
     SizedType,
     UnaryType,
     bit,
@@ -12,6 +13,9 @@ from generated.output_params import (
     hm_node_leaf,
     inferred,
     label,
+    mc_inferred,
+    mc_left,
+    mc_right,
     pair,
     sized,
     unary_succ,
@@ -151,6 +155,30 @@ class TestHmNode:
         assert isinstance(right_val, hm_node_leaf)
         assert left_val.value == 10
         assert right_val.value == 20
+
+
+class TestMcInferred:
+    """McInferred: output param inferred through multi-constructor McPair."""
+
+    def test_mc_left_roundtrip(self):
+        uint32_ti = UintTypeConstructor(32)
+        unary_2 = unary_succ(1, x=unary_succ(0, x=unary_zero()))
+        inner = mc_left(UnaryType(), uint32_ti, first=unary_2, other=99)
+        obj = mc_inferred(2, x=inner, y=3)
+        result = McInferredType().load_from(obj.serialize().begin_parse())
+        assert isinstance(result, mc_inferred)
+        assert result.n == 2
+        assert result.y == 3
+
+    def test_mc_right_roundtrip(self):
+        uint32_ti = UintTypeConstructor(32)
+        unary_1 = unary_succ(0, x=unary_zero())
+        inner = mc_right(UnaryType(), uint32_ti, val=unary_1, extra=42)
+        obj = mc_inferred(1, x=inner, y=1)
+        result = McInferredType().load_from(obj.serialize().begin_parse())
+        assert isinstance(result, mc_inferred)
+        assert result.n == 1
+        assert result.y == 1
 
 
 class TestNegativeNatErrors:
