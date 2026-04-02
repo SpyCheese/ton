@@ -200,6 +200,26 @@ class TestTags:
         assert ts["Unit"].constructors[0].tag_bits == ""
         assert ts["Unit"].constructors[0].tag_len == 0
 
+    def test_auto_tag_matches_cpp_reference(self):
+        """CRC32 auto-tags match the C++ tlbc reference implementation (block-auto.cpp)."""
+        with open("/home/danklishch/code/ton/src/crypto/block/block.tlb") as f:
+            _, types = analyze_text(f.read())
+        by_name = {t.name: t for t in types}
+
+        # Values from block-auto.cpp check_tag methods
+        checks = [
+            ("BlockExtra", "block_extra", 0x4A33F6FD, 32),
+            ("McBlockExtra", "masterchain_block_extra", 0xCCA5, 16),
+            ("ComplaintDescr", "no_blk_gen", 0x450E8BD9, 32),
+            ("ComplaintDescr", "no_blk_gen_diff", 0xC737B0CA, 32),
+        ]
+        for type_name, cons_name, expected_tag, expected_len in checks:
+            con = next(c for c in by_name[type_name].constructors if c.name == cons_name)
+            assert con.tag_len == expected_len, f"{cons_name}: tag_len"
+            assert int(con.tag_bits, 2) == expected_tag, (
+                f"{cons_name}: expected 0x{expected_tag:08x}, got 0x{int(con.tag_bits, 2):08x}"
+            )
+
 
 # ── Match tree ────────────────────────────────────────────────────────
 

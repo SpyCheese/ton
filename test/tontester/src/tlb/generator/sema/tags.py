@@ -67,7 +67,7 @@ def _canonical_text(c: Constructor) -> str:
         prefix = "~" if rp.negated else ""
         result += " " + prefix + _expr_to_str(rp.expr, 100)
 
-    return " ".join(parts) + " = " + result + ";"
+    return " ".join(parts) + " = " + result
 
 
 def _expr_to_str(expr: TypeExpr, prio: int) -> str:
@@ -86,7 +86,7 @@ def _expr_to_str(expr: TypeExpr, prio: int) -> str:
             inner = _expr_to_str(func, 90)
             for a in args:
                 inner += " " + _expr_to_str(a, 91)
-            return f"({inner})" if prio > 90 and args else inner
+            return f"({inner})" if prio > 95 and args else inner
 
         case Add(left=left, right=right):
             inner = f"{_expr_to_str(left, 20)} + {_expr_to_str(right, 21)}"
