@@ -183,6 +183,90 @@ Support library imported by generated code:
 - `AnyType` — TypeInfo for `Any`/`Cell` (consumes entire slice)
 - `TlbModelError` — deserialization/constraint errors
 
+### Type Simplifications (`SimplifyConfig`)
+
+Well-known TL-B types can be simplified to native Python types when
+`SimplifyConfig` is passed to `generate_python()`. Controlled per-type via
+`WellKnownType` enum. Sema detects patterns in `sema/well_known.py` and sets
+`ResolvedType.well_known`. The strategy builder checks `ctx.simplify.is_enabled()`
+and produces simplified strategies instead of `UserTypeStrategy`.
+
+**Simplified types:**
+
+| TL-B type | Well-known | Python type | Strategy |
+|-----------|-----------|-------------|----------|
+| `Maybe X` | `MAYBE` | `X \| None` | `MaybeStrategy` (inline tag + inner) |
+| `Unit` | `UNIT` | `None` | `EnumLiteralStrategy` |
+| `Bool` | `BOOL` | `bool` | `EnumLiteralStrategy` |
+| `True`/`BoolTrue` | `BOOL_TRUE` | `Literal[True]` | `EnumLiteralStrategy` |
+| `BoolFalse` | `BOOL_FALSE` | `Literal[False]` | `EnumLiteralStrategy` |
+| `Bit` | `BIT` | `bool` (+ `n * Bit` → `bitarray`) | `EnumLiteralStrategy`/`BitsStrategy` |
+| `Unary ~n` | `UNARY` | `int` | `UnaryStrategy` (output param = value itself) |
+| `HashmapE n X` | `HASHMAP_E` | `HashmapDict[X]` | `HashmapStrategy(allow_empty=True)` |
+| `Hashmap n X` | `HASHMAP` | `HashmapDict[X]` | `HashmapStrategy(allow_empty=False)` |
+| `VarUInteger n` | `VAR_UINTEGER` | `int` | `VarIntStrategy(signed=False)` |
+| `VarInteger n` | `VAR_INTEGER` | `int` | `VarIntStrategy(signed=True)` |
+| `^Cell` | (builtin) | `Cell` | `CellRefBuiltinStrategy` |
+
+**Key design decisions:**
+- Classes for well-known types are still generated (needed when used unsimplified
+  or when nested Maybe falls back). Simplification only affects field-level strategies.
+- `MaybeStrategy` checks `inner.is_nullable` — nested `Maybe (Maybe X)` falls back
+  to full `UserTypeStrategy` since `X | None | None` would collapse.
+- `UnaryStrategy.emit_get_output()` returns the value directly (the int IS the output),
+  used by inference chains. `InferenceStep.concrete_arg` stores the concrete type
+  expression for the chain endpoint.
+- `HashmapDict[V]` is a lazy dict wrapper in `tlb/hashmap.py` backed by generated
+  helpers in `tlb/hashmap_auto.py`. Tree traversal on demand, mutations via sorted
+  overlay (`SortedDict`), proper trie serialization on write.
+- `HashmapStrategy.emit_serialize_assertions` verifies `key_bits` and `value_ti` match.
+
+**Runtime support for simplifications** (`tlb/object.py`):
+- `MaybeTypeInfo[X](inner_ti)` — for simplified Maybe as generic arg
+- `UnitTypeInfo`, `BoolTypeInfo` — singletons for Unit/Bool
+- `UnaryTypeInfo` — unary encoding ser/deser
+- `VarUIntTypeConstructor(n)`, `VarIntTypeConstructor(n)` — variable-length integers
+- `CellRefType` — opaque `^Cell` (store_ref/load_ref)
+- `HashmapDictTypeInfo[V]` — InstantiableTypeInfo for HashmapDict in generic contexts
+
+### Writing a New Backend
+
+The sema layer produces a backend-agnostic resolved IR. To write a new code
+generator (e.g., C++, Rust, TypeScript):
+
+1. **Consume `list[ResolvedType]`** from `analyze()`. Each type has constructors,
+   fields, type-level params, match trees, deser plans, and `well_known` classification.
+
+2. **Implement a name scope** for your target language's naming rules (keywords,
+   reserved names, collision avoidance).
+
+3. **Implement type strategies** — the core abstraction. For each `ResolvedTypeExpr`,
+   decide how to emit load/store code. At minimum:
+   - Builtin nat types (`##`, `#<`, `#<=`, `uint`, `int`, `bits`)
+   - User-defined types (`TypeApply` → delegate to TypeInfo-like construct)
+   - Cell references (`^Type`)
+   - Tuples (`n * Type`)
+   - Type params (generics)
+   - Conditionals (`flag?Type`)
+
+4. **Implement constructor/type generators** that walk `deser_steps` and emit
+   load/store methods. The deser plan is ordered: entry bindings → field reads →
+   constraint checks → output extraction. Follow this order exactly.
+
+5. **Implement a runtime library** for your target language:
+   - TypeInfo protocol (serialize/deserialize dispatch)
+   - TLBRecord base (serialize_to, get_output, check_type)
+   - Primitive type constructors (uint, int, bits, bounded uint, etc.)
+   - Ref wrapper (lazy cell reference)
+   - HashMap support (if simplifications are desired)
+
+6. **Handle well-known types** optionally — check `ResolvedType.well_known` and
+   emit simplified code for Maybe, Bool, Unary, HashmapE, VarUInteger, etc.
+   The sema detection is backend-agnostic.
+
+7. **Test against block.tlb** — the 979-line schema with ~380 constructors covers
+   every TL-B feature. Deserialize a real block BOC and verify round-trip.
+
 ### Tests
 
 - Schema files: `tests/tlb/schemas/*.tlb` (one per feature area)
@@ -211,6 +295,13 @@ Support library imported by generated code:
 - [x] Serialize assertions (nat params, constraints, sub-type consistency)
 - [x] Deserialize assertions (nat param non-negativity at entry)
 - [x] TypeInfo equality for runtime type param verification
+- [x] Type simplifications: Maybe→`X|None`, Bool→`bool`, Unary→`int`,
+      Bit→`bool`/`bitarray`, HashmapE→`HashmapDict`, VarUInteger/VarInteger→`int`,
+      `^Cell`→opaque `Cell`
+- [x] Lazy `HashmapDict` with sorted overlay mutations, trie serialization
+- [x] CRC32 auto-tags matching C++ `tlbc` reference implementation
 - [x] End-to-end block.tlb (979 lines, ~380 constructors, zero basedpyright warnings)
 - [x] Real block deserialization verified against C++ reference
-- [ ] C++ codegen (separate backend, same sema output)
+- [ ] General enum simplification (non-well-known enums → Python IntEnum)
+- [ ] HashmapAugE simplification
+- [ ] Other backends (C++, etc.) — same sema output, different codegen
