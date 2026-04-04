@@ -43,10 +43,23 @@ if __name__ == "__main__":
     tlb_out = repo_root / "test/tontester/tests/tlb/generated"
     tlb_out.mkdir(parents=True, exist_ok=True)
     simplify_all = SimplifyConfig.all()
-    for schema_file in sorted(tlb_schemas.glob("*.tlb")):
-        out_file = tlb_out / (schema_file.stem + ".py")
-        config = simplify_all if schema_file.stem == "simplify" else None
-        generate_tlb_python(schema_file, out_file, simplify=config)
+    inline_only = SimplifyConfig(inline_records=True)
+    test_schemas: list[tuple[str, SimplifyConfig | None]] = [
+        ("basic", None),
+        ("cellref", None),
+        ("collisions", None),
+        ("cond_tuple", None),
+        ("generics", None),
+        ("inline_records", inline_only),
+        ("nat_params", None),
+        ("nat_types", None),
+        ("output_params", None),
+        ("simplify", simplify_all),
+        ("special_cells", None),
+        ("validation", None),
+    ]
+    for name, config in test_schemas:
+        generate_tlb_python(tlb_schemas / f"{name}.tlb", tlb_out / f"{name}.py", simplify=config)
 
     # Generate hashmap helper (with simplifications)
     hashmap_tlb = repo_root / "crypto/tl/hashmap.tlb"
@@ -63,4 +76,4 @@ if __name__ == "__main__":
     # Generate block.tlb
     block_tlb = repo_root / "crypto/block/block.tlb"
     block_out = tlb_out / "block.py"
-    generate_tlb_python(block_tlb, block_out)
+    generate_tlb_python(block_tlb, block_out, simplify=inline_only)

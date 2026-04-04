@@ -40,7 +40,5 @@ def generate_python(types: list[ResolvedType], simplify: SimplifyConfig | None =
     ctx.emit_imports(sb)
     sb.blank()
     sb.line(body.build().rstrip())
-    for wrapper_code in ctx.ref_wrapper_code:
-        sb.line(wrapper_code)
     sb.blank()
     return sb.build()

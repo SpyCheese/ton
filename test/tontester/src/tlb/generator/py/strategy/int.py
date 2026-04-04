@@ -51,7 +51,3 @@ class IntStrategy(TypeStrategy):
     @override
     def load_uses_cs(self) -> bool:
         return not self.width.is_zero
-
-    @override
-    def descriptor(self) -> str:
-        return f"int{self.width.local}"

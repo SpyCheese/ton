@@ -73,7 +73,3 @@ class EnumLiteralStrategy(TypeStrategy):
     @override
     def is_nullable(self) -> bool:
         return self.info.py_type_str == "None"
-
-    @override
-    def descriptor(self) -> str:
-        return f"enum_{self.info.py_type_str}"

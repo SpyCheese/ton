@@ -42,7 +42,3 @@ class TupleStrategy(TypeStrategy):
             elem_tmp = self.ctx.tmp("_elem")
             self.element.emit_load(elem_tmp, cs, sb)
             sb.line(f"{target}.append({elem_tmp})")
-
-    @override
-    def descriptor(self) -> str:
-        return f"tuple_{self.count.local}_{self.element.descriptor()}"

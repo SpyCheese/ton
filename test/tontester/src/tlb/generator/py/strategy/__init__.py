@@ -6,7 +6,6 @@ from .bounded_uint import BoundedUintStrategy as BoundedUintStrategy
 from .builder import StrategyBuilder as StrategyBuilder
 from .cell import CellRefBuiltinStrategy as CellRefBuiltinStrategy
 from .cell_ref import CellRefStrategy as CellRefStrategy
-from .cell_ref import GenericCellRefStrategy as GenericCellRefStrategy
 from .enum_literal import EnumLiteralStrategy as EnumLiteralStrategy
 from .int import IntStrategy as IntStrategy
 from .maybe import MaybeStrategy as MaybeStrategy

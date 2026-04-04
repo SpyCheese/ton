@@ -32,7 +32,7 @@ from ._base import TypeStrategy
 from .bits import BitsStrategy
 from .bounded_uint import BoundedUintStrategy
 from .cell import CellRefBuiltinStrategy
-from .cell_ref import CellRefStrategy, GenericCellRefStrategy
+from .cell_ref import CellRefStrategy
 from .enum_literal import EnumLiteralInfo, EnumLiteralStrategy
 from .int import IntStrategy
 from .maybe import MaybeStrategy
@@ -106,15 +106,8 @@ class StrategyBuilder:
         """Create a NatExpr from a resolved expression."""
         return NatExpr(self._to_nat(expr), self.scope)
 
-    def build(
-        self, type_expr: ResolvedTypeExpr, *, inside_generic_arg: bool = False
-    ) -> TypeStrategy:
-        """Create a TypeStrategy for a resolved type expression.
-
-        inside_generic_arg: when True, ^Type uses Ref[X] from runtime instead
-        of generating a wrapper class, since wrappers are file-level concrete
-        classes incompatible with the generic Ref[X] type system.
-        """
+    def build(self, type_expr: ResolvedTypeExpr) -> TypeStrategy:
+        """Create a TypeStrategy for a resolved type expression."""
         match type_expr:
             case TypeApply():
                 return self._build_type_apply(type_expr)
@@ -126,11 +119,8 @@ class StrategyBuilder:
                 return TypeParamStrategy(param, type_var, ti_var)
 
             case CellRefType(inner=inner_expr):
-                is_concrete = not inner_expr.references_type_params
-                inner = self.build(inner_expr, inside_generic_arg=inside_generic_arg)
-                if is_concrete and not inside_generic_arg:
-                    return CellRefStrategy(inner, self.ctx)
-                return GenericCellRefStrategy(inner, self.ctx)
+                inner = self.build(inner_expr)
+                return CellRefStrategy(inner, self.ctx)
 
             case TupleType(count=count_expr, element=element_expr):
                 if (
@@ -140,7 +130,7 @@ class StrategyBuilder:
                 ):
                     return BitsStrategy(NatExpr(count_expr, self.scope), self.ctx)
                 count = NatExpr(count_expr, self.scope)
-                element = self.build(element_expr, inside_generic_arg=inside_generic_arg)
+                element = self.build(element_expr)
                 return TupleStrategy(count, element, self.ctx)
 
             case AnonymousRecordType(type=anon_type):
@@ -223,7 +213,7 @@ class StrategyBuilder:
         assert isinstance(
             inner_arg, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
         )
-        inner = self.build(inner_arg, inside_generic_arg=True)
+        inner = self.build(inner_arg)
         if inner.is_nullable:
             return self._build_user_type(type_expr)
         return MaybeStrategy(inner, self.ctx)

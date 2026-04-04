@@ -46,8 +46,3 @@ class VarIntStrategy(TypeStrategy):
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
         sb.line(f"{target} = {self._ti_name}({self._n.local}).load_from({cs})")
-
-    @override
-    def descriptor(self) -> str:
-        kind = "VarInteger" if self._signed else "VarUInteger"
-        return f"{kind}_{self._n.local}"

@@ -29,7 +29,3 @@ class SliceTypeStrategy(TypeStrategy):
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
         sb.line(f"{target} = {cs}")
-
-    @override
-    def descriptor(self) -> str:
-        return "Slice"

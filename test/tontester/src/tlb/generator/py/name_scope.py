@@ -24,6 +24,7 @@ from ..sema.types import (
 
 type BindableForName = ResolvedType | ResolvedConstructor | TypeLevelParam
 type BindableForField = ResolvedField | TypeParamDef | NatParamDef
+type BindableForSetter = ResolvedField
 type BindableForGeneric = TypeLevelParam
 
 _PYTHON_KEYWORDS: frozenset[str] = frozenset(keyword.kwlist) | frozenset(keyword.softkwlist)
@@ -104,6 +105,7 @@ class NameScope:
     _bindings: dict[IdentityKey[Bindable], str]
     _local_bindings: dict[IdentityKey[Bindable], str]
     _generic_bindings: dict[IdentityKey[BindableForGeneric], str]
+    _setter_bindings: dict[IdentityKey[BindableForSetter], str]
     _parent: NameScope | None
 
     def __init__(self, parent: NameScope | None = None) -> None:
@@ -111,6 +113,7 @@ class NameScope:
         self._bindings = {}
         self._local_bindings = {}
         self._generic_bindings = {}
+        self._setter_bindings = {}
         self._parent = parent
 
     def _is_taken(self, name: str) -> bool:
@@ -144,6 +147,22 @@ class NameScope:
         self._used.add(name)
         self._generic_bindings[IdentityKey(obj)] = name
         return name
+
+    def bind_setter(self, obj: BindableForSetter, preferred: str) -> str:
+        """Register a setter method name for an inlined property. Returns the actual name used."""
+        name = self._make_unique(preferred)
+        self._used.add(name)
+        self._setter_bindings[IdentityKey(obj)] = name
+        return name
+
+    def lookup_setter(self, obj: BindableForSetter) -> str:
+        """Get the setter method name for a ResolvedField."""
+        key = IdentityKey(obj)
+        if key in self._setter_bindings:
+            return self._setter_bindings[key]
+        if self._parent is not None:
+            return self._parent.lookup_setter(obj)
+        raise KeyError(f"no setter binding for {obj!r}")
 
     def bind_field(self, obj: BindableForField, preferred: str) -> str:
         """Register a field name and a corresponding local variable name.

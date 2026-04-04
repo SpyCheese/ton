@@ -2,8 +2,10 @@
 
 from ..identity_key import IdentityKey
 from ..sema.types import (
+    AnonymousRecordType,
     BindOutputParam,
     BindParam,
+    CellRefType,
     CheckConstraint,
     InferenceStep,
     NatParamDef,
@@ -13,6 +15,7 @@ from ..sema.types import (
     ReadField,
     ResolvedConstructor,
     ResolvedField,
+    ResolvedType,
     SolveConstraint,
     TypeParamDef,
     TypeParamRef,
@@ -25,6 +28,25 @@ from .strategy import TypeStrategy
 from .strategy.builder import StrategyBuilder
 
 
+def _get_inlineable_anon(f: ResolvedField) -> tuple[ResolvedType, bool] | None:
+    """Check if a field is an inlineable anonymous record.
+
+    Returns (anon_type, is_cell_ref) or None.
+    Only unnamed, non-conditional, non-generic anonymous records qualify.
+    """
+    if f.name is not None or f.condition is not None:
+        return None
+    if isinstance(f.type_expr, AnonymousRecordType) and f.type_expr.type.arity == 0:
+        return (f.type_expr.type, False)
+    if (
+        isinstance(f.type_expr, CellRefType)
+        and isinstance(f.type_expr.inner, AnonymousRecordType)
+        and f.type_expr.inner.type.arity == 0
+    ):
+        return (f.type_expr.inner.type, True)
+    return None
+
+
 class ConstructorGenerator:
     ctx: PyContext
     c: ResolvedConstructor
@@ -33,6 +55,7 @@ class ConstructorGenerator:
     params: list[ParamDef]
     type_params: list[TypeParamDef]
     strategies: dict[IdentityKey[ResolvedField], TypeStrategy]
+    inlined_fields: list[tuple[ResolvedField, ResolvedType, bool]]
     cls_name: str
 
     def __init__(self, ctx: PyContext, c: ResolvedConstructor, type_scope: NameScope) -> None:
@@ -42,10 +65,11 @@ class ConstructorGenerator:
         self.params = []
         self.type_params = []
         self.strategies = {}
+        self.inlined_fields = []
 
-        self.bind_names()
+        self._bind_names()
 
-    def bind_names(self) -> None:
+    def _bind_names(self) -> None:
         """Pre-bind all field and param names in this constructor's scope."""
         self.scope = self.type_scope.child()
         self.ctx.register_constructor(self.c, self)
@@ -59,6 +83,20 @@ class ConstructorGenerator:
 
         for f in self.c.fields:
             _ = self.scope.bind_field(f, f.name or "field")
+
+        # Detect inlineable anonymous record fields and bind their sub-field names.
+        if self.ctx.simplify.inline_records:
+            for f in self.c.fields:
+                result = _get_inlineable_anon(f)
+                if result is None:
+                    continue
+                anon_type, is_cell_ref = result
+                anon_cons = anon_type.constructors[0]
+                for sf in anon_cons.fields:
+                    if sf.name is not None:
+                        _ = self.scope.bind_field(sf, sf.name)
+                        _ = self.scope.bind_setter(sf, f"set_{sf.name}")
+                self.inlined_fields.append((f, anon_type, is_cell_ref))
 
         self.cls_name = self.ctx.scope.lookup(self.c)
 
@@ -113,6 +151,8 @@ class ConstructorGenerator:
             if self.type_params:
                 sb.blank()
                 self._generate_check_type(sb)
+            if self.inlined_fields:
+                self._generate_inline_properties(sb)
 
     def _generate_serialize_to(
         self,
@@ -366,3 +406,34 @@ class ConstructorGenerator:
                     sb.line(f"assert self.{ti_name} == ti")
                     sb.line("return")
             sb.line("raise ValueError(f'no type param at index {idx}')")
+
+    def _generate_inline_properties(self, sb: SourceBuilder) -> None:
+        """Generate property accessors for inlined anonymous record sub-fields."""
+        builder = StrategyBuilder(self.ctx, self.scope)
+        for parent_field, anon_type, is_cell_ref in self.inlined_fields:
+            field_name = self.scope.lookup(parent_field)
+            anon_cons = anon_type.constructors[0]
+            anon_scope = self.ctx.get_constructor(anon_cons).scope
+            for sf in anon_cons.fields:
+                if sf.name is None:
+                    continue
+                prop_name = self.scope.lookup(sf)
+                inner_name = anon_scope.lookup(sf)
+                strat = builder.build(sf.type_expr)
+                py_type = strat.py_type()
+                if sf.condition is not None:
+                    py_type = f"{py_type} | None"
+                if is_cell_ref:
+                    accessor = f"self.{field_name}.ref.{inner_name}"
+                else:
+                    accessor = f"self.{field_name}.{inner_name}"
+                setter_name = self.scope.lookup_setter(sf)
+                sb.blank()
+                sb.line("@property")
+                sb.line(f"def {prop_name}(self) -> {py_type}:")
+                with sb.block():
+                    sb.line(f"return {accessor}")
+                sb.blank()
+                sb.line(f"def {setter_name}(self, value: {py_type}) -> None:")
+                with sb.block():
+                    sb.line(f"{accessor} = value")

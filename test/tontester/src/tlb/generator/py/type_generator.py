@@ -24,9 +24,9 @@ class TypeGenerator:
         self.ctx = ctx
         self.t = t
 
-        self.bind_names()
+        self._bind_names()
 
-    def bind_names(self) -> None:
+    def _bind_names(self) -> None:
         """Pre-bind type-level and constructor field names (must happen before codegen)."""
         self.scope = self.ctx.scope.child()
         self.ctx.set_type_scope(self.t, self.scope)
@@ -50,7 +50,6 @@ class TypeGenerator:
         self.cons_generators = []
         for c in self.t.constructors:
             cg = ConstructorGenerator(self.ctx, c, self.scope)
-            cg.bind_names()
             self.cons_generators.append(cg)
 
     def generate(self, sb: SourceBuilder) -> None:

@@ -1,15 +1,22 @@
 """Tests for generated code with inline records ([field:Type ...])."""
 
 from generated.inline_records import (
+    Anon_1Type,
+    Anon_4Type,
     Anon_cons,
     Anon_cons_1,
     Anon_cons_2,
+    Anon_cons_3,
+    Anon_cons_4,
+    BareUnnamedType,
     GenericInlineType,
-    Ref_Anon_1,
     RefInlineType,
+    RefUnnamedType,
     WithInlineType,
+    bare_unnamed,
     generic_inline,
     ref_inline,
+    ref_unnamed,
     with_inline,
 )
 from tlb.object import Ref, UintTypeConstructor
@@ -37,7 +44,7 @@ class TestRefInline:
 
     def test_roundtrip(self):
         inner = Anon_cons_1(x=100, y=200)
-        obj = ref_inline(inner=Ref_Anon_1(inner))
+        obj = ref_inline(inner=Ref(Anon_1Type(), inner))
         result = RefInlineType().load_from(obj.serialize().begin_parse())
         assert isinstance(result, ref_inline)
         assert result.inner.ref.x == 100
@@ -46,12 +53,73 @@ class TestRefInline:
     def test_structure(self):
         """Outer cell has 0 data bits + 1 ref, inner cell has 64 bits."""
         inner = Anon_cons_1(x=0, y=0)
-        cell = ref_inline(inner=Ref_Anon_1(inner)).serialize()
+        cell = ref_inline(inner=Ref(Anon_1Type(), inner)).serialize()
         cs = cell.begin_parse()
         assert cs.remaining_bits == 0
         assert cs.remaining_refs == 1
         ref_cs = cs.load_ref().begin_parse()
         assert ref_cs.remaining_bits == 64
+
+
+class TestBareUnnamed:
+    """Unnamed bare inline record: _:[x:uint32 y:uint32] — properties inlined."""
+
+    def test_property_access(self):
+        obj = bare_unnamed(tag=1, field=Anon_cons_3(x=42, y=99))
+        assert obj.x == 42
+        assert obj.y == 99
+
+    def test_roundtrip_with_properties(self):
+        obj = bare_unnamed(tag=5, field=Anon_cons_3(x=10, y=20))
+        result = BareUnnamedType().load_from(obj.serialize().begin_parse())
+        assert result.tag == 5
+        assert result.x == 10
+        assert result.y == 20
+
+    def test_setter(self):
+        obj = bare_unnamed(tag=1, field=Anon_cons_3(x=1, y=2))
+        obj.set_x(100)
+        obj.set_y(200)
+        assert obj.x == 100
+        assert obj.y == 200
+        # Verify underlying field is updated
+        assert obj.field.x == 100
+        assert obj.field.y == 200
+
+    def test_roundtrip_after_set(self):
+        obj = bare_unnamed(tag=1, field=Anon_cons_3(x=1, y=2))
+        obj.set_x(999)
+        result = BareUnnamedType().load_from(obj.serialize().begin_parse())
+        assert result.x == 999
+
+
+class TestRefUnnamed:
+    """Unnamed ref inline record: _:^[a:uint32 b:uint32] — properties inlined."""
+
+    def test_property_access(self):
+        obj = ref_unnamed(tag=1, field=Ref(Anon_4Type(), Anon_cons_4(a=42, b=99)))
+        assert obj.a == 42
+        assert obj.b == 99
+
+    def test_roundtrip_with_properties(self):
+        obj = ref_unnamed(tag=7, field=Ref(Anon_4Type(), Anon_cons_4(a=10, b=20)))
+        result = RefUnnamedType().load_from(obj.serialize().begin_parse())
+        assert result.tag == 7
+        assert result.a == 10
+        assert result.b == 20
+
+    def test_setter(self):
+        obj = ref_unnamed(tag=1, field=Ref(Anon_4Type(), Anon_cons_4(a=1, b=2)))
+        obj.set_a(100)
+        obj.set_b(200)
+        assert obj.a == 100
+        assert obj.b == 200
+
+    def test_roundtrip_after_set(self):
+        obj = ref_unnamed(tag=1, field=Ref(Anon_4Type(), Anon_cons_4(a=1, b=2)))
+        obj.set_a(999)
+        result = RefUnnamedType().load_from(obj.serialize().begin_parse())
+        assert result.a == 999
 
 
 class TestGenericInline:

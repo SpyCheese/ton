@@ -45,7 +45,3 @@ class BitsStrategy(TypeStrategy):
         else:
             self.ctx.use("BitsTypeConstructor")
             sb.line(f"{target} = BitsTypeConstructor({self.width.local}).load_from({cs})")
-
-    @override
-    def descriptor(self) -> str:
-        return f"bits{self.width.local}"

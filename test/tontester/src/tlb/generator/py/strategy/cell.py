@@ -31,7 +31,3 @@ class CellRefBuiltinStrategy(TypeStrategy):
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
         sb.line(f"{target} = {cs}.load_ref()")
-
-    @override
-    def descriptor(self) -> str:
-        return "ref_Cell"

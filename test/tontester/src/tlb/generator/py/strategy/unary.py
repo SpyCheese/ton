@@ -40,7 +40,3 @@ class UnaryStrategy(TypeStrategy):
     def emit_get_output(self, field_expr: str, position: int) -> str:
         assert position == 0
         return field_expr
-
-    @override
-    def descriptor(self) -> str:
-        return "Unary"

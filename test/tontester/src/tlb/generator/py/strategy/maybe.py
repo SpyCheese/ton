@@ -52,7 +52,3 @@ class MaybeStrategy(TypeStrategy):
     @override
     def is_nullable(self) -> bool:
         return True
-
-    @override
-    def descriptor(self) -> str:
-        return f"maybe_{self.inner.descriptor()}"

@@ -56,8 +56,3 @@ class BoundedUintStrategy(TypeStrategy):
     @override
     def load_uses_cs(self) -> bool:
         return not (self.inclusive and self.bound.is_zero)
-
-    @override
-    def descriptor(self) -> str:
-        op = "leq" if self.inclusive else "lt"
-        return f"{op}{self.bound.local}"

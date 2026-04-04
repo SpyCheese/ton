@@ -49,7 +49,7 @@ class HashmapStrategy(TypeStrategy):
         assert isinstance(
             val_arg, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
         )
-        val_strat = builder.build(val_arg, inside_generic_arg=True)
+        val_strat = builder.build(val_arg)
         self._val_ti = val_strat.type_info_expr()
         self._val_ti_self = val_strat.type_info_expr_self()
         self._val_py_type = val_strat.py_type()
@@ -85,8 +85,3 @@ class HashmapStrategy(TypeStrategy):
             f"{target} = {self.py_type()}.load_from("
             + f"{cs}, {self._key_bits.local}, {self._val_ti}, allow_empty={allow})"
         )
-
-    @override
-    def descriptor(self) -> str:
-        kind = "HashmapE" if self._allow_empty else "Hashmap"
-        return f"{kind}_{self._key_bits.local}_{self._val_py_type}"

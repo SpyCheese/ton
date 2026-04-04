@@ -8,7 +8,7 @@ from ..source_builder import SourceBuilder
 
 
 class StrategyBuilderProtocol(Protocol):
-    def build(self, type_expr: ResolvedTypeExpr, *, inside_generic_arg: bool = False) -> TypeStrategy: ...
+    def build(self, type_expr: ResolvedTypeExpr) -> TypeStrategy: ...
 
 
 class TypeStrategy(ABC):
@@ -66,8 +66,3 @@ class TypeStrategy(ABC):
         any assertions were emitted. Default: no assertions (for primitives).
         """
         return False
-
-    @abstractmethod
-    def descriptor(self) -> str:
-        """A unique string identifying this strategy for dedup purposes."""
-        ...

@@ -10,10 +10,11 @@ class SimplifyConfig:
     """Controls which well-known type simplifications are active."""
 
     simplify: frozenset[WellKnownType] = field(default_factory=frozenset)
+    inline_records: bool = False
 
     @staticmethod
     def all() -> SimplifyConfig:
-        return SimplifyConfig(simplify=frozenset(WellKnownType))
+        return SimplifyConfig(simplify=frozenset(WellKnownType), inline_records=True)
 
     @staticmethod
     def none() -> SimplifyConfig:

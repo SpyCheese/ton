@@ -73,7 +73,7 @@ class UserTypeStrategy(TypeStrategy):
                 assert isinstance(
                     arg, TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType
                 )
-                arg_strategy = builder.build(arg, inside_generic_arg=True)
+                arg_strategy = builder.build(arg)
                 self._ti_args.append(arg_strategy.type_info_expr())
                 self._ti_args_self.append(arg_strategy.type_info_expr_self())
                 self._type_var_args.append(arg_strategy.py_type())
@@ -134,15 +134,3 @@ class UserTypeStrategy(TypeStrategy):
             sb.line(f"{field_name}.check_type({pos}, {ti_expr})")
             emitted = True
         return emitted
-
-    @override
-    def descriptor(self) -> str:
-        if not self._ti_args:
-            return self._type_name
-        parts: list[str] = []
-        for a in self._ti_args:
-            sanitized = a
-            for ch in "()[], .":
-                sanitized = sanitized.replace(ch, "_")
-            parts.append(sanitized)
-        return f"{self._type_name}_{'_'.join(parts)}"
