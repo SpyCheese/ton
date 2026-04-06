@@ -107,8 +107,10 @@ class TypeGenerator:
             self.ctx.use("InstantiableTypeInfo")
             sb.line("@final")
             sb.line(
-                f"class {info_name}{generic_suffix}"
-                + f"(InstantiableTypeInfo[{type_name}{generic_suffix}, {protocol_args_str}]):"
+                (
+                    f"class {info_name}{generic_suffix}"
+                    f"(InstantiableTypeInfo[{type_name}{generic_suffix}, {protocol_args_str}]):"
+                )
             )
         else:
             sb.line("@final")
@@ -164,8 +166,10 @@ class TypeGenerator:
                     sb.line("if not cs.is_special():")
                     with sb.block():
                         sb.line(
-                            "raise TlbModelError("
-                            + f"'expected special cell for {type_name}, got ordinary cell')"
+                            (
+                                "raise TlbModelError("
+                                f"'expected special cell for {type_name}, got ordinary cell')"
+                            )
                         )
                     if entry_params:
                         arg_names = [self.scope.lookup(tlp) for tlp in entry_params]

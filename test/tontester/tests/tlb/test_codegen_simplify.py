@@ -257,7 +257,6 @@ class TestHashmapSimplification:
         assert cs.load_uint(1) == 0  # hme_empty tag
         assert cs.load_uint(16) == 0xABCD
 
-
     def test_wrong_key_bits_caught(self):
         """HashmapDict with wrong key_bits is caught on serialize."""
         wrong_dict: HashmapDict[int] = HashmapDict(16, UintTypeConstructor(32))

@@ -97,9 +97,11 @@ def register_types(schema: Schema, registry: TypeRegistry) -> None:
         for c in constructors[1:]:
             if len(c.result_params) != arity:
                 raise SemaError(
-                    f"inconsistent arity for type '{type_name}': "
-                    + f"constructor '{c.name}' has {len(c.result_params)} params, "
-                    + f"expected {arity}"
+                    (
+                        f"inconsistent arity for type '{type_name}': "
+                        f"constructor '{c.name}' has {len(c.result_params)} params, "
+                        f"expected {arity}"
+                    )
                 )
 
         param_kinds = _determine_param_kinds(type_name, constructors, arity)
@@ -112,9 +114,11 @@ def register_types(schema: Schema, registry: TypeRegistry) -> None:
                 output_positions.append(i)
             elif negated_count > 0:
                 raise SemaError(
-                    f"type '{type_name}': result param at position {i} is negated (~) "
-                    + f"in {negated_count} of {len(constructors)} constructors; "
-                    + "must be all or none"
+                    (
+                        f"type '{type_name}': result param at position {i} is negated (~) "
+                        f"in {negated_count} of {len(constructors)} constructors; "
+                        "must be all or none"
+                    )
                 )
         resolved_type.type_level_params = [
             TypeLevelParam(position=i, kind=param_kinds[i], is_output=(i in output_positions))
@@ -131,8 +135,10 @@ def register_types(schema: Schema, registry: TypeRegistry) -> None:
         special_count = sum(1 for c in constructors if c.is_special)
         if 0 < special_count < len(constructors):
             raise SemaError(
-                f"type '{type_name}': {special_count} of {len(constructors)} constructors "
-                + "are marked special (!); must be all or none"
+                (
+                    f"type '{type_name}': {special_count} of {len(constructors)} constructors "
+                    "are marked special (!); must be all or none"
+                )
             )
 
 
@@ -229,8 +235,10 @@ def _resolve_constructor(c: Constructor, registry: TypeRegistry) -> ResolvedCons
             if f.is_type:
                 if f.name not in type_param_tlp:
                     raise SemaError(
-                        f"Type parameter '{f.name}' not found in result params of "
-                        + f"constructor '{c.name}'"
+                        (
+                            f"Type parameter '{f.name}' not found in result params of "
+                            f"constructor '{c.name}'"
+                        )
                     )
                 p = TypeParamDef(name=f.name, type_level_param=type_param_tlp[f.name])
             else:
@@ -423,8 +431,10 @@ def _check_type_apply_arity(expr: ResolvedTypeExpr) -> None:
         for tlp, arg in zip(expr.type.type_level_params, expr.arguments, strict=True):
             if tlp.kind == ParamKind.NAT and isinstance(arg, TypeParamRef):
                 raise SemaError(
-                    f"type '{expr.type.name}' expects a nat argument at position "
-                    + f"{tlp.position}, got Type parameter '{arg.param.name}'"
+                    (
+                        f"type '{expr.type.name}' expects a nat argument at position "
+                        f"{tlp.position}, got Type parameter '{arg.param.name}'"
+                    )
                 )
         if expr.type is NatLess_type:
             arg = expr.arguments[0]

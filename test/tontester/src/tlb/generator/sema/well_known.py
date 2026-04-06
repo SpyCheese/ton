@@ -159,8 +159,7 @@ def _is_hashmap_e(rt: ResolvedType) -> bool:
 
 
 def _is_hashmap(rt: ResolvedType) -> bool:
-    """hm_edge#_ {n:#} {X:Type} {l:#} {m:#} label:(HmLabel ~l n)
-              {n = (~m) + l} node:(HashmapNode m X) = Hashmap n X;"""
+    """hm_edge#_ {n:#} {X:Type} {l:#} {m:#} label:(HmLabel ~l n) {n = (~m) + l} node:(HashmapNode m X) = Hashmap n X;"""
     if rt.name != "Hashmap":
         return False
     if rt.arity != 2 or len(rt.constructors) != 1:

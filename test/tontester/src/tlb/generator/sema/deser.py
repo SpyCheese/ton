@@ -127,8 +127,10 @@ def build_deser_plan(constructor: ResolvedConstructor) -> list[DeserStep]:
     if unbound:
         names = ", ".join(sorted(p.name for p in unbound))
         raise SemaError(
-            f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
-            + f"parameter(s) {names} cannot be computed during deserialization"
+            (
+                f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
+                f"parameter(s) {names} cannot be computed during deserialization"
+            )
         )
 
     constructor.deser_steps = steps
@@ -171,9 +173,11 @@ def _emit_entry_bindings(
                 )
             case TypeApply():
                 raise SemaError(
-                    f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
-                    + f"result param at position {position} is a type application; "
-                    + "Type-kinded result params must be bare type parameter references"
+                    (
+                        f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
+                        f"result param at position {position} is a type application; "
+                        "Type-kinded result params must be bare type parameter references"
+                    )
                 )
             case _:
                 _solve_entry_expr(expr, position, constructor, known_params, steps)
@@ -215,8 +219,10 @@ def _solve_entry_expr(
         known_params.add(target)
     else:
         raise SemaError(
-            f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
-            + f"cannot solve result param expression at position {position} for '{target.name}'"
+            (
+                f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
+                f"cannot solve result param expression at position {position} for '{target.name}'"
+            )
         )
 
 
@@ -290,7 +296,9 @@ def _scan_for_outputs(
         inf_idx = _inference_index_for_param(applied_type, arg_idx)
         if inf_idx is not None and inf_idx < len(applied_type.inference):
             if applied_type.inference[inf_idx].is_capable:
-                new_chain = chain + [InferenceStep(type=applied_type, param_idx=arg_idx, concrete_arg=arg)]
+                new_chain = chain + [
+                    InferenceStep(type=applied_type, param_idx=arg_idx, concrete_arg=arg)
+                ]
                 _scan_for_outputs(source_field, arg, constructor, known_params, steps, new_chain)
 
 

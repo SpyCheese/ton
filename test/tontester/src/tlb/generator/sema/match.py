@@ -108,8 +108,10 @@ def _dispatch(
         return MatchConstructor(constructor=states[0].constructor)
     if depth >= MAX_DEPTH:
         raise SemaError(
-            f"type '{resolved_type.name}': constructor disambiguation exceeded "
-            + f"max depth {MAX_DEPTH}"
+            (
+                f"type '{resolved_type.name}': constructor disambiguation exceeded "
+                f"max depth {MAX_DEPTH}"
+            )
         )
 
     split = _try_constraint_split(states, resolved_type, cons_by_id)
@@ -218,8 +220,10 @@ def _check_all_have_bits(
             c = cons_by_id[cid]
             if offset >= len(c.tag_bits):
                 raise SemaError(
-                    f"type '{resolved_type.name}': constructor '{s.constructor.name}' "
-                    + "is ambiguous — tag bits exhausted during disambiguation"
+                    (
+                        f"type '{resolved_type.name}': constructor '{s.constructor.name}' "
+                        "is ambiguous — tag bits exhausted during disambiguation"
+                    )
                 )
 
 

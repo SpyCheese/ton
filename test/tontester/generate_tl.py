@@ -68,7 +68,9 @@ if __name__ == "__main__":
 
     hashmap_simplify = SimplifyConfig(
         simplify=frozenset(
-            wkt for wkt in WellKnownType if wkt not in (WellKnownType.HASHMAP_E, WellKnownType.HASHMAP)
+            wkt
+            for wkt in WellKnownType
+            if wkt not in (WellKnownType.HASHMAP_E, WellKnownType.HASHMAP)
         )
     )
     generate_tlb_python(hashmap_tlb, hashmap_out, simplify=hashmap_simplify)

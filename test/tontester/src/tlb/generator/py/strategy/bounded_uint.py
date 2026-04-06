@@ -38,8 +38,10 @@ class BoundedUintStrategy(TypeStrategy):
             return
         self.ctx.use("BoundedUintTypeConstructor")
         sb.line(
-            f"BoundedUintTypeConstructor({self.bound.self_}, inclusive={self.inclusive})"
-            + f".serialize_value({value}, {builder})"
+            (
+                f"BoundedUintTypeConstructor({self.bound.self_}, inclusive={self.inclusive})"
+                f".serialize_value({value}, {builder})"
+            )
         )
 
     @override
@@ -49,8 +51,10 @@ class BoundedUintStrategy(TypeStrategy):
             return
         self.ctx.use("BoundedUintTypeConstructor")
         sb.line(
-            f"{target} = BoundedUintTypeConstructor({self.bound.local}, inclusive={self.inclusive})"
-            + f".load_from({cs})"
+            (
+                f"{target} = BoundedUintTypeConstructor({self.bound.local}, inclusive={self.inclusive})"
+                f".load_from({cs})"
+            )
         )
 
     @override

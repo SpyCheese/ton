@@ -178,17 +178,25 @@ class StrategyBuilder:
                     return self._build_maybe(type_expr)
                 if t.well_known == WellKnownType.UNARY:
                     from .unary import UnaryStrategy
+
                     return UnaryStrategy(self.ctx)
                 if t.well_known in (WellKnownType.HASHMAP_E, WellKnownType.HASHMAP):
                     from .hashmap import HashmapStrategy
+
                     return HashmapStrategy(
-                        type_expr, self.ctx, self.scope, self,
+                        type_expr,
+                        self.ctx,
+                        self.scope,
+                        self,
                         allow_empty=(t.well_known == WellKnownType.HASHMAP_E),
                     )
                 if t.well_known in (WellKnownType.VAR_UINTEGER, WellKnownType.VAR_INTEGER):
                     from .varint import VarIntStrategy
+
                     return VarIntStrategy(
-                        type_expr, self.ctx, self.scope,
+                        type_expr,
+                        self.ctx,
+                        self.scope,
                         signed=(t.well_known == WellKnownType.VAR_INTEGER),
                     )
                 if info := _ENUM_LITERAL_INFOS.get(t.well_known):

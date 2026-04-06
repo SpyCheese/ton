@@ -292,8 +292,10 @@ class ConstructorGenerator:
                     sb.line(f"if {var_name} < 0:")
                     with sb.block():
                         sb.line(
-                            "raise TlbModelError("
-                            + f"f'nat parameter {target_param.name} is negative: {{{var_name}}}')"
+                            (
+                                "raise TlbModelError("
+                                f"f'nat parameter {target_param.name} is negative: {{{var_name}}}')"
+                            )
                         )
 
             case BindOutputParam(target_param=target_param, extraction=extraction):
@@ -314,8 +316,10 @@ class ConstructorGenerator:
                 sb.line(f"if {var_name} < 0:")
                 with sb.block():
                     sb.line(
-                        "raise TlbModelError("
-                        + f"f'nat parameter {target_param.name} is negative: {{{var_name}}}')"
+                        (
+                            "raise TlbModelError("
+                            f"f'nat parameter {target_param.name} is negative: {{{var_name}}}')"
+                        )
                     )
 
             case CheckConstraint():

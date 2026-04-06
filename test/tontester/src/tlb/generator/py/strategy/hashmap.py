@@ -82,6 +82,8 @@ class HashmapStrategy(TypeStrategy):
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
         allow = "True" if self._allow_empty else "False"
         sb.line(
-            f"{target} = {self.py_type()}.load_from("
-            + f"{cs}, {self._key_bits.local}, {self._val_ti}, allow_empty={allow})"
+            (
+                f"{target} = {self.py_type()}.load_from("
+                f"{cs}, {self._key_bits.local}, {self._val_ti}, allow_empty={allow})"
+            )
         )
