@@ -278,17 +278,21 @@ def _scan_for_outputs(
     for arg_idx, arg in enumerate(type_expr.arguments):
         if not isinstance(arg, NatParamRef):
             continue
-        if arg.param in known_params:
-            continue
         tlp = applied_type.type_level_params[arg_idx]
-        if tlp.is_output:
-            extraction = OutputExtraction(
-                source_field=source_field,
-                chain=list(chain),
-                result_param_position=arg_idx,
-            )
-            steps.append(BindOutputParam(target_param=arg.param, extraction=extraction))
-            known_params.add(arg.param)
+        if not tlp.is_output:
+            continue
+        if arg.param in known_params:
+            raise SemaError((
+                f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
+                f"parameter '{arg.param.name}' is bound from multiple output (~) positions"
+            ))
+        extraction = OutputExtraction(
+            source_field=source_field,
+            chain=list(chain),
+            result_param_position=arg_idx,
+        )
+        steps.append(BindOutputParam(target_param=arg.param, extraction=extraction))
+        known_params.add(arg.param)
 
     for arg_idx, arg in enumerate(type_expr.arguments):
         if not isinstance(arg, TypeApply):

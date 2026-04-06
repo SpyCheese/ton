@@ -806,6 +806,26 @@ class TestSemaErrors:
         with pytest.raises(SemaError, match="cannot be computed"):
             _ = analyze_text("foo$_ {n:#} {m:#} {n = (~m) * 2} x:uint32 = T n;")
 
+    def test_duplicate_output_param(self):
+        """Same param at multiple output positions should error."""
+        with pytest.raises(SemaError, match="multiple output"):
+            _ = analyze_text("""
+                pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;
+                unary_zero$0 = Unary ~0;
+                unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
+                infer_both$_ {n:#} {m:#} pair:(Pair (Unary ~n) (Unary ~m)) = InferBoth ~n ~m;
+                foo$_ {n:#} x:(InferBoth ~n ~n) = Foo;
+            """)
+
+    def test_duplicate_output_param_across_fields(self):
+        """Same param bound from output positions in two separate fields should error."""
+        with pytest.raises(SemaError, match="multiple output"):
+            _ = analyze_text("""
+                unary_zero$0 = Unary ~0;
+                unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
+                foo$_ {n:#} x:(Unary ~n) y:(Unary ~n) = Foo;
+            """)
+
 
 # ── Inline records ───────────────────────────────────────────────────
 
