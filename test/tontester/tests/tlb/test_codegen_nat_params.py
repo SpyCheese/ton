@@ -1,5 +1,6 @@
 """Tests for generated code with nat parameters."""
 
+import pytest
 from generated.nat_params import (
     FixedArrayType,
     MaybeTupleType,
@@ -39,6 +40,14 @@ class TestFixedArray:
         uint32_ti = UintTypeConstructor(32)
         obj = fixed_array[int](3, uint32_ti, items=[0, 0, 0])
         assert obj.serialize().begin_parse().remaining_bits == 96  # 3 * 32
+
+    def test_extra_items_caught(self):
+        """Adding items without updating n fails assertion on serialize."""
+        uint32_ti = UintTypeConstructor(32)
+        obj = fixed_array[int](2, uint32_ti, items=[10, 20])
+        obj.items.append(30)
+        with pytest.raises(AssertionError):
+            _ = obj.serialize()
 
 
 class TestThreeInts:

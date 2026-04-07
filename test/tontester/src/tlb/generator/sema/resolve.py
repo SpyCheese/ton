@@ -105,7 +105,6 @@ def register_types(schema: Schema, registry: TypeRegistry) -> None:
                 )
 
         param_kinds = _determine_param_kinds(type_name, constructors, arity)
-        resolved_type.arity = arity
 
         output_positions: list[int] = []
         for i in range(arity):
@@ -581,7 +580,6 @@ def _resolve_inline_record(
         TypeLevelParam(position=i, kind=ParamKind.TYPE, is_output=False)
         for i in range(type_param_count)
     ]
-    anon_type.arity = type_param_count
     anon_type.type_level_params = type_level_params
 
     type_param_idx = 0

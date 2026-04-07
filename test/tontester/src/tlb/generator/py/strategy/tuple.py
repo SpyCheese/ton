@@ -35,6 +35,11 @@ class TupleStrategy(TypeStrategy):
             self.element.emit_store(f"{value}[{idx}]", builder, sb)
 
     @override
+    def emit_serialize_assertions(self, field_name: str, sb: SourceBuilder) -> bool:
+        sb.line(f"assert len({field_name}) == {self.count.self_}")
+        return True
+
+    @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
         sb.line(f"{target}: list[{self.element.py_type()}] = []")
         sb.line(f"for _ in range({self.count.local}):")

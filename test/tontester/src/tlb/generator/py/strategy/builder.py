@@ -164,7 +164,6 @@ class StrategyBuilder:
                 assert t.produces_nat
                 return UintStrategy(NatExpr(NatLiteral(int(name[4:])), NameScope()), self.ctx)
             if name.startswith("int"):
-                assert t.produces_nat
                 return IntStrategy(NatExpr(NatLiteral(int(name[3:])), NameScope()), self.ctx)
             if name.startswith("bits"):
                 return BitsStrategy(NatExpr(NatLiteral(int(name[4:])), NameScope()), self.ctx)

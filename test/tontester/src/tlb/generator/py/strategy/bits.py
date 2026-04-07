@@ -32,11 +32,17 @@ class BitsStrategy(TypeStrategy):
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
         if self.width.is_constant:
-            sb.line(f"assert len({value}) == {self.width.self_}")
             sb.line(f"_ = {builder}.store_bits({value})")
         else:
             self.ctx.use("BitsTypeConstructor")
             sb.line(f"BitsTypeConstructor({self.width.self_}).serialize_value({value}, {builder})")
+
+    @override
+    def emit_serialize_assertions(self, field_name: str, sb: SourceBuilder) -> bool:
+        if not self.width.is_constant:
+            return False
+        sb.line(f"assert len({field_name}) == {self.width.self_}")
+        return True
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:

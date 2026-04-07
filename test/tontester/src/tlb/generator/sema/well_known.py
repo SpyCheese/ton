@@ -35,7 +35,7 @@ def _is_maybe(rt: ResolvedType) -> bool:
         return False
     if rt.arity != 1 or len(rt.constructors) != 2:
         return False
-    if len(rt.type_level_params) != 1 or rt.type_level_params[0].kind != ParamKind.TYPE:
+    if rt.type_level_params[0].kind != ParamKind.TYPE:
         return False
     cons = sorted(rt.constructors, key=lambda c: c.tag_bits)
     nothing, just = cons[0], cons[1]
@@ -145,7 +145,7 @@ def _is_hashmap_e(rt: ResolvedType) -> bool:
     if rt.arity != 2 or len(rt.constructors) != 2:
         return False
     tlps = rt.type_level_params
-    if len(tlps) != 2 or tlps[0].kind != ParamKind.NAT or tlps[1].kind != ParamKind.TYPE:
+    if tlps[0].kind != ParamKind.NAT or tlps[1].kind != ParamKind.TYPE:
         return False
     cons = sorted(rt.constructors, key=lambda c: c.tag_bits)
     empty, root = cons[0], cons[1]
@@ -165,7 +165,7 @@ def _is_hashmap(rt: ResolvedType) -> bool:
     if rt.arity != 2 or len(rt.constructors) != 1:
         return False
     tlps = rt.type_level_params
-    if len(tlps) != 2 or tlps[0].kind != ParamKind.NAT or tlps[1].kind != ParamKind.TYPE:
+    if tlps[0].kind != ParamKind.NAT or tlps[1].kind != ParamKind.TYPE:
         return False
     return rt.constructors[0].name == "hm_edge"
 
@@ -176,7 +176,7 @@ def _is_var_uinteger(rt: ResolvedType) -> bool:
         return False
     if rt.arity != 1 or len(rt.constructors) != 1:
         return False
-    if len(rt.type_level_params) != 1 or rt.type_level_params[0].kind != ParamKind.NAT:
+    if rt.type_level_params[0].kind != ParamKind.NAT:
         return False
     return rt.constructors[0].name == "var_uint"
 
@@ -187,6 +187,6 @@ def _is_var_integer(rt: ResolvedType) -> bool:
         return False
     if rt.arity != 1 or len(rt.constructors) != 1:
         return False
-    if len(rt.type_level_params) != 1 or rt.type_level_params[0].kind != ParamKind.NAT:
+    if rt.type_level_params[0].kind != ParamKind.NAT:
         return False
     return rt.constructors[0].name == "var_int"

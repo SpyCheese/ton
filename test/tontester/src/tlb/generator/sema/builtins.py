@@ -6,7 +6,6 @@ from .types import ParamKind, ResolvedType, TypeLevelParam
 def _builtin(
     name: str,
     *,
-    arity: int = 0,
     param_kinds: list[ParamKind] | None = None,
     produces_nat: bool = False,
 ) -> ResolvedType:
@@ -14,7 +13,6 @@ def _builtin(
     kinds = param_kinds or []
     t = ResolvedType(
         name=name,
-        arity=arity,
         type_level_params=[
             TypeLevelParam(position=i, kind=k, is_output=False) for i, k in enumerate(kinds)
         ],
@@ -26,14 +24,14 @@ def _builtin(
 
 # Core nat types
 Nat_type = _builtin("#", produces_nat=True)
-NatWidth_type = _builtin("##", arity=1, param_kinds=[ParamKind.NAT], produces_nat=True)
-NatLess_type = _builtin("#<", arity=1, param_kinds=[ParamKind.NAT], produces_nat=True)
-NatLeq_type = _builtin("#<=", arity=1, param_kinds=[ParamKind.NAT], produces_nat=True)
+NatWidth_type = _builtin("##", param_kinds=[ParamKind.NAT], produces_nat=True)
+NatLess_type = _builtin("#<", param_kinds=[ParamKind.NAT], produces_nat=True)
+NatLeq_type = _builtin("#<=", param_kinds=[ParamKind.NAT], produces_nat=True)
 
 # Integer/bitstring types (parameterized)
-Int_type = _builtin("int", arity=1, param_kinds=[ParamKind.NAT], produces_nat=True)
-UInt_type = _builtin("uint", arity=1, param_kinds=[ParamKind.NAT], produces_nat=True)
-Bits_type = _builtin("bits", arity=1, param_kinds=[ParamKind.NAT])
+Int_type = _builtin("int", param_kinds=[ParamKind.NAT])
+UInt_type = _builtin("uint", param_kinds=[ParamKind.NAT], produces_nat=True)
+Bits_type = _builtin("bits", param_kinds=[ParamKind.NAT])
 
 # Special types
 Any_type = _builtin("Any")
@@ -62,12 +60,8 @@ def create_builtin_registry() -> dict[str, ResolvedType]:
     for n in range(1, 257):
         registry[f"uint{n}"] = _builtin(f"uint{n}", produces_nat=True)
     for n in range(1, 258):
-        registry[f"int{n}"] = _builtin(f"int{n}", produces_nat=True)
+        registry[f"int{n}"] = _builtin(f"int{n}")
     for n in range(1, 1024):
         registry[f"bits{n}"] = _builtin(f"bits{n}")
-
-    # Comparison operators (used internally for constraints)
-    for name in ["=", "<", "<="]:
-        registry[name] = _builtin(name, arity=2, param_kinds=[ParamKind.NAT, ParamKind.NAT])
 
     return registry

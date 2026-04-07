@@ -377,14 +377,16 @@ class InferenceInfo:
 
 @dataclass(eq=False)
 class ResolvedType:
+    # Intrinsic properties
     name: str
-    arity: int = 0
     type_level_params: list[TypeLevelParam] = field(default_factory=list)
     constructors: list[ResolvedConstructor] = field(default_factory=list)
 
     produces_nat: bool = False
     is_builtin: bool = False
     is_special: bool = False  # all constructors have ! prefix (exotic cell type)
+
+    # Computed properties
     is_enum: bool = False
     is_typedef: bool = False
     typedef_target: ResolvedTypeExpr | None = None
@@ -392,3 +394,7 @@ class ResolvedType:
     match_tree: MatchTree | None = None
     inference: list[InferenceInfo] = field(default_factory=list)
     well_known: WellKnownType | None = None
+
+    @property
+    def arity(self):
+        return len(self.type_level_params)
