@@ -6,7 +6,7 @@ just$1 {X:Type} value:X = Maybe X;
 bool_false$0 = Bool;
 bool_true$1 = Bool;
 unit$_ = Unit;
-true$1 = True;
+true$_ = True;
 
 // Using simplified enums as fields
 enum_fields$_ a:Bool b:Unit c:True x:uint32 = EnumFields;

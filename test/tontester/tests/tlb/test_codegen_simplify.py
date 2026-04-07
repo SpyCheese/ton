@@ -99,39 +99,39 @@ class TestNestedMaybe:
 
 
 class TestEnumLiterals:
-    """Bool → bool, Unit → None, True → Literal[True]."""
+    """Bool → bool, Unit → None, True → None (unit type)."""
 
     def test_all_fields_roundtrip(self):
-        obj = enum_fields(a=True, b=None, c=True, x=42)
+        obj = enum_fields(a=True, b=None, c=None, x=42)
         result = EnumFieldsType().load_from(obj.serialize().begin_parse())
         assert result.a is True
         assert result.b is None
-        assert result.c is True
+        assert result.c is None
         assert result.x == 42
 
     def test_bool_false_roundtrip(self):
-        obj = enum_fields(a=False, b=None, c=True, x=99)
+        obj = enum_fields(a=False, b=None, c=None, x=99)
         result = EnumFieldsType().load_from(obj.serialize().begin_parse())
         assert result.a is False
         assert result.b is None
-        assert result.c is True
+        assert result.c is None
         assert result.x == 99
 
     def test_serialized_bits(self):
-        """a:Bool(1) + b:Unit(0) + c:True(1) + x:uint32(32) = 34 bits."""
-        obj = enum_fields(a=True, b=None, c=True, x=0x12345678)
+        """a:Bool(1) + b:Unit(0) + c:True(0) + x:uint32(32) = 33 bits."""
+        obj = enum_fields(a=True, b=None, c=None, x=0x12345678)
         cs = obj.serialize().begin_parse()
-        assert cs.remaining_bits == 34
+        assert cs.remaining_bits == 33
         assert cs.load_uint(1) == 1  # a = True
         # b = Unit, 0 bits
-        assert cs.load_uint(1) == 1  # c = True (tag $1)
+        # c = True, 0 bits (unit type)
         assert cs.load_uint(32) == 0x12345678  # x
 
     def test_bool_false_serialized_bits(self):
-        obj = enum_fields(a=False, b=None, c=True, x=0)
+        obj = enum_fields(a=False, b=None, c=None, x=0)
         cs = obj.serialize().begin_parse()
         assert cs.load_uint(1) == 0  # a = False
-        assert cs.load_uint(1) == 1  # c = True
+        # c = True, 0 bits
         assert cs.load_uint(32) == 0
 
 

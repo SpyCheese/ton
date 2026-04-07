@@ -225,6 +225,14 @@ def is_nat(expr: ResolvedExpr) -> TypeIs[ResolvedNatExpr]:
     )
 
 
+def is_type(expr: ResolvedExpr) -> TypeIs[ResolvedTypeExpr]:
+    """Type guard: check whether a ResolvedExpr is a type expression."""
+    return isinstance(
+        expr,
+        TypeParamRef | TypeApply | TupleType | CellRefType | AnonymousRecordType,
+    )
+
+
 @dataclass(eq=False)
 class ResolvedField:
     name: str | None

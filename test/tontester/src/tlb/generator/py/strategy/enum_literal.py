@@ -13,8 +13,7 @@ class EnumLiteralInfo:
     """Describes how to simplify an enum type to a Python literal."""
 
     py_type_str: str
-    type_info_name: str
-    tag_bits: int
+    type_info_expr: str
     tag_len: int
     values: dict[int, str]  # tag_value → Python literal expression
 
@@ -35,8 +34,8 @@ class EnumLiteralStrategy(TypeStrategy):
 
     @override
     def type_info_expr(self) -> str:
-        self.ctx.use(self.info.type_info_name)
-        return self.info.type_info_name
+        self.ctx.use(self.info.type_info_expr)
+        return self.info.type_info_expr
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Protocol, cast, final, override
+from collections.abc import Callable
+from typing import Literal, Protocol, cast, final, override
 
 from bitarray import bitarray
 from pytoniq_core import Builder, Cell, Slice
@@ -183,55 +184,56 @@ AnyType = _AnyType()
 
 
 @final
-class _UnitTypeInfo(TypeInfo[None]):
-    @override
-    def serialize_value(self, value: None, builder: Builder) -> None:
-        pass
+class _EnumTypeInfo[T](TypeInfo[T]):
+    """TypeInfo for simplified enum types (Unit, Bool, True, BoolFalse, Bit)."""
+
+    def __init__(
+        self,
+        tag_len: int,
+        to_tag: Callable[[T], int],
+        from_tag: Callable[[int], T],
+    ) -> None:
+        self._tag_len = tag_len
+        self._to_tag = to_tag
+        self._from_tag = from_tag
 
     @override
-    def load_from(self, cs: Slice) -> None:
-        return None
+    def serialize_value(self, value: T, builder: Builder) -> None:
+        if self._tag_len == 0:
+            return
+        _ = builder.store_uint(self._to_tag(value), self._tag_len)
 
     @override
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, _UnitTypeInfo)
-
-    @override
-    def __hash__(self) -> int:
-        return hash("UnitTypeInfo")
-
-    @override
-    def __repr__(self) -> str:
-        return "Unit"
-
-
-UnitTypeInfo = _UnitTypeInfo()
-
-
-@final
-class _BoolTypeInfo(TypeInfo[bool]):
-    @override
-    def serialize_value(self, value: bool, builder: Builder) -> None:
-        _ = builder.store_uint(int(value), 1)
-
-    @override
-    def load_from(self, cs: Slice) -> bool:
-        return bool(cs.load_uint(1))
+    def load_from(self, cs: Slice) -> T:
+        if self._tag_len == 0:
+            return self._from_tag(0)
+        return self._from_tag(cs.load_uint(self._tag_len))
 
     @override
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, _BoolTypeInfo)
+        return self is other
 
     @override
     def __hash__(self) -> int:
-        return hash("BoolTypeInfo")
-
-    @override
-    def __repr__(self) -> str:
-        return "Bool"
+        return hash(("EnumTypeInfo", id(self._to_tag), id(self._from_tag)))
 
 
-BoolTypeInfo = _BoolTypeInfo()
+def _deser_true(tag: int) -> Literal[True]:
+    if tag != 1:
+        raise TlbModelError(f"expected tag 1 for True, got {tag}")
+    return True
+
+
+def _deser_false(tag: int) -> Literal[False]:
+    if tag != 0:
+        raise TlbModelError(f"expected tag 0 for False, got {tag}")
+    return False
+
+
+UnitTypeInfo: TypeInfo[None] = _EnumTypeInfo(0, lambda _: 0, lambda _: None)
+BoolTypeInfo: TypeInfo[bool] = _EnumTypeInfo(1, int, bool)
+TrueTypeInfo: TypeInfo[Literal[True]] = _EnumTypeInfo(1, int, _deser_true)
+FalseTypeInfo: TypeInfo[Literal[False]] = _EnumTypeInfo(1, int, _deser_false)
 
 
 @final

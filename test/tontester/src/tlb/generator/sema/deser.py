@@ -282,10 +282,12 @@ def _scan_for_outputs(
         if not tlp.is_output:
             continue
         if arg.param in known_params:
-            raise SemaError((
-                f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
-                f"parameter '{arg.param.name}' is bound from multiple output (~) positions"
-            ))
+            raise SemaError(
+                (
+                    f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
+                    f"parameter '{arg.param.name}' is bound from multiple output (~) positions"
+                )
+            )
         extraction = OutputExtraction(
             source_field=source_field,
             chain=list(chain),
