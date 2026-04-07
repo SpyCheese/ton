@@ -1,12 +1,15 @@
-"""Lazy dictionary backed by a TON Hashmap cell.
+"""Lazy dictionary backed by a TON HashmapAug cell.
 
-Wraps a HashmapE cell and provides dict-like read/write access.
+Wraps a HashmapAugE cell and provides dict-like read/write access.
 Reads traverse the tree lazily. Writes are tracked in a sorted overlay
 and merged during iteration and serialization.
+
+Regular (non-augmented) hashmaps use UnitTypeInfo as the extra type,
+which takes 0 bits on the wire.
 """
 
 from collections.abc import Iterator
-from typing import final, override
+from typing import Protocol, final, override
 
 from bitarray import bitarray
 from bitarray.util import ba2int, int2ba
@@ -14,15 +17,16 @@ from pytoniq_core import Builder, Cell, Slice
 from sortedcontainers import SortedDict
 
 from .hashmap_auto import (
-    HashmapType,
-    hm_edge,
+    HashmapAugType,
+    HmLabel,
+    ahm_edge,
+    ahmn_fork,
+    ahmn_leaf,
     hml_long,
     hml_same,
     hml_short,
-    hmn_fork,
-    hmn_leaf,
 )
-from .object import InstantiableTypeInfo, TypeInfo
+from .object import InstantiableTypeInfo, TypeInfo, UnitTypeInfo
 
 
 class _Deleted:
@@ -34,7 +38,39 @@ class _Deleted:
 _DELETED = _Deleted()
 
 
-def _label_bits(label: hml_short | hml_long | hml_same) -> bitarray:
+class Augmentation[V, E](Protocol):
+    """Augmentation callbacks for HashmapAug."""
+
+    @property
+    def extra_ti(self) -> TypeInfo[E]: ...
+    def eval_leaf(self, value: V) -> E: ...
+    def merge(self, left: E, right: E) -> E: ...
+    def eval_empty(self) -> E: ...
+
+
+@final
+class _UnitAug:
+    @property
+    def extra_ti(self) -> TypeInfo[None]:
+        return UnitTypeInfo
+
+    def eval_leaf(self, value: object) -> None:
+        _ = value
+        return None
+
+    def merge(self, left: None, right: None) -> None:
+        _ = left
+        _ = right
+        return None
+
+    def eval_empty(self) -> None:
+        return None
+
+
+UnitAug = _UnitAug()
+
+
+def _label_bits(label: HmLabel) -> bitarray:
     match label:
         case hml_short(s=s):
             return s
@@ -44,27 +80,29 @@ def _label_bits(label: hml_short | hml_long | hml_same) -> bitarray:
             return bitarray([v]) * n
 
 
-def _iter_edge[V](edge: hm_edge[V], prefix: bitarray, key_bits: int) -> Iterator[tuple[int, V]]:
+def _iter_edge[V, E](
+    edge: ahm_edge[V, E], prefix: bitarray, key_bits: int
+) -> Iterator[tuple[int, V]]:
     """Lazily yield (key, value) pairs in sorted order from a hashmap edge."""
     prefix = prefix + _label_bits(edge.label)
     match edge.node:
-        case hmn_leaf(value=value):
+        case ahmn_leaf(value=value):
             yield (ba2int(prefix), value)
-        case hmn_fork(left=left, right=right):
+        case ahmn_fork(left=left, right=right):
             yield from _iter_edge(left.ref, prefix + bitarray([False]), key_bits)
             yield from _iter_edge(right.ref, prefix + bitarray([True]), key_bits)
 
 
-def _lookup_edge[V](edge: hm_edge[V], key: bitarray, pos: int) -> V | None:
+def _lookup_edge[V, E](edge: ahm_edge[V, E], key: bitarray, pos: int) -> V | None:
     """Look up a single key by traversing the tree."""
     label = _label_bits(edge.label)
     if key[pos : pos + len(label)] != label:
         return None
     pos += len(label)
     match edge.node:
-        case hmn_leaf(value=value):
+        case ahmn_leaf(value=value):
             return value
-        case hmn_fork(left=left, right=right):
+        case ahmn_fork(left=left, right=right):
             if key[pos]:
                 return _lookup_edge(right.ref, key, pos + 1)
             else:
@@ -132,8 +170,8 @@ def _serialize_label(builder: Builder, label: bitarray, max_len: int) -> None:
 
 
 @final
-class HashmapDict[V]:
-    """Lazy dictionary backed by a HashmapE n X cell.
+class HashmapDict[V, E = None]:
+    """Lazy dictionary backed by a HashmapAugE n X Y cell.
 
     Reads traverse the tree on demand. The parsed root is cached after
     first access. Writes go into a sorted overlay (SortedDict) and are
@@ -144,14 +182,18 @@ class HashmapDict[V]:
         self,
         key_bits: int,
         value_ti: TypeInfo[V],
+        extra_ti: TypeInfo[E] = UnitTypeInfo,
+        aug: Augmentation[V, E] = UnitAug,
         cell: Cell | None = None,
         allow_empty: bool = True,
     ) -> None:
         self._key_bits = key_bits
         self._value_ti = value_ti
+        self._extra_ti = extra_ti
+        self._aug = aug
         self._cell = cell
         self._allow_empty = allow_empty
-        self._root: hm_edge[V] | None = None
+        self._root: ahm_edge[V, E] | None = None
         self._root_parsed = False
         self._overlay: SortedDict[int, V | _Deleted] = SortedDict()
 
@@ -163,11 +205,13 @@ class HashmapDict[V]:
     def value_ti(self) -> TypeInfo[V]:
         return self._value_ti
 
-    def _get_root(self) -> hm_edge[V] | None:
+    def _get_root(self) -> ahm_edge[V, E] | None:
         if not self._root_parsed:
             if self._cell is not None:
                 cs = self._cell.begin_parse()
-                self._root = HashmapType[V]().load_from(cs, self._key_bits, self._value_ti)
+                self._root = HashmapAugType[V, E]().load_from(
+                    cs, self._key_bits, self._value_ti, self._extra_ti
+                )
             self._root_parsed = True
         return self._root
 
@@ -253,8 +297,8 @@ class HashmapDict[V]:
     def serialize_to(self, builder: Builder) -> None:
         """Serialize the hashmap.
 
-        HashmapE (allow_empty): $0 for empty, $1 ^root for non-empty.
-        Hashmap (!allow_empty): root edge directly in the builder.
+        HashmapAugE (allow_empty): $0 extra for empty, $1 ^root extra for non-empty.
+        HashmapAug (!allow_empty): root edge directly in the builder.
         """
         if self._allow_empty:
             self._serialize_hashmap_e(builder)
@@ -262,54 +306,62 @@ class HashmapDict[V]:
             self._serialize_hashmap(builder)
 
     def _serialize_hashmap_e(self, builder: Builder) -> None:
-        if not self._overlay and self._cell is not None:
-            _ = builder.store_uint(1, 1)
-            _ = builder.store_ref(self._cell)
-            return
         entries = list(self.items())
         if not entries:
             _ = builder.store_uint(0, 1)
+            self._aug.extra_ti.serialize_value(self._aug.eval_empty(), builder)
         else:
-            root_cell = self._build_root(entries)
+            root_cell, root_extra = self._build_root(entries)
             _ = builder.store_uint(1, 1)
             _ = builder.store_ref(root_cell)
+            self._aug.extra_ti.serialize_value(root_extra, builder)
 
     def _serialize_hashmap(self, builder: Builder) -> None:
-        if not self._overlay and self._cell is not None:
-            _ = builder.store_slice(self._cell.begin_parse())
-            return
         entries = list(self.items())
         assert entries, "non-empty Hashmap cannot be serialized as empty"
-        root_cell = self._build_root(entries)
+        root_cell, _ = self._build_root(entries)
         _ = builder.store_slice(root_cell.begin_parse())
 
-    def _build_root(self, entries: list[tuple[int, V]]) -> Cell:
+    def _build_root(self, entries: list[tuple[int, V]]) -> tuple[Cell, E]:
         keys = [int2ba(k, self._key_bits) for k, _ in entries]
         vals = [v for _, v in entries]
-        return _build_hashmap(keys, vals, 0, len(keys), 0, self._key_bits, self._value_ti)
+        return _build_hashmap(
+            keys, vals, 0, len(keys), 0, self._key_bits, self._value_ti, self._aug
+        )
 
     @classmethod
     def load_from(
-        cls, cs: Slice, key_bits: int, value_ti: TypeInfo[V], allow_empty: bool = True
-    ) -> HashmapDict[V]:
+        cls,
+        cs: Slice,
+        key_bits: int,
+        value_ti: TypeInfo[V],
+        extra_ti: TypeInfo[E] = UnitTypeInfo,
+        allow_empty: bool = True,
+        aug: Augmentation[V, E] = UnitAug,
+    ) -> HashmapDict[V, E]:
         """Load a hashmap from a slice.
 
-        allow_empty=True: HashmapE format ($0 for empty, $1 ^root for non-empty)
-        allow_empty=False: Hashmap format (always a root edge, read directly from cs)
+        allow_empty=True: HashmapAugE format ($0 extra for empty, $1 ^root extra)
+        allow_empty=False: HashmapAug format (root edge directly from cs)
         """
         if allow_empty:
             if cs.load_bit():
                 cell = cs.load_ref()
-                return cls(key_bits, value_ti, cell, allow_empty=True)
-            return cls(key_bits, value_ti, allow_empty=True)
+                _ = extra_ti.load_from(cs)
+                return cls(key_bits, value_ti, extra_ti, aug, cell, allow_empty=True)
+            _ = extra_ti.load_from(cs)
+            return cls(key_bits, value_ti, extra_ti, aug, allow_empty=True)
         else:
             b = Builder()
             _ = b.store_slice(cs)
-            return cls(key_bits, value_ti, b.end_cell(), allow_empty=False)
+            return cls(key_bits, value_ti, extra_ti, aug, b.end_cell(), allow_empty=False)
 
     @classmethod
     def type_info(
-        cls, key_bits: int, value_ti: TypeInfo[V], allow_empty: bool = True
+        cls,
+        key_bits: int,
+        value_ti: TypeInfo[V],
+        allow_empty: bool = True,
     ) -> TypeInfo[HashmapDict[V]]:
         """Create a TypeInfo for HashmapDict — used by Ref[Hashmap] and generics."""
         return HashmapDictTypeInfo[V]().instantiate(key_bits, value_ti, allow_empty)
@@ -323,12 +375,16 @@ class HashmapDictTypeInfo[V](InstantiableTypeInfo[HashmapDict[V], int, TypeInfo[
 
     @override
     def load_from(
-        self, cs: Slice, key_bits: int, value_ti: TypeInfo[V], allow_empty: bool
+        self,
+        cs: Slice,
+        key_bits: int,
+        value_ti: TypeInfo[V],
+        allow_empty: bool,
     ) -> HashmapDict[V]:
-        return HashmapDict[V].load_from(cs, key_bits, value_ti, allow_empty)
+        return HashmapDict[V].load_from(cs, key_bits, value_ti, allow_empty=allow_empty)
 
 
-def _build_hashmap[V](
+def _build_hashmap[V, E](
     keys: list[bitarray],
     vals: list[V],
     lo: int,
@@ -336,18 +392,29 @@ def _build_hashmap[V](
     pos: int,
     key_bits: int,
     value_ti: TypeInfo[V],
-) -> Cell:
+    aug: Augmentation[V, E],
+) -> tuple[Cell, E]:
+    """Build a hashmap cell from sorted key/value arrays. Returns (cell, extra)."""
     assert lo < hi
     prefix = _common_prefix(keys, lo, hi, pos)
     pos += len(prefix)
     b = Builder()
     _serialize_label(b, prefix, key_bits - (pos - len(prefix)))
     if hi - lo == 1:
+        extra = aug.eval_leaf(vals[lo])
+        aug.extra_ti.serialize_value(extra, b)
         value_ti.serialize_value(vals[lo], b)
+        return (b.end_cell(), extra)
     else:
         split = _split_at_bit(keys, lo, hi, pos)
-        left_cell = _build_hashmap(keys, vals, lo, split, pos + 1, key_bits, value_ti)
-        right_cell = _build_hashmap(keys, vals, split, hi, pos + 1, key_bits, value_ti)
+        left_cell, left_extra = _build_hashmap(
+            keys, vals, lo, split, pos + 1, key_bits, value_ti, aug
+        )
+        right_cell, right_extra = _build_hashmap(
+            keys, vals, split, hi, pos + 1, key_bits, value_ti, aug
+        )
         _ = b.store_ref(left_cell)
         _ = b.store_ref(right_cell)
-    return b.end_cell()
+        extra = aug.merge(left_extra, right_extra)
+        aug.extra_ti.serialize_value(extra, b)
+        return (b.end_cell(), extra)

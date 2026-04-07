@@ -20,7 +20,7 @@ from ._base import StrategyBuilderProtocol, TypeStrategy
 
 @final
 class HashmapStrategy(TypeStrategy):
-    """Simplified Hashmap/HashmapE → HashmapDict[V]."""
+    """Simplified Hashmap/HashmapE → HashmapDict[V, None]."""
 
     def __init__(
         self,
@@ -56,16 +56,23 @@ class HashmapStrategy(TypeStrategy):
 
     @override
     def py_type(self) -> str:
-        return f"HashmapDict[{self._val_py_type}]"
+        return f"HashmapDict[{self._val_py_type}, None]"
 
     @override
     def type_info_expr(self) -> str:
         allow = "True" if self._allow_empty else "False"
-        return f"{self.py_type()}.type_info({self._key_bits.local}, {self._val_ti}, allow_empty={allow})"
+        return (
+            f"{self.py_type()}.type_info("
+            f"{self._key_bits.local}, {self._val_ti}, allow_empty={allow})"
+        )
 
     @override
     def type_info_expr_self(self) -> str:
-        return f"{self.py_type()}.type_info({self._key_bits_self.self_}, {self._val_ti_self}, allow_empty={self._allow_empty})"
+        return (
+            f"{self.py_type()}.type_info("
+            f"{self._key_bits_self.self_}, {self._val_ti_self},"
+            f" allow_empty={self._allow_empty})"
+        )
 
     @override
     def emit_serialize_assertions(self, field_name: str, sb: SourceBuilder) -> bool:

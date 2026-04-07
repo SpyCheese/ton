@@ -237,3 +237,191 @@ class TestHashmapDict:
         assert len(d) == 3
         for k, v in entries.items():
             assert d[k] == v
+
+
+class _SumAug:
+    """Sum augmentation: extra at each node = sum of leaf values in subtree."""
+
+    @property
+    def extra_ti(self):
+        return UintTypeConstructor(32)
+
+    def eval_leaf(self, value: int) -> int:
+        return value
+
+    def merge(self, left: int, right: int) -> int:
+        return left + right
+
+    def eval_empty(self) -> int:
+        return 0
+
+
+_sum_aug = _SumAug()
+_uint32 = UintTypeConstructor(32)
+
+
+class TestAugmentedHashmapDict:
+    """Tests for HashmapDict with augmentation (HashmapAugE)."""
+
+    def test_serialize_empty(self):
+        """Empty augmented dict serializes as $0 + extra."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug)
+        b = Builder()
+        d.serialize_to(b)
+        cs = b.end_cell().begin_parse()
+        assert cs.load_uint(1) == 0  # ahme_empty tag
+        assert cs.load_uint(32) == 0  # eval_empty() extra
+
+    def test_serialize_single(self):
+        """Single entry: root extra = eval_leaf(value)."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug)
+        d[42] = 100
+        b = Builder()
+        d.serialize_to(b)
+        cs = b.end_cell().begin_parse()
+        assert cs.load_uint(1) == 1  # ahme_root tag
+        _ = cs.load_ref()  # skip root cell
+        assert cs.load_uint(32) == 100  # root extra = eval_leaf(100)
+
+    def test_serialize_multiple_merges(self):
+        """Multiple entries: root extra = sum of all values."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug)
+        d[0] = 10
+        d[128] = 20
+        d[255] = 30
+        b = Builder()
+        d.serialize_to(b)
+        cs = b.end_cell().begin_parse()
+        assert cs.load_uint(1) == 1  # ahme_root tag
+        _ = cs.load_ref()
+        assert cs.load_uint(32) == 60  # 10 + 20 + 30
+
+    def test_roundtrip(self):
+        """Serialize then deserialize augmented dict, values preserved."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug)
+        d[1] = 100
+        d[5] = 500
+        d[255] = 999
+
+        b = Builder()
+        d.serialize_to(b)
+        cs = b.end_cell().begin_parse()
+        d2 = HashmapDict[int, int].load_from(cs, 8, _uint32, _uint32, aug=_sum_aug)
+        assert d2.to_dict() == {1: 100, 5: 500, 255: 999}
+
+    def test_roundtrip_reserialize(self):
+        """Loaded augmented dict re-serializes with correct extras."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug)
+        d[0] = 10
+        d[128] = 20
+
+        b = Builder()
+        d.serialize_to(b)
+        cs = b.end_cell().begin_parse()
+        d2 = HashmapDict[int, int].load_from(cs, 8, _uint32, _uint32, aug=_sum_aug)
+        d2[64] = 30
+
+        b2 = Builder()
+        d2.serialize_to(b2)
+        cs2 = b2.end_cell().begin_parse()
+        assert cs2.load_uint(1) == 1
+        _ = cs2.load_ref()
+        assert cs2.load_uint(32) == 60  # 10 + 20 + 30
+
+    def test_getitem_after_load(self):
+        """Deserialized augmented dict supports key lookup."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug)
+        d[10] = 100
+        d[20] = 200
+
+        b = Builder()
+        d.serialize_to(b)
+        d2 = HashmapDict[int, int].load_from(
+            b.end_cell().begin_parse(), 8, _uint32, _uint32, aug=_sum_aug
+        )
+        assert d2[10] == 100
+        assert d2[20] == 200
+        assert 10 in d2
+        assert 99 not in d2
+
+    def test_leaf_extras_in_tree(self):
+        """Leaf nodes inside the tree contain correct extras."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug)
+        d[0] = 42
+
+        b = Builder()
+        d.serialize_to(b)
+        cs = b.end_cell().begin_parse()
+        assert cs.load_uint(1) == 1  # ahme_root tag
+        root = cs.load_ref().begin_parse()
+        # Root is ahm_edge: label then ahmn_leaf(extra, value)
+        # Key 0 = 00000000 (8 bits all zero) → hml_same $11, v=0, n=8
+        assert root.load_uint(2) == 3  # hml_same tag
+        assert root.load_uint(1) == 0  # v = False
+        assert root.load_uint(4) == 8  # n = 8 (#<= 8)
+        # ahmn_leaf: extra then value
+        assert root.load_uint(32) == 42  # extra = eval_leaf(42)
+        assert root.load_uint(32) == 42  # value
+
+    def test_fork_extras_in_tree(self):
+        """Fork nodes inside the tree contain merged extras."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug)
+        d[0] = 10  # left subtree (bit 0 = 0)
+        d[128] = 20  # right subtree (bit 0 = 1)
+
+        b = Builder()
+        d.serialize_to(b)
+        cs = b.end_cell().begin_parse()
+        assert cs.load_uint(1) == 1  # ahme_root tag
+        _ = cs.load_uint(32)  # root-level extra (from ahme_root)
+
+        # Root extra should be in ahme_root envelope, but that's after the ref.
+        # Actually, ahme_root is: $1 ^root extra — let me re-read
+        # We already read the tag and skipped the ref... wait, let me re-do
+        cs2 = b.end_cell().begin_parse()
+        assert cs2.load_uint(1) == 1
+        root_cell = cs2.load_ref()
+        assert cs2.load_uint(32) == 30  # ahme_root extra = 10 + 20
+
+        # Inside the root cell: ahm_edge with label + ahmn_fork
+        root_cs = root_cell.begin_parse()
+        assert root_cs.load_uint(1) == 0  # hml_short
+        assert root_cs.load_uint(1) == 0  # unary_zero
+        # ahmn_fork: left_ref, right_ref, extra
+        left_cell = root_cs.load_ref()
+        right_cell = root_cs.load_ref()
+        fork_extra = root_cs.load_uint(32)
+        assert fork_extra == 30  # merge(10, 20)
+
+        # Left leaf: label + extra + value
+        left_cs = left_cell.begin_parse()
+        # label for remaining 7 bits: key 0 = 0000000
+        # hml_same $11, v=0, n=7
+        assert left_cs.load_uint(2) == 3  # hml_same tag
+        assert left_cs.load_uint(1) == 0  # v = False
+        assert left_cs.load_uint(3) == 7  # n = 7 (#<= 7)
+        assert left_cs.load_uint(32) == 10  # leaf extra
+        assert left_cs.load_uint(32) == 10  # leaf value
+
+        # Right leaf: key 128 = 10000000, remaining 7 bits = 0000000
+        right_cs = right_cell.begin_parse()
+        assert right_cs.load_uint(2) == 3  # hml_same
+        assert right_cs.load_uint(1) == 0  # v = False
+        assert right_cs.load_uint(3) == 7  # n = 7
+        assert right_cs.load_uint(32) == 20  # leaf extra
+        assert right_cs.load_uint(32) == 20  # leaf value
+
+    def test_non_empty_hashmap_aug(self):
+        """HashmapAug (allow_empty=False) serialization."""
+        d = HashmapDict(8, _uint32, _uint32, _sum_aug, allow_empty=False)
+        d[1] = 100
+        d[2] = 200
+
+        b = Builder()
+        d.serialize_to(b)
+
+        # Deserialize as HashmapAug (no tag, edge directly in slice)
+        d2 = HashmapDict[int, int].load_from(
+            b.end_cell().begin_parse(), 8, _uint32, _uint32, allow_empty=False, aug=_sum_aug
+        )
+        assert d2.to_dict() == {1: 100, 2: 200}

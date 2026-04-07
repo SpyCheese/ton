@@ -208,7 +208,7 @@ class TestHashmapSimplification:
                 _ = hm.set_int_key(k, Builder().store_uint(v, 32).end_cell().begin_parse())  # pyright: ignore[reportUnknownMemberType]
             cell = hm.serialize()
             assert cell is not None
-            d = HashmapDict(8, UintTypeConstructor(32), cell)
+            d = HashmapDict(8, UintTypeConstructor(32), cell=cell)
         return dict_field(data=d, extra=extra)
 
     def test_empty_roundtrip(self):

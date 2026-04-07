@@ -31,6 +31,8 @@ class WellKnownType(Enum):
     BIT = auto()
     HASHMAP_E = auto()
     HASHMAP = auto()
+    HASHMAP_AUG_E = auto()
+    HASHMAP_AUG = auto()
     VAR_UINTEGER = auto()
     VAR_INTEGER = auto()
 

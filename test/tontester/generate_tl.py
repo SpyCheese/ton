@@ -63,7 +63,9 @@ if __name__ == "__main__":
         generate_tlb_python(tlb_schemas / f"{name}.tlb", tlb_out / f"{name}.py", simplify=config)
 
     # Generate hashmap helper (with bit/unary simplifications only)
-    hashmap_simplify = SimplifyConfig(simplify=frozenset({WellKnownType.BIT, WellKnownType.UNARY}))
+    hashmap_simplify = SimplifyConfig(
+        simplify=frozenset({WellKnownType.BIT, WellKnownType.UNARY, WellKnownType.UNIT})
+    )
     hashmap_tlb = repo_root / "test/tontester/src/tlb/hashmap_auto.tlb"
     hashmap_out = repo_root / "test/tontester/src/tlb/hashmap_auto.py"
     generate_tlb_python(hashmap_tlb, hashmap_out, simplify=hashmap_simplify)

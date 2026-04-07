@@ -61,6 +61,18 @@ hm_edge#_ {n:#} {X:Type} {l:#} {m:#}
 hme_empty$0 {n:#} {X:Type} = HashmapE n X;
 hme_root$1 {n:#} {X:Type} root:^(Hashmap n X) = HashmapE n X;
 
+ahmn_leaf#_ {X:Type} {Y:Type} extra:Y value:X = HashmapAugNode 0 X Y;
+ahmn_fork#_ {n:#} {X:Type} {Y:Type} left:^(HashmapAug n X Y)
+  right:^(HashmapAug n X Y) extra:Y = HashmapAugNode (n + 1) X Y;
+
+ahm_edge#_ {n:#} {X:Type} {Y:Type} {l:#} {m:#}
+  label:(HmLabel ~l n) {n = (~m) + l}
+  node:(HashmapAugNode m X Y) = HashmapAug n X Y;
+
+ahme_empty$0 {n:#} {X:Type} {Y:Type} extra:Y = HashmapAugE n X Y;
+ahme_root$1 {n:#} {X:Type} {Y:Type} root:^(HashmapAug n X Y)
+  extra:Y = HashmapAugE n X Y;
+
 var_uint$_ {n:#} len:(#< n) value:(uint (len * 8)) = VarUInteger n;
 var_int$_ {n:#} len:(#< n) value:(int (len * 8)) = VarInteger n;
 """
@@ -76,6 +88,8 @@ _WELL_KNOWN_NAMES: list[tuple[WellKnownType, str]] = [
     (WellKnownType.UNARY, "Unary"),
     (WellKnownType.HASHMAP_E, "HashmapE"),
     (WellKnownType.HASHMAP, "Hashmap"),
+    (WellKnownType.HASHMAP_AUG_E, "HashmapAugE"),
+    (WellKnownType.HASHMAP_AUG, "HashmapAug"),
     (WellKnownType.VAR_UINTEGER, "VarUInteger"),
     (WellKnownType.VAR_INTEGER, "VarInteger"),
 ]
