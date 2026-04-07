@@ -115,14 +115,18 @@ class Ref[X](TLBRecord):
         self._value_cell = cell
         self._value = None
 
+    @property
+    def cell(self):
+        if self._value_cell is not None:
+            return self._value_cell
+        else:
+            builder = Builder()
+            self._tx.serialize_value(cast(X, self._value), builder)
+            return builder.end_cell()
+
     @override
     def serialize_to(self, builder: Builder):
-        if self._value_cell is not None:
-            _ = builder.store_ref(self._value_cell)
-        else:
-            child = Builder()
-            self._tx.serialize_value(cast(X, self._value), child)
-            _ = builder.store_ref(child.end_cell())
+        _ = builder.store_ref(self.cell)
 
     @override
     def __repr__(self):

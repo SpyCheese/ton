@@ -192,3 +192,30 @@ class TestCellRef:
         _ = b.store_uint(999, 32)
         ref.set_cell(b.end_cell())
         assert ref.ref == 999
+
+    def test_cell_from_value(self):
+        """Ref[X].cell serializes the value into a Cell."""
+        ref: Ref[int] = Ref(_uint32, 12345)
+        cell = ref.cell
+        assert cell.begin_parse().load_uint(32) == 12345
+
+    def test_cell_from_raw_cell(self):
+        """Ref[X].cell returns the raw cell when constructed from a Cell."""
+        from pytoniq_core import Builder
+
+        b = Builder()
+        _ = b.store_uint(777, 32)
+        original = b.end_cell()
+        ref: Ref[int] = Ref(_uint32, original)
+        assert ref.cell is original
+
+    def test_cell_does_not_deserialize(self):
+        """Ref[X].cell does not trigger deserialization of a raw cell."""
+        from pytoniq_core import Builder
+
+        b = Builder()
+        _ = b.store_uint(42, 32)
+        ref: Ref[int] = Ref(_uint32, b.end_cell())
+        _ = ref.cell
+        assert ref._value_cell is not None  # pyright: ignore[reportPrivateUsage]
+        assert ref._value is None  # pyright: ignore[reportPrivateUsage]
