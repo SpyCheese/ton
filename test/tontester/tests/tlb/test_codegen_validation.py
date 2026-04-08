@@ -5,6 +5,7 @@ from bitarray import bitarray
 from generated.validation import (
     Anon_cons,
     ConstrainedType,
+    ContainerParentType,
     EqFieldType,
     FixedBitsType,
     InlineGenericType,
@@ -15,6 +16,9 @@ from generated.validation import (
     ValType,
     VarBitsFieldType,
     constrained,
+    container_empty,
+    container_full,
+    container_parent,
     eq_field,
     fixed_bits,
     inline_generic,
@@ -323,6 +327,52 @@ class TestCheckType:
         p.check_type(1, UintTypeConstructor(64))
         with pytest.raises(AssertionError):
             p.check_type(0, IntTypeConstructor(32))
+
+    def test_check_type_skips_untracked_param(self):
+        """container_empty doesn't track X, so check_type(0, ...) is a no-op."""
+        from tlb.object import UintTypeConstructor
+
+        obj = container_empty(UintTypeConstructor(64), extra=42)
+        # idx=0 (X) — not tracked, should silently pass regardless of what ti is
+        obj.check_type(0, UintTypeConstructor(32))
+        obj.check_type(0, UintTypeConstructor(999))
+        # idx=1 (Y) — tracked, should assert
+        obj.check_type(1, UintTypeConstructor(64))
+        with pytest.raises(AssertionError):
+            obj.check_type(1, UintTypeConstructor(32))
+        # idx=2 — not a type param at all, should raise ValueError
+        with pytest.raises(ValueError, match="no type param at index 2"):
+            obj.check_type(2, UintTypeConstructor(32))
+
+    def test_container_parent_empty_roundtrip(self):
+        """Wrapper serializing container_empty — exercises check_type on untracked X param."""
+        from tlb.object import UintTypeConstructor
+
+        inner = container_empty(UintTypeConstructor(64), extra=100)
+        obj = container_parent(inner=inner)
+        result = ContainerParentType().load_from(obj.serialize().begin_parse())
+        assert isinstance(result.inner, container_empty)
+        assert result.inner.extra == 100
+
+    def test_container_parent_full_roundtrip(self):
+        """Wrapper serializing container_full — all type params tracked and checked."""
+        from tlb.object import UintTypeConstructor
+
+        inner = container_full(UintTypeConstructor(32), UintTypeConstructor(64), value=7, extra=200)
+        obj = container_parent(inner=inner)
+        result = ContainerParentType().load_from(obj.serialize().begin_parse())
+        assert isinstance(result.inner, container_full)
+        assert result.inner.value == 7
+        assert result.inner.extra == 200
+
+    def test_container_parent_full_wrong_type(self):
+        """container_full with wrong X type — caught by check_type on serialize."""
+        from tlb.object import UintTypeConstructor
+
+        inner = container_full(UintTypeConstructor(8), UintTypeConstructor(64), value=7, extra=200)
+        obj = container_parent(inner=inner)
+        with pytest.raises(AssertionError):
+            _ = obj.serialize()
 
 
 class TestDeserializeConstraints:

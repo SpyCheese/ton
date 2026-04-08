@@ -398,8 +398,6 @@ class ConstructorGenerator:
                 expr = self.c.result_param_exprs.get(tlp.position)
                 if not isinstance(expr, TypeParamRef):
                     continue
-                if expr.param not in self.type_params:
-                    continue
                 ti_name = self.scope.lookup(expr.param)
                 if first:
                     sb.line(f"if idx == {tlp.position}:")
@@ -407,7 +405,8 @@ class ConstructorGenerator:
                 else:
                     sb.line(f"elif idx == {tlp.position}:")
                 with sb.block():
-                    sb.line(f"assert self.{ti_name} == ti")
+                    if expr.param in self.type_params:
+                        sb.line(f"assert self.{ti_name} == ti")
                     sb.line("return")
             sb.line("raise ValueError(f'no type param at index {idx}')")
 

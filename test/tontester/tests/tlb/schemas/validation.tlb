@@ -33,3 +33,8 @@ inline_generic$_ x:(Maybe [a:uint32 b:uint64]) = InlineGeneric;
 // Parent with concrete type arg for check_type testing
 pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;
 typed_parent$_ inner:(Pair uint32 uint64) = TypedParent;
+
+// Union where one constructor doesn't use all type params (like ahme_empty)
+container_empty$0 {X:Type} {Y:Type} extra:Y = Container X Y;
+container_full$1 {X:Type} {Y:Type} value:X extra:Y = Container X Y;
+container_parent$_ inner:(Container uint32 uint64) = ContainerParent;
