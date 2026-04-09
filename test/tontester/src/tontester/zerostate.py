@@ -325,24 +325,24 @@ def _build_config_params(
 ) -> list[ConfigParam]:
     """Build the list of ConfigParam objects for the zerostate."""
     from block.generated import (
-        ConfigParam_cons,
-        ConfigParam_cons_1,
-        ConfigParam_cons_2,
-        ConfigParam_cons_7,
-        ConfigParam_cons_8,
-        ConfigParam_cons_9,
-        ConfigParam_cons_10,
-        ConfigParam_cons_11,
-        ConfigParam_cons_13,
-        ConfigParam_cons_14,
-        ConfigParam_cons_15,
-        ConfigParam_cons_16,
-        ConfigParam_cons_17,
-        ConfigParam_cons_18,
-        ConfigParam_cons_20,
-        ConfigParam_cons_21,
-        ConfigParam_cons_22,
-        ConfigParam_cons_26,
+        ConfigParam_0,
+        ConfigParam_1,
+        ConfigParam_2,
+        ConfigParam_7,
+        ConfigParam_8,
+        ConfigParam_9,
+        ConfigParam_10,
+        ConfigParam_11,
+        ConfigParam_13,
+        ConfigParam_14,
+        ConfigParam_15,
+        ConfigParam_16,
+        ConfigParam_17,
+        ConfigParam_18,
+        ConfigParam_28,
+        ConfigParam_29,
+        ConfigParam_30,
+        ConfigParam_34,
         StoragePricesType,
         config_block_limits,
         config_fwd_prices,
@@ -355,26 +355,24 @@ def _build_config_params(
     params: list[ConfigParam] = []
 
     # Param 0: config address (AllOnes * 5)
-    params.append(ConfigParam_cons(config_addr=_bits256_int(_ALL_ONES * 5)))
+    params.append(ConfigParam_0(config_addr=_bits256_int(_ALL_ONES * 5)))
 
-    # Param 1: elector address (AllOnes * 3)
-    params.append(ConfigParam_cons_1(elector_addr=_bits256_int(_ALL_ONES * 3)))
+    # Param 1: elector address (AllOnes * 3)Grams
+    params.append(ConfigParam_1(elector_addr=_bits256_int(_ALL_ONES * 3)))
 
     # Param 2: minter address (wallet)
-    params.append(ConfigParam_cons_2(minter_addr=_bits256_int(wallet_addr)))
+    params.append(ConfigParam_2(minter_addr=_bits256_int(wallet_addr)))
 
     # Param 7: to_mint extra currencies
     mint_dict: HashmapDict[int] = HashmapDict(32, VarUIntTypeConstructor(32))
     mint_dict[0xFFFF_FFEF] = 1_000_000_000_000  # -17 as uint32
     mint_dict[239] = 666_666_666_666
-    params.append(ConfigParam_cons_7(to_mint=extra_currencies(dict=mint_dict)))
+    params.append(ConfigParam_7(to_mint=extra_currencies(dict=mint_dict)))
 
     # Param 8: version + capabilities
     cap_value = 2 | 4 | 8 | 32 | 64 | 128
     params.append(
-        ConfigParam_cons_8(
-            field=capabilities(version=config.global_version, capabilities=cap_value)
-        )
+        ConfigParam_8(field=capabilities(version=config.global_version, capabilities=cap_value))
     )
 
     # Param 9: mandatory params
@@ -382,14 +380,14 @@ def _build_config_params(
     mandatory_dict: HashmapDict[None] = HashmapDict(32, UnitTypeInfo, allow_empty=False)
     for idx in mandatory:
         mandatory_dict[idx] = None
-    params.append(ConfigParam_cons_9(mandatory_params=mandatory_dict))
+    params.append(ConfigParam_9(mandatory_params=mandatory_dict))
 
     # Param 10: critical params
-    critical = [0xFFFF_FC19, 0xFFFF_FC18, 0xFFFF_FC17, 0, 1, 9, 10, 12, 14, 15, 16, 17, 32, 34, 36]
+    critical = [-999, -1000, -1001, 0, 1, 9, 10, 12, 14, 15, 16, 17, 32, 34, 36]
     critical_dict: HashmapDict[None] = HashmapDict(32, UnitTypeInfo, allow_empty=False)
     for idx in critical:
         critical_dict[idx & 0xFFFF_FFFF] = None
-    params.append(ConfigParam_cons_10(critical_params=critical_dict))
+    params.append(ConfigParam_10(critical_params=critical_dict))
 
     # Param 11: config proposal setup
     normal_setup = cfg_vote_cfg(
@@ -413,7 +411,7 @@ def _build_config_params(
         cell_price=1_000,
     )
     params.append(
-        ConfigParam_cons_11(
+        ConfigParam_11(
             field=cfg_vote_setup(
                 normal_params=Ref(ConfigProposalSetupType(), normal_setup),
                 critical_params=Ref(ConfigProposalSetupType(), critical_setup),
@@ -423,7 +421,7 @@ def _build_config_params(
 
     # Param 13: complaint prices
     params.append(
-        ConfigParam_cons_13(
+        ConfigParam_13(
             field=complaint_prices(
                 deposit=_grams(100 * GRAM),
                 bit_price=_grams(1),
@@ -434,7 +432,7 @@ def _build_config_params(
 
     # Param 14: block create fees
     params.append(
-        ConfigParam_cons_14(
+        ConfigParam_14(
             field=block_grams_created(
                 masterchain_block_fee=_grams(int(1.7 * GRAM)),
                 basechain_block_fee=_grams(1 * GRAM),
@@ -444,7 +442,7 @@ def _build_config_params(
 
     # Param 15: election params
     params.append(
-        ConfigParam_cons_15(
+        ConfigParam_15(
             validators_elected_for=2400,
             elections_start_before=800,
             elections_end_before=60,
@@ -454,7 +452,7 @@ def _build_config_params(
 
     # Param 16: validator counts
     params.append(
-        ConfigParam_cons_16(
+        ConfigParam_16(
             max_validators=1000,
             max_main_validators=1000,
             min_validators=1000,
@@ -463,7 +461,7 @@ def _build_config_params(
 
     # Param 17: stake limits
     params.append(
-        ConfigParam_cons_17(
+        ConfigParam_17(
             min_stake=_grams(10_000 * GRAM),
             max_stake=_grams(100_000 * GRAM),
             min_total_stake=_grams(10_000 * GRAM),
@@ -483,7 +481,7 @@ def _build_config_params(
         32, StoragePricesType(), allow_empty=False
     )
     sp_dict[0] = sp
-    params.append(ConfigParam_cons_18(field=sp_dict))
+    params.append(ConfigParam_18(field=sp_dict))
 
     # Param 20: mc gas prices
     params.append(
@@ -584,7 +582,7 @@ def _build_config_params(
 
     # Param 28: catchain config
     params.append(
-        ConfigParam_cons_20(
+        ConfigParam_28(
             field=catchain_config_new(
                 flags=0,
                 shuffle_mc_validators=True,
@@ -598,7 +596,7 @@ def _build_config_params(
 
     # Param 29: consensus config
     params.append(
-        ConfigParam_cons_21(
+        ConfigParam_29(
             field=consensus_config_v4(
                 flags=0,
                 use_quic=False,
@@ -639,7 +637,7 @@ def _build_config_params(
             max_leader_window_desync=config.shard_consensus.max_leader_window_desync,
         )
     params.append(
-        ConfigParam_cons_22(
+        ConfigParam_30(
             field=new_consensus_config_all(
                 mc=Ref(NewConsensusConfigType(), mc_ncp) if mc_ncp is not None else None,
                 shard=Ref(NewConsensusConfigType(), shard_ncp) if shard_ncp is not None else None,
@@ -661,7 +659,7 @@ def _build_config_params(
 
     n_validators = len(validator_keys)
     params.append(
-        ConfigParam_cons_26(
+        ConfigParam_34(
             cur_validators=validators_ext(
                 utime_since=now_time,
                 utime_until=now_time + 3600,
@@ -701,12 +699,6 @@ def _empty_shard_hashes() -> ShardHashes_cons:
                 BinTreeType[ShardDescr].instantiate(ShardDescrType())
             ),
         ),
-    )
-
-
-def _empty_old_mc_blocks() -> OldMcBlocksInfo_cons:
-    return OldMcBlocksInfo_cons(
-        field=ahme_empty(32, KeyMaxLtType(), extra=KeyMaxLtAug().eval_empty()),
     )
 
 
@@ -824,18 +816,17 @@ Zerostate = ZerostateResult
 
 
 def create_zerostate(
-    state_dir: Path, config: NetworkConfig, validator_keys: list[Key]
+    state_dir: Path,
+    config: NetworkConfig,
+    validator_keys: list[Key],
+    *,
+    basechain_fhash_override: bytes | None = None,
 ) -> ZerostateResult:
     now_time = int(time.time())
     zs = ZerostateBuilder()
 
     # --- Wallet ---
-    wallet_pk_path = state_dir / "main-wallet.pk"
-    if wallet_pk_path.exists():
-        wallet_key = nacl.signing.SigningKey(wallet_pk_path.read_bytes())
-    else:
-        wallet_key = nacl.signing.SigningKey.generate()
-        _ = wallet_pk_path.write_bytes(bytes(wallet_key))
+    wallet_key = nacl.signing.SigningKey.generate()
 
     wallet_bp = WalletV1Blueprint(workchain=-1, private_key=wallet_key)
     wallet_bp.address = Address((-1, b"\x00" * 32))
@@ -892,17 +883,15 @@ def create_zerostate(
         ),
         custom=None,
     )
+
     base_state_cell = base_state.serialize()
     base_boc = base_state_cell.to_boc()
-    base_fhash = hashlib.sha256(base_boc).digest()
+    base_fhash = basechain_fhash_override or hashlib.sha256(base_boc).digest()
     base_rhash = base_state_cell.hash
-
     _ = (state_dir / "basestate0.boc").write_bytes(base_boc)
-    _ = (state_dir / "basestate0.fhash").write_bytes(base_fhash)
-    _ = (state_dir / "basestate0.rhash").write_bytes(base_rhash)
 
     # --- Now add param 12 (workchains) with base state hashes ---
-    from block.generated import ConfigParam_cons_12
+    from block.generated import ConfigParam_12
 
     wc_descr = workchain_v2(
         enabled_since=now_time,
@@ -929,11 +918,11 @@ def create_zerostate(
 
     wc_dict: HashmapDict[WorkchainDescr] = HashmapDict(32, WorkchainDescrType())
     wc_dict[0] = wc_descr
-    config_params.append(ConfigParam_cons_12(workchains=wc_dict))
+    config_params.append(ConfigParam_12(workchains=wc_dict))
 
     # --- Add param 31 (special/fundamental addresses) ---
     # In Fift: wallet, smc3, and elector call make_special; config does NOT.
-    from block.generated import ConfigParam_cons_23 as ConfigParam_31
+    from block.generated import ConfigParam_31
 
     special_dict: HashmapDict[None] = HashmapDict(256, UnitTypeInfo)
     special_dict[int.from_bytes(wallet_bp.address.hash_part, "big")] = None
@@ -976,7 +965,9 @@ def create_zerostate(
                     catchain_seqno=0,
                     nx_cc_updated=True,
                 ),
-                prev_blocks=_empty_old_mc_blocks(),
+                prev_blocks=OldMcBlocksInfo_cons(
+                    field=ahme_empty(32, KeyMaxLtType(), extra=KeyMaxLtAug().eval_empty()),
+                ),
                 after_key_block=True,
                 last_key_block=None,
                 block_create_stats=None,
@@ -1014,10 +1005,7 @@ def create_zerostate(
     mc_boc = mc_state_cell.to_boc()
     mc_fhash = hashlib.sha256(mc_boc).digest()
     mc_rhash = mc_state_cell.hash
-
     _ = (state_dir / "zerostate.boc").write_bytes(mc_boc)
-    _ = (state_dir / "zerostate.fhash").write_bytes(mc_fhash)
-    _ = (state_dir / "zerostate.rhash").write_bytes(mc_rhash)
 
     return ZerostateResult(
         masterchain=WorkchainState(
