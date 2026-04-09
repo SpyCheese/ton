@@ -70,7 +70,11 @@ if __name__ == "__main__":
     hashmap_out = repo_root / "test/tontester/src/tlb/hashmap_auto.py"
     generate_tlb_python(hashmap_tlb, hashmap_out, simplify=hashmap_simplify)
 
-    # Generate block.tlb
+    # Generate block.tlb (test copy with inline_only for existing e2e tests)
     block_tlb = repo_root / "crypto/block/block.tlb"
     block_out = tlb_out / "block.py"
     generate_tlb_python(block_tlb, block_out, simplify=inline_only)
+
+    # Generate block.tlb (full simplifications for the block module)
+    block_module_out = repo_root / "test/tontester/src/block/generated.py"
+    generate_tlb_python(block_tlb, block_module_out, simplify=simplify_all)

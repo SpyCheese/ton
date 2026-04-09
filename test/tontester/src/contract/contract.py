@@ -29,6 +29,10 @@ class Provider(Protocol):
     async def send_external(self, message: MessageAny) -> None: ...
 
 
+class Zerostate(Protocol):
+    def deploy(self, address: Address, state_init: StateInit, balance: CurrencyCollection): ...
+
+
 class StateReader(Protocol):
     async def fetch[T](self, address: Address, parser: Callable[[Cell], T]) -> T: ...
 
@@ -86,3 +90,8 @@ class Blueprint[S: ContractState](ABC):
         msg = MessageAny(info=info, init=self.state_init, body=Cell.empty())
         await provider.send_external(msg)
         return self.materialize(provider)
+
+    def add_to_zerostate[T](
+        self: ContractBlueprint[T], zerostate: Zerostate, balance: CurrencyCollection
+    ):
+        zerostate.deploy(self.address, self.state_init, balance)
