@@ -160,13 +160,20 @@ def _split_at_bit(keys: list[bitarray], lo: int, hi: int, pos: int) -> int:
 
 
 def _serialize_label(builder: Builder, label: bitarray, max_len: int) -> None:
+    # k = ceil(log2(max_len + 1))
+    # hml_short ('0'): 2n + 2 bits
+    # hml_long  ('10'): 2 + k + n bits
+    # hml_same  ('11'): 3 + k bits
+
     n = len(label)
-    if n > 0 and (label.all() or not label.any()):
+    k = max_len.bit_length() if max_len > 0 else 0
+    is_same = n > 0 and (label.all() or not label.any())
+    if is_same and n > 1 and k < 2 * n - 1:
         hml_same(max_len, v=bool(label[0]), n=n).serialize_to(builder)
-    elif n < 10:
-        hml_short(max_len, n, len=n, s=label).serialize_to(builder)
-    else:
+    elif k < n:
         hml_long(max_len, n=n, s=label).serialize_to(builder)
+    else:
+        hml_short(max_len, n, len=n, s=label).serialize_to(builder)
 
 
 @final
