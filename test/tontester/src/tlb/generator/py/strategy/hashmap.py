@@ -33,6 +33,8 @@ class HashmapStrategy(TypeStrategy):
         self._ctx = ctx
         self._allow_empty = allow_empty
         ctx.use("HashmapDict")
+        ctx.use("UnitTypeInfo")
+        ctx.use("UnitAug")
 
         t = type_expr.type
         # First param is key_bits (nat), second is value type
@@ -77,8 +79,12 @@ class HashmapStrategy(TypeStrategy):
     @override
     def emit_serialize_assertions(self, field_name: str, sb: SourceBuilder) -> bool:
         key_expr = self._key_bits_self.self_
+        allow = self._allow_empty
         sb.line(f"assert {field_name}.key_bits == {key_expr}")
         sb.line(f"assert {field_name}.value_ti == {self._val_ti_self}")
+        sb.line(f"assert {field_name}.allow_empty is {allow}")
+        sb.line(f"assert {field_name}.extra_ti is UnitTypeInfo")
+        sb.line(f"assert {field_name}.aug is UnitAug")
         return True
 
     @override

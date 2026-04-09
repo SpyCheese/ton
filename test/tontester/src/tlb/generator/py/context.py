@@ -63,47 +63,39 @@ class PyContext:
         self._next_tmp += 1
         return name
 
+    _IMPORTS: dict[str, list[str]] = {
+        "dataclasses": ["dataclass"],
+        "typing": ["Literal", "final", "override"],
+        "bitarray": ["bitarray"],
+        "pytoniq_core": ["Builder", "Cell", "Slice"],
+        "tlb.object": [
+            "AnyType",
+            "BitsTypeConstructor",
+            "BoundedUintTypeConstructor",
+            "CellRefType",
+            "InstantiableTypeInfo",
+            "BoolTypeInfo",
+            "FalseTypeInfo",
+            "IntTypeConstructor",
+            "MaybeTypeInfo",
+            "UnitTypeInfo",
+            "Ref",
+            "RefType",
+            "TLBRecord",
+            "TlbModelError",
+            "TrueTypeInfo",
+            "TupleTypeConstructor",
+            "TypeInfo",
+            "UintTypeConstructor",
+            "UnaryTypeInfo",
+            "VarIntTypeConstructor",
+            "VarUIntTypeConstructor",
+        ],
+        "tlb.hashmap": ["HashmapDict", "UnitAug"],
+    }
+
     def emit_imports(self, sb: SourceBuilder) -> None:
-        if "dataclass" in self.used_imports:
-            sb.line("from dataclasses import dataclass")
-        typing_parts = [n for n in ["Literal", "final", "override"] if n in self.used_imports]
-        if typing_parts:
-            sb.line(f"from typing import {', '.join(typing_parts)}")
-        sb.blank()
-        if "bitarray" in self.used_imports:
-            sb.line("from bitarray import bitarray")
-        pytoniq = [n for n in ["Builder", "Cell", "Slice"] if n in self.used_imports]
-        if pytoniq:
-            sb.line(f"from pytoniq_core import {', '.join(pytoniq)}")
-        sb.blank()
-        tlb_obj = [
-            n
-            for n in [
-                "AnyType",
-                "BitsTypeConstructor",
-                "BoundedUintTypeConstructor",
-                "CellRefType",
-                "InstantiableTypeInfo",
-                "BoolTypeInfo",
-                "FalseTypeInfo",
-                "IntTypeConstructor",
-                "MaybeTypeInfo",
-                "UnitTypeInfo",
-                "Ref",
-                "RefType",
-                "TLBRecord",
-                "TlbModelError",
-                "TrueTypeInfo",
-                "TupleTypeConstructor",
-                "TypeInfo",
-                "UintTypeConstructor",
-                "UnaryTypeInfo",
-                "VarIntTypeConstructor",
-                "VarUIntTypeConstructor",
-            ]
-            if n in self.used_imports
-        ]
-        if tlb_obj:
-            sb.line(f"from tlb.object import {', '.join(tlb_obj)}")
-        if "HashmapDict" in self.used_imports:
-            sb.line("from tlb.hashmap import HashmapDict")
+        for module, names in self._IMPORTS.items():
+            used = [n for n in names if n in self.used_imports]
+            if used:
+                sb.line(f"from {module} import {', '.join(used)}")

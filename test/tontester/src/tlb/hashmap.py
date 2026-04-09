@@ -26,7 +26,7 @@ from .hashmap_auto import (
     hml_same,
     hml_short,
 )
-from .object import InstantiableTypeInfo, TypeInfo, UnitTypeInfo
+from .object import InstantiableTypeInfo, TypeInfo, UnitTypeInfo, drain_slice
 
 
 class _Deleted:
@@ -212,6 +212,18 @@ class HashmapDict[V, E = None]:
     def value_ti(self) -> TypeInfo[V]:
         return self._value_ti
 
+    @property
+    def extra_ti(self) -> TypeInfo[E]:
+        return self._extra_ti
+
+    @property
+    def aug(self) -> Augmentation[V, E]:
+        return self._aug
+
+    @property
+    def allow_empty(self) -> bool:
+        return self._allow_empty
+
     def _get_root(self) -> ahm_edge[V, E] | None:
         if not self._root_parsed:
             if self._cell is not None:
@@ -361,6 +373,7 @@ class HashmapDict[V, E = None]:
         else:
             b = Builder()
             _ = b.store_slice(cs)
+            drain_slice(cs)
             return cls(key_bits, value_ti, extra_ti, aug, b.end_cell(), allow_empty=False)
 
     @classmethod
@@ -389,6 +402,10 @@ class HashmapDictTypeInfo[V](InstantiableTypeInfo[HashmapDict[V], int, TypeInfo[
         allow_empty: bool,
     ) -> HashmapDict[V]:
         return HashmapDict[V].load_from(cs, key_bits, value_ti, allow_empty=allow_empty)
+
+    @override
+    def __repr__(self):
+        return "HashmapDict"
 
 
 def _build_hashmap[V, E](

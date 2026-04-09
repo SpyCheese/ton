@@ -10,6 +10,7 @@ from generated.simplify import (
     MaybeRefType,
     MixedType,
     NestedMaybeType,
+    NonemptyDictType,
     SignedValType,
     SimpleMaybeType,
     SizedType,
@@ -21,6 +22,7 @@ from generated.simplify import (
     maybe_ref,
     mixed,
     nested_maybe,
+    nonempty_dict,
     nothing,
     pair,
     signed_val,
@@ -270,6 +272,55 @@ class TestHashmapSimplification:
 
         wrong_dict: HashmapDict[int] = HashmapDict(8, IntTypeConstructor(32))
         obj = dict_field(data=wrong_dict, extra=0)
+        with pytest.raises(AssertionError):
+            _ = obj.serialize()
+
+    def test_wrong_allow_empty_caught(self):
+        """HashmapDict with wrong allow_empty is caught on serialize."""
+        wrong_dict: HashmapDict[int] = HashmapDict(8, UintTypeConstructor(32), allow_empty=False)
+        obj = dict_field(data=wrong_dict, extra=0)
+        with pytest.raises(AssertionError):
+            _ = obj.serialize()
+
+    def test_wrong_extra_ti_caught(self):
+        """A different TypeInfo[None] (not UnitTypeInfo) is caught on serialize."""
+        from tlb.object import UnitTypeInfo, _EnumTypeInfo  # pyright: ignore[reportPrivateUsage]
+
+        fake_unit = _EnumTypeInfo(0, lambda _: 0, lambda _: None)
+        assert fake_unit is not UnitTypeInfo
+        wrong_dict: HashmapDict[int] = HashmapDict(
+            8, UintTypeConstructor(32), extra_ti=fake_unit
+        )
+        obj = dict_field(data=wrong_dict, extra=0)
+        with pytest.raises(AssertionError):
+            _ = obj.serialize()
+
+
+class TestNonemptyHashmap:
+    """Hashmap n X (allow_empty=False) → HashmapDict[X]."""
+
+    def _make_nonempty(self, entries: dict[int, int]) -> nonempty_dict:
+        from pytoniq_core import Builder, HashMap
+
+        assert entries, "Hashmap (non-empty) must have at least one entry"
+        hm = HashMap(8)
+        for k, v in entries.items():
+            _ = hm.set_int_key(k, Builder().store_uint(v, 32).end_cell().begin_parse())  # pyright: ignore[reportUnknownMemberType]
+        cell = hm.serialize()
+        assert cell is not None
+        d: HashmapDict[int] = HashmapDict(8, UintTypeConstructor(32), cell=cell, allow_empty=False)
+        return nonempty_dict(data=d)
+
+    def test_roundtrip(self):
+        obj = self._make_nonempty({10: 100, 20: 200})
+        result = NonemptyDictType().load_from(obj.serialize().begin_parse())
+        assert result.data[10] == 100
+        assert result.data[20] == 200
+
+    def test_wrong_allow_empty_caught(self):
+        """HashmapDict with allow_empty=True is caught for Hashmap field."""
+        d: HashmapDict[int] = HashmapDict(8, UintTypeConstructor(32), allow_empty=True)
+        obj = nonempty_dict(data=d)
         with pytest.raises(AssertionError):
             _ = obj.serialize()
 

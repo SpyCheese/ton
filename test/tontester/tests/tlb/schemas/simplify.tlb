@@ -38,6 +38,9 @@ hme_root$1 {n:#} {X:Type} root:^(Hashmap n X) = HashmapE n X;
 // Using simplified dict as a field
 dict_field$_ data:(HashmapE 8 uint32) extra:uint16 = DictField;
 
+// Non-empty hashmap (allow_empty=False)
+nonempty_dict$_ data:(Hashmap 8 uint32) = NonemptyDict;
+
 // Simple Maybe field
 simple_maybe$_ x:(Maybe uint32) = SimpleMaybe;
 
