@@ -602,3 +602,9 @@ class TupleTypeConstructor[X](TypeInfo[list[X]]):
     @override
     def __repr__(self) -> str:
         return f"Tuple({self._count}, {self._element_ti!r})"
+
+
+def drain_slice(cs: Slice):
+    _ = cs.skip_bits(cs.remaining_bits)
+    while cs.remaining_refs:
+        _ = cs.load_ref()
