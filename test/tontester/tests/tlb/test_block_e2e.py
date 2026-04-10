@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from generated.block import BlockType, block, block_info, bool_false, bool_true
+from generated.block import block, block_info, bool_false, bool_true
 from pytoniq_core import Cell
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -15,7 +15,7 @@ def testnet_block() -> block:
     with open(boc_path, "rb") as f:
         boc_data = f.read()
     cell = Cell.one_from_boc(boc_data)
-    result = BlockType().deserialize(cell)
+    result = block.deserialize(cell)
     assert isinstance(result, block)
     return result
 

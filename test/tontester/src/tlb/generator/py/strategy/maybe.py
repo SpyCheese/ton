@@ -21,13 +21,13 @@ class MaybeStrategy(TypeStrategy):
 
     @override
     def type_info_expr(self) -> str:
-        self.ctx.use("MaybeTypeInfo")
-        return f"MaybeTypeInfo({self.inner.type_info_expr()})"
+        self.ctx.use("MaybeTypeConstructor")
+        return f"MaybeTypeConstructor({self.inner.type_info_expr()})"
 
     @override
     def type_info_expr_self(self) -> str:
-        self.ctx.use("MaybeTypeInfo")
-        return f"MaybeTypeInfo({self.inner.type_info_expr_self()})"
+        self.ctx.use("MaybeTypeConstructor")
+        return f"MaybeTypeConstructor({self.inner.type_info_expr_self()})"
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:

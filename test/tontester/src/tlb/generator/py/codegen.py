@@ -27,9 +27,13 @@ def generate_python(types: list[ResolvedType], simplify: SimplifyConfig | None =
         if t.is_builtin or not t.constructors:
             continue
         type_name = t.name or "Anon"
-        _ = ctx.scope.bind(t, type_name)
-        for c in t.constructors:
-            _ = ctx.scope.bind(c, c.name or _anonymous_constructor_name(type_name, c))
+        if t.has_unnamed_sole_constructor:
+            # Unnamed sole constructor: use the type name directly, don't bind type
+            _ = ctx.scope.bind(t.constructors[0], type_name)
+        else:
+            _ = ctx.scope.bind(t, type_name)
+            for c in t.constructors:
+                _ = ctx.scope.bind(c, c.name or _anonymous_constructor_name(type_name, c))
 
     # Pre-bind all field names so cross-type inference chain lookups work.
     type_generators: list[TypeGenerator] = []

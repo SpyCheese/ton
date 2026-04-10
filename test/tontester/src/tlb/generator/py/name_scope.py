@@ -41,6 +41,7 @@ _FIELD_RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
 
 _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
     {
+        "Anon",  # reserved so anonymous types start at Anon_1
         "int",
         "str",
         "bool",
@@ -74,11 +75,12 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "cs",
         "InstantiableTypeInfo",
         "IntTypeConstructor",
-        "MaybeTypeInfo",
+        "GenericTLBType",
+        "MaybeTypeConstructor",
         "Ref",
-        "RefType",
         "Slice",
         "TLBRecord",
+        "TLBType",
         "TlbModelError",
         "TrueTypeInfo",
         "TupleTypeConstructor",
@@ -186,7 +188,7 @@ class NameScope:
         local_name = field_name
         key = IdentityKey(obj)
         suffix = 1
-        while local_name in _RESERVED or local_name in self._local_bindings.values():
+        while self._is_taken(local_name) or local_name in self._local_bindings.values():
             local_name = f"{preferred}_{suffix}"
             suffix += 1
         self._local_bindings[key] = local_name

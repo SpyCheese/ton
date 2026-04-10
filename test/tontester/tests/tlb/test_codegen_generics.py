@@ -2,15 +2,7 @@
 
 from generated.generics import (
     EitherType,
-    MaybeRefType,
     MaybeType,
-    MaybeUint32Type,
-    PairMaybeType,
-    PairRefType,
-    PairType,
-    RefMaybeType,
-    SwappedType,
-    WrapperType,
     just,
     left,
     maybe_ref,
@@ -24,7 +16,7 @@ from generated.generics import (
     swapped,
     wrapper,
 )
-from tlb.object import Ref, RefType, UintTypeConstructor
+from tlb.object import Ref, UintTypeConstructor
 
 # ── Generic types ─────────────────────────────────────────────────────
 
@@ -76,7 +68,7 @@ class TestPair:
         uint32_ti = UintTypeConstructor(32)
         int8_ti = UintTypeConstructor(8)
         obj = pair[int, int](uint32_ti, int8_ti, first=42, second=7)
-        result = PairType[int, int]().load_from(obj.serialize().begin_parse(), uint32_ti, int8_ti)
+        result = pair[int, int].load_from(obj.serialize().begin_parse(), uint32_ti, int8_ti)
         assert isinstance(result, pair)
         assert result.first == 42
         assert result.second == 7
@@ -88,7 +80,7 @@ class TestWrapper:
         uint32_ti = UintTypeConstructor(32)
         inner: just[int] = just[int](uint32_ti, value=42)
         obj = wrapper[int](uint32_ti, inner=inner)
-        result = WrapperType[int]().load_from(obj.serialize().begin_parse(), uint32_ti)
+        result = wrapper[int].load_from(obj.serialize().begin_parse(), uint32_ti)
         assert isinstance(result, wrapper)
         assert isinstance(result.inner, just)
         assert result.inner.value == 42
@@ -98,7 +90,7 @@ class TestWrapper:
         uint32_ti = UintTypeConstructor(32)
         inner: nothing = nothing()
         obj = wrapper[int](uint32_ti, inner=inner)
-        result = WrapperType[int]().load_from(obj.serialize().begin_parse(), uint32_ti)
+        result = wrapper[int].load_from(obj.serialize().begin_parse(), uint32_ti)
         assert isinstance(result, wrapper)
         assert isinstance(result.inner, nothing)
 
@@ -109,7 +101,7 @@ class TestMaybeUint32:
     def test_nothing_roundtrip(self):
         inner: nothing = nothing()
         obj = maybe_uint32(inner=inner)
-        result = MaybeUint32Type().load_from(obj.serialize().begin_parse())
+        result = maybe_uint32.load_from(obj.serialize().begin_parse())
         assert isinstance(result, maybe_uint32)
         assert isinstance(result.inner, nothing)
 
@@ -117,7 +109,7 @@ class TestMaybeUint32:
         uint32_ti = UintTypeConstructor(32)
         inner: just[int] = just[int](uint32_ti, value=42)
         obj = maybe_uint32(inner=inner)
-        result = MaybeUint32Type().load_from(obj.serialize().begin_parse())
+        result = maybe_uint32.load_from(obj.serialize().begin_parse())
         assert isinstance(result, maybe_uint32)
         assert isinstance(result.inner, just)
         assert result.inner.value == 42
@@ -133,7 +125,7 @@ class TestPairMaybe:
             maybe_ti, uint32_ti, first=just[int](uint32_ti, value=99), second=7
         )
         obj = pair_maybe[int](uint32_ti, value=inner_pair)
-        result = PairMaybeType[int]().load_from(obj.serialize().begin_parse(), uint32_ti)
+        result = pair_maybe[int].load_from(obj.serialize().begin_parse(), uint32_ti)
         assert isinstance(result, pair_maybe)
         assert isinstance(result.value, pair)
         assert isinstance(result.value.first, just)
@@ -147,7 +139,7 @@ class TestPairMaybe:
             maybe_ti, uint32_ti, first=nothing(), second=123
         )
         obj = pair_maybe[int](uint32_ti, value=inner_pair)
-        result = PairMaybeType[int]().load_from(obj.serialize().begin_parse(), uint32_ti)
+        result = pair_maybe[int].load_from(obj.serialize().begin_parse(), uint32_ti)
         assert isinstance(result, pair_maybe)
         assert isinstance(result.value, pair)
         assert isinstance(result.value.first, nothing)
@@ -162,17 +154,17 @@ class TestMaybeRef:
 
     def test_just_roundtrip(self):
         uint8_ti = UintTypeConstructor(8)
-        ref_ti = RefType[int].instantiate(uint8_ti)
+        ref_ti = Ref[int].instantiate(uint8_ti)
         inner: just[Ref[int]] = just[Ref[int]](ref_ti, value=Ref(uint8_ti, 42))
         obj = maybe_ref(inner=inner)
-        result = MaybeRefType().load_from(obj.serialize().begin_parse())
+        result = maybe_ref.load_from(obj.serialize().begin_parse())
         assert isinstance(result, maybe_ref)
         assert isinstance(result.inner, just)
         assert result.inner.value.ref == 42
 
     def test_nothing_roundtrip(self):
         obj = maybe_ref(inner=nothing())
-        result = MaybeRefType().load_from(obj.serialize().begin_parse())
+        result = maybe_ref.load_from(obj.serialize().begin_parse())
         assert isinstance(result, maybe_ref)
         assert isinstance(result.inner, nothing)
 
@@ -185,7 +177,7 @@ class TestRefMaybe:
         maybe_ti = MaybeType[int].instantiate(uint32_ti)
         inner_val: just[int] = just[int](uint32_ti, value=77)
         obj = ref_maybe[int](uint32_ti, inner=Ref(maybe_ti, inner_val))
-        result = RefMaybeType[int]().load_from(obj.serialize().begin_parse(), uint32_ti)
+        result = ref_maybe[int].load_from(obj.serialize().begin_parse(), uint32_ti)
         assert isinstance(result, ref_maybe)
         deref = result.inner.ref
         assert isinstance(deref, just)
@@ -195,7 +187,7 @@ class TestRefMaybe:
         uint32_ti = UintTypeConstructor(32)
         maybe_ti = MaybeType[int].instantiate(uint32_ti)
         obj = ref_maybe[int](uint32_ti, inner=Ref(maybe_ti, nothing()))
-        result = RefMaybeType[int]().load_from(obj.serialize().begin_parse(), uint32_ti)
+        result = ref_maybe[int].load_from(obj.serialize().begin_parse(), uint32_ti)
         assert isinstance(result, ref_maybe)
         assert isinstance(result.inner.ref, nothing)
 
@@ -205,10 +197,10 @@ class TestPairRef:
 
     def test_roundtrip(self):
         uint32_ti = UintTypeConstructor(32)
-        ref_ti = RefType[int].instantiate(uint32_ti)
+        ref_ti = Ref[int].instantiate(uint32_ti)
         inner_pair = pair[Ref[int], int](ref_ti, uint32_ti, first=Ref(uint32_ti, 99), second=7)
         obj = pair_ref[int](uint32_ti, value=inner_pair)
-        result = PairRefType[int]().load_from(obj.serialize().begin_parse(), uint32_ti)
+        result = pair_ref[int].load_from(obj.serialize().begin_parse(), uint32_ti)
         assert isinstance(result, pair_ref)
         assert isinstance(result.value, pair)
         assert result.value.first.ref == 99
@@ -222,9 +214,7 @@ class TestSwapped:
         uint32_ti = UintTypeConstructor(32)
         uint8_ti = UintTypeConstructor(8)
         obj = swapped[int, int](uint32_ti, uint8_ti, second=7, first=42)
-        result = SwappedType[int, int]().load_from(
-            obj.serialize().begin_parse(), uint32_ti, uint8_ti
-        )
+        result = swapped[int, int].load_from(obj.serialize().begin_parse(), uint32_ti, uint8_ti)
         assert isinstance(result, swapped)
         assert result.first == 42
         assert result.second == 7

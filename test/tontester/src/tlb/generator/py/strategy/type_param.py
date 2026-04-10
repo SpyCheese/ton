@@ -13,13 +13,15 @@ class TypeParamStrategy(TypeStrategy):
 
     Delegates serialization to a runtime TypeInfo passed as an argument.
     type_var is the generic type variable name (e.g. "X").
-    ti_var is the Python variable holding the TypeInfo (e.g. "self._tX" or "_tX").
+    ti_field is the dataclass field name (e.g. "_tX"), used for self.X access.
+    ti_local is the local variable name (e.g. "_tX" or "_tX_1"), used in load_from body.
     """
 
-    def __init__(self, param: TypeParamDef, type_var: str, ti_var: str) -> None:
+    def __init__(self, param: TypeParamDef, type_var: str, ti_field: str, ti_local: str) -> None:
         self.param = param
         self.type_var = type_var
-        self.ti_var = ti_var
+        self.ti_field = ti_field
+        self.ti_local = ti_local
 
     @override
     def py_type(self) -> str:
@@ -27,19 +29,19 @@ class TypeParamStrategy(TypeStrategy):
 
     @override
     def type_info_expr(self) -> str:
-        return self.ti_var
+        return self.ti_local
 
     @override
     def type_info_expr_self(self) -> str:
-        return f"self.{self.ti_var}"
+        return f"self.{self.ti_field}"
 
     @override
     def emit_store(self, value: str, builder: str, sb: SourceBuilder) -> None:
-        sb.line(f"self.{self.ti_var}.serialize_value({value}, {builder})")
+        sb.line(f"self.{self.ti_field}.serialize_value({value}, {builder})")
 
     @override
     def emit_load(self, target: str, cs: str, sb: SourceBuilder) -> None:
-        sb.line(f"{target} = {self.ti_var}.load_from({cs})")
+        sb.line(f"{target} = {self.ti_local}.load_from({cs})")
 
     @property
     @override

@@ -3,8 +3,8 @@
 import pytest
 from bitarray import bitarray
 from generated.special_cells import (
-    MerkleProofType,
-    MerkleUpdateType,
+    EitherProofUpdateType,
+    either_proof,
     merkle_proof,
     merkle_update,
 )
@@ -38,13 +38,13 @@ def _hash_bits(cell: Cell) -> bitarray:
     return result
 
 
-class TestMerkleProofType:
+class TestMerkleProof:
     def test_deserialize_rejects_ordinary_cell(self):
-        """MerkleProofType.deserialize should reject non-special cells."""
+        """merkle_proof deserialize should reject non-special cells."""
         b = Builder()
         _ = b.store_uint(0x03, 8)
         with pytest.raises(TlbModelError, match="special"):
-            _ = MerkleProofType[int]().deserialize(b.end_cell(), UintTypeConstructor(32))
+            _ = merkle_proof[int].deserialize(b.end_cell(), UintTypeConstructor(32))
 
     def test_roundtrip(self):
         """Create a merkle proof special cell and deserialize it."""
@@ -61,7 +61,7 @@ class TestMerkleProofType:
         _ = b.store_ref(inner_cell)
         proof_cell = _as_special(b.end_cell(), CellTypes.merkle_proof)
 
-        result = MerkleProofType[int]().deserialize(proof_cell, uint32_ti)
+        result = merkle_proof[int].deserialize(proof_cell, uint32_ti)
         assert isinstance(result, merkle_proof)
         assert result.depth == 0
         assert result.virtual_hash == _hash_bits(inner_cell)
@@ -83,7 +83,7 @@ class TestMerkleProofType:
         _ = b.store_ref(pruned)
         proof_cell = _as_special(b.end_cell(), CellTypes.merkle_proof)
 
-        result = MerkleProofType[int]().deserialize(proof_cell, uint32_ti)
+        result = merkle_proof[int].deserialize(proof_cell, uint32_ti)
         assert isinstance(result, merkle_proof)
         assert result.virtual_hash == _hash_bits(inner_cell)
         assert result.depth == 0
@@ -91,13 +91,13 @@ class TestMerkleProofType:
             _ = result.virtual_root.ref
 
 
-class TestMerkleUpdateType:
+class TestMerkleUpdate:
     def test_deserialize_rejects_ordinary_cell(self):
-        """MerkleUpdateType.deserialize should reject non-special cells."""
+        """merkle_update deserialize should reject non-special cells."""
         b = Builder()
         _ = b.store_uint(0x04, 8)
         with pytest.raises(TlbModelError, match="special"):
-            _ = MerkleUpdateType[int]().deserialize(b.end_cell(), UintTypeConstructor(32))
+            _ = merkle_update[int].deserialize(b.end_cell(), UintTypeConstructor(32))
 
     def test_roundtrip(self):
         """Create a merkle update special cell and deserialize it."""
@@ -121,9 +121,38 @@ class TestMerkleUpdateType:
         _ = b.store_ref(new_cell)
         update_cell = _as_special(b.end_cell(), CellTypes.merkle_update)
 
-        result = MerkleUpdateType[int]().deserialize(update_cell, uint32_ti)
+        result = merkle_update[int].deserialize(update_cell, uint32_ti)
         assert isinstance(result, merkle_update)
         assert result.old.ref == 10
         assert result.new.ref == 20
         assert result.old_hash == _hash_bits(old_cell)
         assert result.new_hash == _hash_bits(new_cell)
+
+
+class TestMultiConstructorSpecial:
+    """EitherProofUpdate — multi-constructor special type with TypeInfo deserialize."""
+
+    def test_deserialize_rejects_ordinary_cell(self):
+        b = Builder()
+        _ = b.store_uint(0x03, 8)
+        ti = EitherProofUpdateType[int]().instantiate(UintTypeConstructor(32))
+        with pytest.raises(TlbModelError, match="special"):
+            _ = ti.deserialize(b.end_cell())
+
+    def test_roundtrip_proof_variant(self):
+        uint32_ti = UintTypeConstructor(32)
+        inner_b = Builder()
+        _ = inner_b.store_uint(42, 32)
+        inner_cell = inner_b.end_cell()
+
+        b = Builder()
+        _ = b.store_uint(3, 8)
+        _ = b.store_bits(_hash_bits(inner_cell))
+        _ = b.store_uint(inner_cell.get_depth(0), 16)
+        _ = b.store_ref(inner_cell)
+        proof_cell = _as_special(b.end_cell(), CellTypes.merkle_proof)
+
+        ti = EitherProofUpdateType[int]().instantiate(uint32_ti)
+        result = ti.deserialize(proof_cell)
+        assert isinstance(result, either_proof)
+        assert result.virtual_root.ref == 42

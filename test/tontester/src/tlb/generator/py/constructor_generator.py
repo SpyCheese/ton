@@ -58,7 +58,12 @@ class ConstructorGenerator:
     inlined_fields: list[tuple[ResolvedField, ResolvedType, bool]]
     cls_name: str
 
-    def __init__(self, ctx: PyContext, c: ResolvedConstructor, type_scope: NameScope) -> None:
+    def __init__(
+        self,
+        ctx: PyContext,
+        c: ResolvedConstructor,
+        type_scope: NameScope,
+    ) -> None:
         self.ctx = ctx
         self.c = c
         self.type_scope = type_scope
@@ -104,6 +109,31 @@ class ConstructorGenerator:
         """Get the scope-bound type variable name for a TypeParamDef."""
         return self.type_scope.lookup_generic(p.type_level_param)
 
+    def _class_header(self) -> str:
+        """Return the generic suffix + base class + metaclass portion of the class declaration."""
+        generic_suffix = ""
+        if self.type_params:
+            generic_suffix = f"[{', '.join(self.type_var_name(p) for p in self.type_params)}]"
+
+        # Build TLBRecord[...] args matching load_from's entry params
+        record_args: list[str] = []
+        for tlp in self.c.parent_type.type_level_params:
+            if tlp.is_output:
+                continue
+            if tlp.kind == ParamKind.NAT:
+                record_args.append("int")
+            else:
+                expr = self.c.result_param_exprs.get(tlp.position)
+                if isinstance(expr, TypeParamRef) and expr.param in self.type_params:
+                    record_args.append(f"TypeInfo[{self.type_var_name(expr.param)}]")
+
+        if record_args:
+            record_suffix = f"[{', '.join(record_args)}]"
+            self.ctx.use("GenericTLBType")
+            return f"{generic_suffix}(TLBRecord{record_suffix}, metaclass=GenericTLBType)"
+        self.ctx.use("TLBType")
+        return f"{generic_suffix}(TLBRecord[()], metaclass=TLBType)"
+
     def generate(self, sb: SourceBuilder) -> None:
         self.ctx.use("final", "dataclass", "TLBRecord", "Builder", "Slice", "override")
 
@@ -112,20 +142,16 @@ class ConstructorGenerator:
             self.strategies[IdentityKey(f)] = builder.build(f.type_expr)
 
         self.params = [
-            p for p in self.c.params if isinstance(p, NatParamDef) or p in builder.used_type_params
+            p for p in self.c.params if isinstance(p, NatParamDef) or p in self.c.used_type_params
         ]
         self.type_params = [p for p in self.params if isinstance(p, TypeParamDef)]
 
         if self.type_params:
             self.ctx.use("TypeInfo")
-            generic_vars = ", ".join(self.type_var_name(p) for p in self.type_params)
-            sb.line("@final")
-            sb.line("@dataclass")
-            sb.line(f"class {self.cls_name}[{generic_vars}](TLBRecord):")
-        else:
-            sb.line("@final")
-            sb.line("@dataclass")
-            sb.line(f"class {self.cls_name}(TLBRecord):")
+
+        sb.line("@final")
+        sb.line("@dataclass")
+        sb.line(f"class {self.cls_name}{self._class_header()}:")
 
         with sb.block():
             for p in self.c.params:
@@ -151,6 +177,9 @@ class ConstructorGenerator:
             if self.type_params:
                 sb.blank()
                 self._generate_check_type(sb)
+            if self.c.parent_type.has_sole_constructor and self.c.parent_type.is_special:
+                sb.blank()
+                self._generate_special_deserialize(sb)
             if self.inlined_fields:
                 self._generate_inline_properties(sb)
 
@@ -206,13 +235,7 @@ class ConstructorGenerator:
         return emitted
 
     def _generate_load_from(self, sb: SourceBuilder) -> None:
-        cs_used = self.c.tag_len > 0 or any(
-            self.strategies[IdentityKey(s.field)].load_uses_cs()
-            for s in self.c.deser_steps
-            if isinstance(s, ReadField)
-        )
-        cs_name = "cs" if cs_used else "_cs"
-        params = [f"{cs_name}: Slice"]
+        params = ["cs: Slice"]
         assertions: list[str] = []
 
         for tlp in self.c.parent_type.type_level_params:
@@ -230,12 +253,12 @@ class ConstructorGenerator:
                     params.append(f"{name}: TypeInfo[{type_var}]")
 
         params_str = ", ".join(params)
+        sb.line("@override")
+        sb.line("@classmethod")
         if self.type_params:
             generic_vars = ", ".join(self.type_var_name(p) for p in self.type_params)
-            sb.line("@classmethod")
             sb.line(f"def load_from(cls, {params_str}) -> {self.cls_name}[{generic_vars}]:")
         else:
-            sb.line("@classmethod")
             sb.line(f"def load_from(cls, {params_str}) -> {self.cls_name}:")
 
         with sb.block():
@@ -249,12 +272,14 @@ class ConstructorGenerator:
                     sb.line("raise TlbModelError('tag mismatch')")
             ctor_args: list[str] = []
             for p in self.c.params:
+                field = self.scope.lookup(p)
+                local = self.scope.lookup_local(p)
                 match p:
                     case TypeParamDef():
                         if p in self.type_params:
-                            ctor_args.append(self.scope.lookup(p))
+                            ctor_args.append(f"{field}={local}")
                     case NatParamDef():
-                        ctor_args.append(self.scope.lookup_local(p))
+                        ctor_args.append(f"{field}={local}" if field != local else local)
             for step in self.c.deser_steps:
                 self._emit_deser_step(step, ctor_args, sb)
             sb.line(f"return cls({', '.join(ctor_args)})")
@@ -409,6 +434,55 @@ class ConstructorGenerator:
                         sb.line(f"assert self.{ti_name} == ti")
                     sb.line("return")
             sb.line("raise ValueError(f'no type param at index {idx}')")
+
+    def _generate_special_deserialize(self, sb: SourceBuilder) -> None:
+        """Generate deserialize() override for special cell types (e.g. merkle proofs)."""
+        self.ctx.use("Cell", "TlbModelError")
+        params = ["cell: Cell"]
+        for tlp in self.c.parent_type.type_level_params:
+            if tlp.is_output:
+                continue
+            name = self.type_scope.lookup(tlp)
+            if tlp.kind == ParamKind.NAT:
+                params.append(f"{name}: int")
+            else:
+                expr = self.c.result_param_exprs.get(tlp.position)
+                assert isinstance(expr, TypeParamRef)
+                if expr.param in self.type_params:
+                    type_var = self.type_scope.lookup_generic(tlp)
+                    params.append(f"{name}: TypeInfo[{type_var}]")
+        params_str = ", ".join(params)
+        if self.type_params:
+            generic_vars = ", ".join(self.type_var_name(p) for p in self.type_params)
+            ret = f"{self.cls_name}[{generic_vars}]"
+        else:
+            ret = self.cls_name
+        sb.line("@override")
+        sb.line("@classmethod")
+        sb.line(f"def deserialize(cls, /, {params_str}) -> {ret}:")
+        with sb.block():
+            sb.line("cs = cell.begin_parse()")
+            sb.line("if not cs.is_special():")
+            with sb.block():
+                sb.line(
+                    (
+                        f"raise TlbModelError("
+                        f"'expected special cell for {self.cls_name}, got ordinary cell')"
+                    )
+                )
+            load_args = ["cs"]
+            for tlp in self.c.parent_type.type_level_params:
+                if tlp.is_output:
+                    continue
+                name = self.type_scope.lookup(tlp)
+                expr = self.c.result_param_exprs.get(tlp.position)
+                if tlp.kind == ParamKind.NAT:
+                    load_args.append(name)
+                elif isinstance(expr, TypeParamRef) and expr.param in self.type_params:
+                    load_args.append(name)
+            sb.line(f"result = cls.load_from({', '.join(load_args)})")
+            sb.line("TlbModelError.raise_if_not_empty(cs)")
+            sb.line("return result")
 
     def _generate_inline_properties(self, sb: SourceBuilder) -> None:
         """Generate property accessors for inlined anonymous record sub-fields."""

@@ -3,17 +3,6 @@
 import pytest
 from bitarray import bitarray
 from generated.simplify import (
-    CoinsType,
-    DictFieldType,
-    EnumFieldsType,
-    InferredUnaryType,
-    MaybeRefType,
-    MixedType,
-    NestedMaybeType,
-    NonemptyDictType,
-    SignedValType,
-    SimpleMaybeType,
-    SizedType,
     coins,
     dict_field,
     enum_fields,
@@ -30,7 +19,7 @@ from generated.simplify import (
     sized,
 )
 from tlb.hashmap import HashmapDict
-from tlb.object import MaybeTypeInfo, Ref, UintTypeConstructor, UnaryTypeInfo
+from tlb.object import MaybeTypeConstructor, Ref, UintTypeConstructor, UnaryTypeInfo
 
 
 class TestSimpleMaybe:
@@ -38,12 +27,12 @@ class TestSimpleMaybe:
 
     def test_just_roundtrip(self):
         obj = simple_maybe(x=42)
-        result = SimpleMaybeType().load_from(obj.serialize().begin_parse())
+        result = simple_maybe.load_from(obj.serialize().begin_parse())
         assert result.x == 42
 
     def test_nothing_roundtrip(self):
         obj = simple_maybe(x=None)
-        result = SimpleMaybeType().load_from(obj.serialize().begin_parse())
+        result = simple_maybe.load_from(obj.serialize().begin_parse())
         assert result.x is None
 
     def test_just_bit_count(self):
@@ -60,14 +49,14 @@ class TestMixed:
 
     def test_just_roundtrip(self):
         obj = mixed(a=10, b=20, c=-5)
-        result = MixedType().load_from(obj.serialize().begin_parse())
+        result = mixed.load_from(obj.serialize().begin_parse())
         assert result.a == 10
         assert result.b == 20
         assert result.c == -5
 
     def test_nothing_roundtrip(self):
         obj = mixed(a=10, b=None, c=-5)
-        result = MixedType().load_from(obj.serialize().begin_parse())
+        result = mixed.load_from(obj.serialize().begin_parse())
         assert result.a == 10
         assert result.b is None
         assert result.c == -5
@@ -81,22 +70,22 @@ class TestNestedMaybe:
     """
 
     def test_just_some_roundtrip(self):
-        inner_ti = MaybeTypeInfo(UintTypeConstructor(32))
+        inner_ti = MaybeTypeConstructor(UintTypeConstructor(32))
         obj = nested_maybe(x=just(inner_ti, value=42))
-        result = NestedMaybeType().load_from(obj.serialize().begin_parse())
+        result = nested_maybe.load_from(obj.serialize().begin_parse())
         assert isinstance(result.x, just)
         assert result.x.value == 42
 
     def test_just_none_roundtrip(self):
-        inner_ti = MaybeTypeInfo(UintTypeConstructor(32))
+        inner_ti = MaybeTypeConstructor(UintTypeConstructor(32))
         obj = nested_maybe(x=just(inner_ti, value=None))
-        result = NestedMaybeType().load_from(obj.serialize().begin_parse())
+        result = nested_maybe.load_from(obj.serialize().begin_parse())
         assert isinstance(result.x, just)
         assert result.x.value is None
 
     def test_nothing_roundtrip(self):
         obj = nested_maybe(x=nothing())
-        result = NestedMaybeType().load_from(obj.serialize().begin_parse())
+        result = nested_maybe.load_from(obj.serialize().begin_parse())
         assert isinstance(result.x, nothing)
 
 
@@ -105,7 +94,7 @@ class TestEnumLiterals:
 
     def test_all_fields_roundtrip(self):
         obj = enum_fields(a=True, b=None, c=None, x=42)
-        result = EnumFieldsType().load_from(obj.serialize().begin_parse())
+        result = enum_fields.load_from(obj.serialize().begin_parse())
         assert result.a is True
         assert result.b is None
         assert result.c is None
@@ -113,7 +102,7 @@ class TestEnumLiterals:
 
     def test_bool_false_roundtrip(self):
         obj = enum_fields(a=False, b=None, c=None, x=99)
-        result = EnumFieldsType().load_from(obj.serialize().begin_parse())
+        result = enum_fields.load_from(obj.serialize().begin_parse())
         assert result.a is False
         assert result.b is None
         assert result.c is None
@@ -142,14 +131,14 @@ class TestUnary:
 
     def test_sized_zero(self):
         obj = sized(0, len=0, data=bitarray())
-        result = SizedType().load_from(obj.serialize().begin_parse())
+        result = sized.load_from(obj.serialize().begin_parse())
         assert result.len == 0
         assert result.n == 0
         assert result.data == bitarray()
 
     def test_sized_three(self):
         obj = sized(3, len=3, data=bitarray("101"))
-        result = SizedType().load_from(obj.serialize().begin_parse())
+        result = sized.load_from(obj.serialize().begin_parse())
         assert result.len == 3
         assert result.n == 3
         assert result.data == bitarray("101")
@@ -158,7 +147,7 @@ class TestUnary:
         """Output param inferred through Pair: x.first is the Unary value."""
         inner = pair(UnaryTypeInfo, UintTypeConstructor(32), first=2, second=99)
         obj = inferred_unary(2, x=inner, y=3)
-        result = InferredUnaryType().load_from(obj.serialize().begin_parse())
+        result = inferred_unary.load_from(obj.serialize().begin_parse())
         assert result.n == 2
         assert result.x.first == 2
         assert result.x.second == 99
@@ -167,7 +156,7 @@ class TestUnary:
     def test_inferred_zero(self):
         inner = pair(UnaryTypeInfo, UintTypeConstructor(32), first=0, second=42)
         obj = inferred_unary(0, x=inner, y=0)
-        result = InferredUnaryType().load_from(obj.serialize().begin_parse())
+        result = inferred_unary.load_from(obj.serialize().begin_parse())
         assert result.n == 0
         assert result.y == 0
 
@@ -187,13 +176,13 @@ class TestMaybeRef:
 
     def test_just_roundtrip(self):
         obj = maybe_ref(x=Ref(UintTypeConstructor(32), 99))
-        result = MaybeRefType().load_from(obj.serialize().begin_parse())
+        result = maybe_ref.load_from(obj.serialize().begin_parse())
         assert result.x is not None
         assert result.x.ref == 99
 
     def test_nothing_roundtrip(self):
         obj = maybe_ref(x=None)
-        result = MaybeRefType().load_from(obj.serialize().begin_parse())
+        result = maybe_ref.load_from(obj.serialize().begin_parse())
         assert result.x is None
 
 
@@ -215,13 +204,13 @@ class TestHashmapSimplification:
 
     def test_empty_roundtrip(self):
         obj = self._make_dict_field({}, extra=42)
-        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        result = dict_field.load_from(obj.serialize().begin_parse())
         assert result.data.is_empty()
         assert result.extra == 42
 
     def test_nonempty_roundtrip(self):
         obj = self._make_dict_field({1: 100, 5: 500, 255: 999}, extra=7)
-        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        result = dict_field.load_from(obj.serialize().begin_parse())
         assert result.data[1] == 100
         assert result.data[5] == 500
         assert result.data[255] == 999
@@ -230,25 +219,25 @@ class TestHashmapSimplification:
     def test_lazy_access(self):
         """Dict is lazy — entries are only parsed on access."""
         obj = self._make_dict_field({42: 123})
-        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        result = dict_field.load_from(obj.serialize().begin_parse())
         assert not result.data._root_parsed  # pyright: ignore[reportPrivateUsage]
         assert result.data[42] == 123
         assert result.data._root_parsed  # pyright: ignore[reportPrivateUsage]
 
     def test_mutation_roundtrip(self):
         obj = self._make_dict_field({1: 100, 2: 200}, extra=1)
-        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        result = dict_field.load_from(obj.serialize().begin_parse())
         result.data[3] = 300
         del result.data[1]
 
         b = result.serialize()
-        result2 = DictFieldType().load_from(b.begin_parse())
+        result2 = dict_field.load_from(b.begin_parse())
         assert result2.data.to_dict() == {2: 200, 3: 300}
         assert result2.extra == 1
 
     def test_iteration_sorted(self):
         obj = self._make_dict_field({255: 3, 0: 1, 128: 2})
-        result = DictFieldType().load_from(obj.serialize().begin_parse())
+        result = dict_field.load_from(obj.serialize().begin_parse())
         keys = list(result.data.keys())
         assert keys == sorted(keys)
 
@@ -284,13 +273,14 @@ class TestHashmapSimplification:
 
     def test_wrong_extra_ti_caught(self):
         """A different TypeInfo[None] (not UnitTypeInfo) is caught on serialize."""
-        from tlb.object import UnitTypeInfo, _EnumTypeInfo  # pyright: ignore[reportPrivateUsage]
-
-        fake_unit = _EnumTypeInfo(0, lambda _: 0, lambda _: None)
-        assert fake_unit is not UnitTypeInfo
-        wrong_dict: HashmapDict[int] = HashmapDict(
-            8, UintTypeConstructor(32), extra_ti=fake_unit
+        from tlb.object import (
+            UnitTypeInfo,
+            _EnumTypeConstructor,  # pyright: ignore[reportPrivateUsage]
         )
+
+        fake_unit = _EnumTypeConstructor(0, lambda _: 0, lambda _: None)
+        assert fake_unit is not UnitTypeInfo
+        wrong_dict: HashmapDict[int] = HashmapDict(8, UintTypeConstructor(32), extra_ti=fake_unit)
         obj = dict_field(data=wrong_dict, extra=0)
         with pytest.raises(AssertionError):
             _ = obj.serialize()
@@ -313,7 +303,7 @@ class TestNonemptyHashmap:
 
     def test_roundtrip(self):
         obj = self._make_nonempty({10: 100, 20: 200})
-        result = NonemptyDictType().load_from(obj.serialize().begin_parse())
+        result = nonempty_dict.load_from(obj.serialize().begin_parse())
         assert result.data[10] == 100
         assert result.data[20] == 200
 
@@ -330,17 +320,17 @@ class TestVarUInteger:
 
     def test_zero(self):
         obj = coins(amount=0)
-        result = CoinsType().load_from(obj.serialize().begin_parse())
+        result = coins.load_from(obj.serialize().begin_parse())
         assert result.amount == 0
 
     def test_small(self):
         obj = coins(amount=255)
-        result = CoinsType().load_from(obj.serialize().begin_parse())
+        result = coins.load_from(obj.serialize().begin_parse())
         assert result.amount == 255
 
     def test_large(self):
         obj = coins(amount=10**18)
-        result = CoinsType().load_from(obj.serialize().begin_parse())
+        result = coins.load_from(obj.serialize().begin_parse())
         assert result.amount == 10**18
 
     def test_serialized_zero(self):
@@ -367,17 +357,17 @@ class TestVarInteger:
 
     def test_zero(self):
         obj = signed_val(x=0)
-        result = SignedValType().load_from(obj.serialize().begin_parse())
+        result = signed_val.load_from(obj.serialize().begin_parse())
         assert result.x == 0
 
     def test_positive(self):
         obj = signed_val(x=127)
-        result = SignedValType().load_from(obj.serialize().begin_parse())
+        result = signed_val.load_from(obj.serialize().begin_parse())
         assert result.x == 127
 
     def test_negative(self):
         obj = signed_val(x=-42)
-        result = SignedValType().load_from(obj.serialize().begin_parse())
+        result = signed_val.load_from(obj.serialize().begin_parse())
         assert result.x == -42
 
     def test_serialized_negative(self):

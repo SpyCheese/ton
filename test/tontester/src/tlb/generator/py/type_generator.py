@@ -53,8 +53,6 @@ class TypeGenerator:
             self.cons_generators.append(cg)
 
     def generate(self, sb: SourceBuilder) -> None:
-        type_name = self.ctx.scope.lookup(self.t)
-
         for cg in self.cons_generators:
             cg.generate(sb)
             sb.blank()
@@ -69,17 +67,29 @@ class TypeGenerator:
                 return f"{name}[{', '.join(cg.type_var_name(p) for p in cg.type_params)}]"
             return name
 
-        if len(self.t.constructors) > 1:
+        if not self.t.has_sole_constructor:
+            type_name = self.ctx.scope.lookup(self.t)
             cons_names = " | ".join(_cons_type(c) for c in self.t.constructors)
             sb.line(f"type {type_name}{generic_suffix} = {cons_names}")
+            sb.blank()
+            sb.blank()
+            self._generate_type_info(sb)
+            sb.blank()
+            sb.blank()
         else:
-            sb.line(f"type {type_name}{generic_suffix} = {_cons_type(self.t.constructors[0])}")
-        sb.blank()
-        sb.blank()
-
-        self._generate_type_info(sb)
-        sb.blank()
-        sb.blank()
+            c = self.t.constructors[0]
+            cons_name = self.ctx.scope.lookup(c)
+            if not self.t.has_unnamed_sole_constructor:
+                # Named constructor — emit alias
+                type_name = self.ctx.scope.lookup(self.t)
+                cg = self.ctx.get_constructor(c)
+                if len(cg.type_params) == len(self.type_vars):
+                    sb.line(f"{type_name} = {cons_name}")
+                else:
+                    sb.line(f"type {type_name}{generic_suffix} = {_cons_type(c)}")
+                sb.blank()
+                sb.blank()
+            # Unnamed constructor uses type name directly — no alias needed
 
     def _generate_type_info(
         self,

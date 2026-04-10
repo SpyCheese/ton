@@ -17,7 +17,6 @@ from pytoniq_core import Builder, Cell, Slice
 from sortedcontainers import SortedDict
 
 from .hashmap_auto import (
-    HashmapAugType,
     HmLabel,
     ahm_edge,
     ahmn_fork,
@@ -228,7 +227,7 @@ class HashmapDict[V, E = None]:
         if not self._root_parsed:
             if self._cell is not None:
                 cs = self._cell.begin_parse()
-                self._root = HashmapAugType[V, E]().load_from(
+                self._root = ahm_edge[V, E].load_from(
                     cs, self._key_bits, self._value_ti, self._extra_ti
                 )
             self._root_parsed = True

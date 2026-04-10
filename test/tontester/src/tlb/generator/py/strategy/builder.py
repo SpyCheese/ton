@@ -20,7 +20,6 @@ from ...sema.types import (
     ResolvedTypeExpr,
     TupleType,
     TypeApply,
-    TypeParamDef,
     TypeParamRef,
     WellKnownType,
     is_nat,
@@ -85,12 +84,10 @@ class StrategyBuilder:
 
     ctx: PyContext
     scope: NameScope
-    used_type_params: set[TypeParamDef]
 
     def __init__(self, ctx: PyContext, scope: NameScope) -> None:
         self.ctx = ctx
         self.scope = scope
-        self.used_type_params = set()
 
     @staticmethod
     def _to_nat(expr: ResolvedExpr) -> ResolvedNatExpr:
@@ -108,10 +105,10 @@ class StrategyBuilder:
                 return self._build_type_apply(type_expr)
 
             case TypeParamRef(param=param):
-                ti_var = self.scope.lookup(param)
+                ti_field = self.scope.lookup(param)
+                ti_local = self.scope.lookup_local(param)
                 type_var = self.scope.lookup_generic(param.type_level_param)
-                self.used_type_params.add(param)
-                return TypeParamStrategy(param, type_var, ti_var)
+                return TypeParamStrategy(param, type_var, ti_field, ti_local)
 
             case CellRefType(inner=inner_expr):
                 inner = self.build(inner_expr)

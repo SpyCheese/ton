@@ -1,11 +1,12 @@
 """Tests for generated Python code from TL-B cellref schema."""
 
 from generated.cellref import (
-    DoubleRefType,
-    NestedRefType,
-    OpaqueRefType,
-    RefToRecordType,
-    SimpleRefType,
+    bool_false as cr_bool_false,
+)
+from generated.cellref import (
+    bool_true as cr_bool_true,
+)
+from generated.cellref import (
     double_ref,
     nested_ref,
     opaque_ref,
@@ -13,20 +14,14 @@ from generated.cellref import (
     simple_ref,
 )
 from generated.cellref import (
-    bool_false as cr_bool_false,
-)
-from generated.cellref import (
-    bool_true as cr_bool_true,
-)
-from generated.cellref import (
     tick_tock as cr_tick_tock,
 )
-from tlb.object import Ref, RefType, UintTypeConstructor
+from tlb.object import Ref, UintTypeConstructor
 
 _uint8 = UintTypeConstructor(8)
 _uint32 = UintTypeConstructor(32)
 _uint64 = UintTypeConstructor(64)
-_ref_uint8 = RefType[int].instantiate(_uint8)
+_ref_uint8 = Ref[int].instantiate(_uint8)
 
 # ── Cell references ───────────────────────────────────────────────────
 
@@ -35,13 +30,13 @@ class TestCellRef:
     def test_simple_ref_roundtrip(self):
         """^uint32: value stored in a referenced cell, accessed via .ref."""
         obj = simple_ref(x=Ref(_uint32, 42))
-        result = SimpleRefType().load_from(obj.serialize().begin_parse())
+        result = simple_ref.load_from(obj.serialize().begin_parse())
         assert result.x.ref == 42
 
     def test_simple_ref_lazy(self):
         """Ref wrapper is lazy — doesn't parse until .ref is accessed."""
         obj = simple_ref(x=Ref(_uint32, 999))
-        result = SimpleRefType().load_from(obj.serialize().begin_parse())
+        result = simple_ref.load_from(obj.serialize().begin_parse())
         # Cell is stored, not yet parsed
         assert result.x._value_cell is not None  # pyright: ignore[reportPrivateUsage]
         val = result.x.ref
@@ -59,7 +54,7 @@ class TestCellRef:
     def test_nested_ref_roundtrip(self):
         """Mix of inline and ref fields."""
         obj = nested_ref(a=10, b=Ref(_uint64, 20), c=-5)
-        result = NestedRefType().load_from(obj.serialize().begin_parse())
+        result = nested_ref.load_from(obj.serialize().begin_parse())
         assert result.a == 10
         assert result.b.ref == 20
         assert result.c == -5
@@ -73,11 +68,9 @@ class TestCellRef:
 
     def test_ref_to_user_type(self):
         """^TickTock: user-defined type in a referenced cell."""
-        from generated.cellref import TickTockType
-
         tt = cr_tick_tock(tick=cr_bool_true(), tock=cr_bool_false())
-        obj = ref_to_record(inner=Ref(TickTockType(), tt))
-        result = RefToRecordType().load_from(obj.serialize().begin_parse())
+        obj = ref_to_record(inner=Ref(cr_tick_tock, tt))
+        result = ref_to_record.load_from(obj.serialize().begin_parse())
         inner = result.inner.ref
         assert isinstance(inner, cr_tick_tock)
         assert isinstance(inner.tick, cr_bool_true)
@@ -85,10 +78,8 @@ class TestCellRef:
 
     def test_ref_to_user_type_structure(self):
         """ref_to_record: 0 data bits + 1 ref (containing 2 bits for TickTock)."""
-        from generated.cellref import TickTockType
-
         tt = cr_tick_tock(tick=cr_bool_false(), tock=cr_bool_false())
-        cell = ref_to_record(inner=Ref(TickTockType(), tt)).serialize()
+        cell = ref_to_record(inner=Ref(cr_tick_tock, tt)).serialize()
         cs = cell.begin_parse()
         assert cs.remaining_bits == 0
         assert cs.remaining_refs == 1
@@ -99,7 +90,7 @@ class TestCellRef:
         """^^uint8: two levels of cell references, access via .ref.ref."""
         inner = Ref(_uint8, 42)
         obj = double_ref(x=Ref(_ref_uint8, inner))
-        result = DoubleRefType().load_from(obj.serialize().begin_parse())
+        result = double_ref.load_from(obj.serialize().begin_parse())
         assert result.x.ref.ref == 42
 
     def test_double_ref_structure(self):
@@ -136,7 +127,7 @@ class TestCellRef:
         _ = b.store_uint(777, 32)
         cell = b.end_cell()
         obj = simple_ref(x=Ref(_uint32, cell))
-        result = SimpleRefType().load_from(obj.serialize().begin_parse())
+        result = simple_ref.load_from(obj.serialize().begin_parse())
         assert result.x.ref == 777
 
     def test_opaque_cell_ref_roundtrip(self):
@@ -149,7 +140,7 @@ class TestCellRef:
         child_cell = b.end_cell()
 
         obj = opaque_ref(data=42, child=child_cell)
-        result = OpaqueRefType().load_from(obj.serialize().begin_parse())
+        result = opaque_ref.load_from(obj.serialize().begin_parse())
         assert result.data == 42
         # child is a raw Cell, not parsed
         cs = result.child.begin_parse()
@@ -176,7 +167,7 @@ class TestCellRef:
         )
 
         obj = opaque_ref(data=1, child=special_cell)
-        result = OpaqueRefType().load_from(obj.serialize().begin_parse())
+        result = opaque_ref.load_from(obj.serialize().begin_parse())
         assert result.data == 1
         assert result.child.begin_parse().is_special()
 

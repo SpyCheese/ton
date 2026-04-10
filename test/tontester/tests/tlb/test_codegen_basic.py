@@ -3,10 +3,7 @@
 import pytest
 from generated.basic import (
     BoolType,
-    MixedType,
     MsgType,
-    TickTockType,
-    UnitType,
     bool_false,
     bool_true,
     mixed,
@@ -67,7 +64,7 @@ class TestUnit:
         assert unit().serialize().begin_parse().remaining_bits == 0
 
     def test_roundtrip(self):
-        assert isinstance(UnitType().load_from(unit().serialize().begin_parse()), unit)
+        assert isinstance(unit.load_from(unit().serialize().begin_parse()), unit)
 
 
 # ── TickTock ──────────────────────────────────────────────────────────
@@ -76,7 +73,7 @@ class TestUnit:
 class TestTickTock:
     def test_roundtrip(self):
         obj = tick_tock(tick=bool_true(), tock=bool_false())
-        result = TickTockType().load_from(obj.serialize().begin_parse())
+        result = tick_tock.load_from(obj.serialize().begin_parse())
         assert isinstance(result.tick, bool_true)
         assert isinstance(result.tock, bool_false)
 
@@ -85,7 +82,7 @@ class TestTickTock:
         b = Builder()
         _ = b.store_bit(1)
         _ = b.store_bit(0)
-        result = TickTockType().load_from(b.end_cell().begin_parse())
+        result = tick_tock.load_from(b.end_cell().begin_parse())
         assert isinstance(result.tick, bool_true)
         assert isinstance(result.tock, bool_false)
 
@@ -100,7 +97,7 @@ class TestTickTock:
 class TestMixed:
     def test_roundtrip(self):
         obj = mixed(a=100, b=-42, c=2**63, d=-100000)
-        result = MixedType().load_from(obj.serialize().begin_parse())
+        result = mixed.load_from(obj.serialize().begin_parse())
         assert result.a == 100
         assert result.b == -42
         assert result.c == 2**63
@@ -112,7 +109,7 @@ class TestMixed:
 
     def test_empty_cell_fails(self):
         with pytest.raises(Exception):
-            _ = MixedType().load_from(Builder().end_cell().begin_parse())
+            _ = mixed.load_from(Builder().end_cell().begin_parse())
 
 
 # ── Three-way dispatch ────────────────────────────────────────────────

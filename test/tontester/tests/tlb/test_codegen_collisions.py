@@ -1,13 +1,7 @@
 """Tests for generated Python code from TL-B collisions schema."""
 
 from generated.collisions import (
-    BarType,
-    ClassType,
-    ClsFieldType,
-    CsFieldType,
     FooType,
-    IntType,
-    KwGenericType,
     PassType,
     bar,
     class_1,
@@ -36,14 +30,14 @@ class TestNameCollisions:
     def test_python_keyword_field_names(self):
         """Fields named 'for' and 'import' get suffixed."""
         obj = class_1(for_1=42, import_1=-1)
-        result = ClassType().load_from(obj.serialize().begin_parse())
+        result = class_1.load_from(obj.serialize().begin_parse())
         assert result.for_1 == 42
         assert result.import_1 == -1
 
     def test_builtin_type_name(self):
         """Type named 'Int' (collides with Python int) works."""
         obj = int_1(value=123)
-        result = IntType().load_from(obj.serialize().begin_parse())
+        result = int_1.load_from(obj.serialize().begin_parse())
         assert result.value == 123
 
     def test_constructor_name_collision_across_types(self):
@@ -56,7 +50,7 @@ class TestNameCollisions:
 
         # foo_1 (in Bar, originally named 'foo') has y:uint64, no tag
         obj_bar = foo_1(y=999)
-        result = BarType().load_from(obj_bar.serialize().begin_parse())
+        result = foo_1.load_from(obj_bar.serialize().begin_parse())
         assert isinstance(result, foo_1)
         assert result.y == 999
 
@@ -70,7 +64,7 @@ class TestNameCollisions:
     def test_field_named_cs(self):
         """Field named 'cs' keeps its name; local var in load_from is renamed."""
         obj = cs_field(a=10, cs=20, b=30)
-        result = CsFieldType().load_from(obj.serialize().begin_parse())
+        result = cs_field.load_from(obj.serialize().begin_parse())
         assert result.a == 10
         assert result.cs == 20
         assert result.b == 30
@@ -78,12 +72,12 @@ class TestNameCollisions:
     def test_field_named_cls(self):
         """Field named 'cls' keeps its name; local var in load_from is renamed."""
         obj = cls_field(cls=42)
-        result = ClsFieldType().load_from(obj.serialize().begin_parse())
+        result = cls_field.load_from(obj.serialize().begin_parse())
         assert result.cls == 42
 
     def test_type_param_named_int(self):
         """Type param named 'int' (collides with Python builtin) round-trips."""
         ti = UintTypeConstructor(32)
         obj = kw_generic(_tint=ti, value=42)
-        result = KwGenericType[int]().load_from(obj.serialize().begin_parse(), ti)
+        result = kw_generic[int].load_from(obj.serialize().begin_parse(), ti)
         assert result.value == 42

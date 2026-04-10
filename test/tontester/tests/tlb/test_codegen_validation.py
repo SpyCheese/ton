@@ -3,18 +3,8 @@
 import pytest
 from bitarray import bitarray
 from generated.validation import (
-    Anon_cons,
-    ConstrainedType,
-    ContainerParentType,
-    EqFieldType,
-    FixedBitsType,
-    InlineGenericType,
-    NatFieldType,
-    OrderedType,
-    TypedParentType,
-    ValParentType,
+    Anon_1,
     ValType,
-    VarBitsFieldType,
     constrained,
     container_empty,
     container_full,
@@ -55,13 +45,13 @@ class TestSerializeFieldConstraints:
 
     def test_constrained_valid(self):
         obj = constrained(flags=1, x=42)
-        result = ConstrainedType().load_from(obj.serialize().begin_parse())
+        result = constrained.load_from(obj.serialize().begin_parse())
         assert result.flags == 1
         assert result.x == 42
 
     def test_constrained_zero(self):
         obj = constrained(flags=0, x=99)
-        result = ConstrainedType().load_from(obj.serialize().begin_parse())
+        result = constrained.load_from(obj.serialize().begin_parse())
         assert result.flags == 0
 
     def test_constrained_too_high(self):
@@ -72,12 +62,12 @@ class TestSerializeFieldConstraints:
 
     def test_ordered_valid(self):
         obj = ordered(a=3, b=5)
-        result = OrderedType().load_from(obj.serialize().begin_parse())
+        result = ordered.load_from(obj.serialize().begin_parse())
         assert result.a == 3 and result.b == 5
 
     def test_ordered_equal(self):
         obj = ordered(a=10, b=10)
-        result = OrderedType().load_from(obj.serialize().begin_parse())
+        result = ordered.load_from(obj.serialize().begin_parse())
         assert result.a == result.b == 10
 
     def test_ordered_wrong(self):
@@ -93,14 +83,14 @@ class TestSerializeSubtypeConsistency:
     def test_parent_with_matching_val_n(self):
         inner = val_n(n=4, x=10)
         obj = val_parent(n=4, inner=inner)
-        result = ValParentType().load_from(obj.serialize().begin_parse())
+        result = val_parent.load_from(obj.serialize().begin_parse())
         assert result.n == 4
         assert isinstance(result.inner, val_n)
         assert result.inner.x == 10
 
     def test_parent_with_val_zero(self):
         obj = val_parent(n=0, inner=val_zero())
-        result = ValParentType().load_from(obj.serialize().begin_parse())
+        result = val_parent.load_from(obj.serialize().begin_parse())
         assert result.n == 0
         assert isinstance(result.inner, val_zero)
 
@@ -120,7 +110,7 @@ class TestSerializeSubtypeConsistency:
     def test_mutated_inner_caught(self):
         """Deserialize correctly, then mutate inner, serialization catches it."""
         obj = val_parent(n=4, inner=val_n(n=4, x=10))
-        result = ValParentType().load_from(obj.serialize().begin_parse())
+        result = val_parent.load_from(obj.serialize().begin_parse())
         result.inner = val_zero()
         with pytest.raises(AssertionError):
             _ = result.serialize()
@@ -154,7 +144,7 @@ class TestNatFieldAsOutputParam:
 
     def test_roundtrip(self):
         obj = nat_field(m=42)
-        result = NatFieldType().load_from(obj.serialize().begin_parse())
+        result = nat_field.load_from(obj.serialize().begin_parse())
         assert result.m == 42
 
     def test_get_output(self):
@@ -167,7 +157,7 @@ class TestEqFieldConstraint:
 
     def test_roundtrip(self):
         obj = eq_field(m=42, n=42)
-        result = EqFieldType().load_from(obj.serialize().begin_parse(), 42)
+        result = eq_field.load_from(obj.serialize().begin_parse(), 42)
         assert result.m == 42 and result.n == 42
 
     def test_serialize_mismatch(self):
@@ -181,7 +171,7 @@ class TestEqFieldConstraint:
         b = Builder()
         _ = b.store_uint(10, 32)
         with pytest.raises(TlbModelError, match="constraint failed"):
-            _ = EqFieldType().load_from(b.end_cell().begin_parse(), 5)
+            _ = eq_field.load_from(b.end_cell().begin_parse(), 5)
 
 
 class TestVarWidthBits:
@@ -189,12 +179,12 @@ class TestVarWidthBits:
 
     def test_roundtrip(self):
         obj = var_bits_field(n=4, s=bitarray("1010"))
-        result = VarBitsFieldType().load_from(obj.serialize().begin_parse(), 4)
+        result = var_bits_field.load_from(obj.serialize().begin_parse(), 4)
         assert result.s == bitarray("1010")
 
     def test_zero_width(self):
         obj = var_bits_field(n=0, s=bitarray())
-        result = VarBitsFieldType().load_from(obj.serialize().begin_parse(), 0)
+        result = var_bits_field.load_from(obj.serialize().begin_parse(), 0)
         assert result.s == bitarray()
 
     def test_wrong_length_on_serialize(self):
@@ -205,7 +195,7 @@ class TestVarWidthBits:
 
     def test_constant_width_roundtrip(self):
         obj = fixed_bits(s=bitarray("10101010"))
-        result = FixedBitsType().load_from(obj.serialize().begin_parse())
+        result = fixed_bits.load_from(obj.serialize().begin_parse())
         assert result.s == bitarray("10101010")
 
     def test_constant_width_wrong_length(self):
@@ -219,18 +209,16 @@ class TestInlineRecordAsGenericArg:
     """Inline record [a:uint32 b:uint64] as argument to Maybe."""
 
     def test_just_roundtrip(self):
-        from generated.validation import AnonType
-
-        inner = Anon_cons(a=10, b=20)
-        obj = inline_generic(x=just(AnonType(), value=inner))
-        result = InlineGenericType().load_from(obj.serialize().begin_parse())
+        inner = Anon_1(a=10, b=20)
+        obj = inline_generic(x=just(Anon_1, value=inner))
+        result = inline_generic.load_from(obj.serialize().begin_parse())
         assert isinstance(result.x, just)
         assert result.x.value.a == 10
         assert result.x.value.b == 20
 
     def test_nothing_roundtrip(self):
         obj = inline_generic(x=nothing())
-        result = InlineGenericType().load_from(obj.serialize().begin_parse())
+        result = inline_generic.load_from(obj.serialize().begin_parse())
         assert isinstance(result.x, nothing)
 
 
@@ -281,8 +269,8 @@ class TestTypeInfoEquality:
 
     def test_generated_type_info_equal(self):
         assert ValType() == ValType()
-        assert ConstrainedType() == ConstrainedType()
-        assert ValType() != ConstrainedType()
+        assert constrained == constrained
+        assert ValType() != constrained
 
     def test_instantiated_equal(self):
         a = ValType.instantiate(4)
@@ -305,7 +293,7 @@ class TestCheckType:
 
         inner = pair(UintTypeConstructor(32), UintTypeConstructor(64), first=10, second=20)
         obj = typed_parent(inner=inner)
-        result = TypedParentType().load_from(obj.serialize().begin_parse())
+        result = typed_parent.load_from(obj.serialize().begin_parse())
         assert result.inner.first == 10
         assert result.inner.second == 20
 
@@ -350,7 +338,7 @@ class TestCheckType:
 
         inner = container_empty(UintTypeConstructor(64), extra=100)
         obj = container_parent(inner=inner)
-        result = ContainerParentType().load_from(obj.serialize().begin_parse())
+        result = container_parent.load_from(obj.serialize().begin_parse())
         assert isinstance(result.inner, container_empty)
         assert result.inner.extra == 100
 
@@ -360,7 +348,7 @@ class TestCheckType:
 
         inner = container_full(UintTypeConstructor(32), UintTypeConstructor(64), value=7, extra=200)
         obj = container_parent(inner=inner)
-        result = ContainerParentType().load_from(obj.serialize().begin_parse())
+        result = container_parent.load_from(obj.serialize().begin_parse())
         assert isinstance(result.inner, container_full)
         assert result.inner.value == 7
         assert result.inner.extra == 200
@@ -384,7 +372,7 @@ class TestDeserializeConstraints:
         _ = b.store_uint(2, 8)
         _ = b.store_uint(0, 32)
         with pytest.raises(TlbModelError, match="constraint failed"):
-            _ = ConstrainedType().load_from(b.end_cell().begin_parse())
+            _ = constrained.load_from(b.end_cell().begin_parse())
 
     def test_ordered_invalid_on_load(self):
         """a=10, b=5 in the stream violates { b >= a }."""
@@ -392,7 +380,7 @@ class TestDeserializeConstraints:
         _ = b.store_uint(10, 32)
         _ = b.store_uint(5, 32)
         with pytest.raises(TlbModelError, match="constraint failed"):
-            _ = OrderedType().load_from(b.end_cell().begin_parse())
+            _ = ordered.load_from(b.end_cell().begin_parse())
 
     def test_wrong_type_arg_for_val_zero(self):
         """val_zero expects type_arg_0 == 0, passing 5 triggers TlbModelError."""

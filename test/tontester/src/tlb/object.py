@@ -1,6 +1,6 @@
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import Callable
-from typing import Literal, Protocol, cast, final, override
+from typing import Literal, Protocol, Self, cast, final, override
 
 from bitarray import bitarray
 from pytoniq_core import Builder, Cell, Slice
@@ -21,7 +21,7 @@ class TypeInfo[T, *Args](Protocol):
 
     def load_from(self, cs: Slice, *args: *Args) -> T: ...
 
-    def deserialize(self, cell: Cell, *args: *Args):
+    def deserialize(self, cell: Cell, *args: *Args) -> T:
         cs = cell.begin_parse()
         if cs.is_special():
             raise TlbModelError("Cell must not be special")
@@ -57,13 +57,9 @@ class InstantiatedGenericType[T, *Args](TypeInfo[T]):
         )
 
     @override
-    def __hash__(self) -> int:
-        return hash(("instantiated", type(self._generic)))
-
-    @override
     def __repr__(self):
         args_str = ", ".join(repr(arg) for arg in self._args)
-        return f"{repr(self._generic)}<{args_str}>"
+        return f"{repr(self._generic)}({args_str})"
 
 
 class InstantiableTypeInfo[T, *Args](TypeInfo[T, *Args], Protocol):
@@ -72,7 +68,7 @@ class InstantiableTypeInfo[T, *Args](TypeInfo[T, *Args], Protocol):
         return InstantiatedGenericType(cls(), *args)
 
 
-class TLBRecord(ABC):
+class TLBRecord[*Args](ABC):
     @abstractmethod
     def serialize_to(self, builder: Builder) -> None: ...
 
@@ -87,9 +83,37 @@ class TLBRecord(ABC):
     def check_type[T](self, _idx: int, _ti: TypeInfo[T]) -> None:
         pass
 
+    @classmethod
+    @abstractmethod
+    def load_from(cls, cs: Slice, *args: *Args) -> Self: ...
+
+    @classmethod
+    def deserialize(cls, /, cell: Cell, *args: *Args) -> Self:
+        cs = cell.begin_parse()
+        if cs.is_special():
+            raise TlbModelError("Cell must not be special")
+        result = cls.load_from(cs, *args)
+        TlbModelError.raise_if_not_empty(cs)
+        return result
+
+    @classmethod
+    def serialize_value(cls, value: Self, builder: Builder) -> None:
+        value.serialize_to(builder)
+
+
+class TLBType(ABCMeta):
+    @override
+    def __repr__(cls):
+        return cls.__name__
+
+
+class GenericTLBType(TLBType):
+    def instantiate[Self, *Args](cls: TypeInfo[Self, *Args], *args: *Args) -> TypeInfo[Self]:
+        return InstantiatedGenericType(cls, *args)
+
 
 @final
-class Ref[X](TLBRecord):
+class Ref[X](TLBRecord[TypeInfo[X]], metaclass=GenericTLBType):
     def __init__(self, tx: TypeInfo[X], ref: X | Cell):
         self._tx = tx
         if isinstance(ref, Cell):
@@ -129,36 +153,18 @@ class Ref[X](TLBRecord):
         _ = builder.store_ref(self.cell)
 
     @override
+    @classmethod
+    def load_from(cls, cs: Slice, tx: TypeInfo[X]) -> Self:
+        child = cs.load_ref()
+        return cls(tx, child)
+
+    @override
     def __repr__(self):
         return f"Ref(_tx={self._tx}, value={self._value if self._value is not None else self._value_cell})"
 
 
 @final
-class RefType[X](InstantiableTypeInfo[Ref[X], TypeInfo[X]]):
-    @override
-    def serialize_value(cls, value: Ref[X], builder: Builder):
-        return value.serialize_to(builder)
-
-    @override
-    def load_from(cls, cs: Slice, tx: TypeInfo[X]) -> Ref[X]:
-        child = cs.load_ref()
-        return Ref(tx, child)
-
-    @override
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, RefType)
-
-    @override
-    def __hash__(self) -> int:
-        return hash("RefType")
-
-    @override
-    def __repr__(self):
-        return "Ref"
-
-
-@final
-class _AnyType(TypeInfo[Slice]):
+class _AnyTypeConstructor(TypeInfo[Slice]):
     @override
     def serialize_value(cls, value: Slice, builder: Builder):
         _ = builder.store_slice(value)
@@ -166,29 +172,23 @@ class _AnyType(TypeInfo[Slice]):
     @override
     def load_from(cls, cs: Slice):
         result = cs.copy()
-        _ = cs.skip_bits(cs.remaining_bits)
-        while cs.remaining_refs:
-            _ = cs.load_ref()
+        drain_slice(cs)
         return result
 
     @override
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, _AnyType)
-
-    @override
-    def __hash__(self) -> int:
-        return hash("AnyType")
+        return isinstance(other, _AnyTypeConstructor)
 
     @override
     def __repr__(self):
         return "Any"
 
 
-AnyType = _AnyType()
+AnyType = _AnyTypeConstructor()
 
 
 @final
-class _EnumTypeInfo[T](TypeInfo[T]):
+class _EnumTypeConstructor[T](TypeInfo[T]):
     """TypeInfo for simplified enum types (Unit, Bool, True, BoolFalse, Bit)."""
 
     def __init__(
@@ -217,10 +217,6 @@ class _EnumTypeInfo[T](TypeInfo[T]):
     def __eq__(self, other: object) -> bool:
         return self is other
 
-    @override
-    def __hash__(self) -> int:
-        return hash(("EnumTypeInfo", id(self._to_tag), id(self._from_tag)))
-
 
 def _deser_true(tag: int) -> Literal[True]:
     if tag != 1:
@@ -234,14 +230,14 @@ def _deser_false(tag: int) -> Literal[False]:
     return False
 
 
-UnitTypeInfo: TypeInfo[None] = _EnumTypeInfo(0, lambda _: 0, lambda _: None)
-BoolTypeInfo: TypeInfo[bool] = _EnumTypeInfo(1, int, bool)
-TrueTypeInfo: TypeInfo[Literal[True]] = _EnumTypeInfo(1, int, _deser_true)
-FalseTypeInfo: TypeInfo[Literal[False]] = _EnumTypeInfo(1, int, _deser_false)
+UnitTypeInfo: TypeInfo[None] = _EnumTypeConstructor(0, lambda _: 0, lambda _: None)
+BoolTypeInfo: TypeInfo[bool] = _EnumTypeConstructor(1, int, bool)
+TrueTypeInfo: TypeInfo[Literal[True]] = _EnumTypeConstructor(1, int, _deser_true)
+FalseTypeInfo: TypeInfo[Literal[False]] = _EnumTypeConstructor(1, int, _deser_false)
 
 
 @final
-class _UnaryTypeInfo(TypeInfo[int]):
+class _UnaryTypeConstructor(TypeInfo[int]):
     """TypeInfo for simplified Unary ~n → int. Ser/deser as unary encoding."""
 
     @override
@@ -260,18 +256,14 @@ class _UnaryTypeInfo(TypeInfo[int]):
 
     @override
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, _UnaryTypeInfo)
-
-    @override
-    def __hash__(self) -> int:
-        return hash("UnaryTypeInfo")
+        return isinstance(other, _UnaryTypeConstructor)
 
     @override
     def __repr__(self) -> str:
         return "Unary"
 
 
-UnaryTypeInfo = _UnaryTypeInfo()
+UnaryTypeInfo = _UnaryTypeConstructor()
 
 
 @final
@@ -301,10 +293,6 @@ class VarUIntTypeConstructor(TypeInfo[int]):
     @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, VarUIntTypeConstructor) and self._n == other._n
-
-    @override
-    def __hash__(self) -> int:
-        return hash(("VarUInt", self._n))
 
     @override
     def __repr__(self) -> str:
@@ -339,16 +327,12 @@ class VarIntTypeConstructor(TypeInfo[int]):
         return isinstance(other, VarIntTypeConstructor) and self._n == other._n
 
     @override
-    def __hash__(self) -> int:
-        return hash(("VarInt", self._n))
-
-    @override
     def __repr__(self) -> str:
         return f"VarInteger({self._n})"
 
 
 @final
-class MaybeTypeInfo[X](TypeInfo[X | None]):
+class MaybeTypeConstructor[X](TypeInfo[X | None]):
     """TypeInfo for simplified Maybe X → X | None. Stores inner TypeInfo."""
 
     def __init__(self, inner: TypeInfo[X]) -> None:
@@ -370,11 +354,7 @@ class MaybeTypeInfo[X](TypeInfo[X | None]):
 
     @override
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, MaybeTypeInfo) and self._inner == other._inner  # pyright: ignore[reportUnknownMemberType]
-
-    @override
-    def __hash__(self) -> int:
-        return hash(("MaybeTypeInfo", self._inner))
+        return isinstance(other, MaybeTypeConstructor) and self._inner == other._inner  # pyright: ignore[reportUnknownMemberType]
 
     @override
     def __repr__(self) -> str:
@@ -382,7 +362,7 @@ class MaybeTypeInfo[X](TypeInfo[X | None]):
 
 
 @final
-class _CellRefType(TypeInfo[Cell]):
+class _CellRefTypeConstructor(TypeInfo[Cell]):
     """TypeInfo for ^Cell — opaque cell reference. Stores/loads entire cells."""
 
     @override
@@ -395,18 +375,14 @@ class _CellRefType(TypeInfo[Cell]):
 
     @override
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, _CellRefType)
-
-    @override
-    def __hash__(self) -> int:
-        return hash("CellRefType")
+        return isinstance(other, _CellRefTypeConstructor)
 
     @override
     def __repr__(self) -> str:
         return "^Cell"
 
 
-CellRefType = _CellRefType()
+CellRefType = _CellRefTypeConstructor()
 
 
 @final
@@ -436,10 +412,6 @@ class UintTypeConstructor(TypeInfo[int]):
     @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, UintTypeConstructor) and self._n == other._n
-
-    @override
-    def __hash__(self) -> int:
-        return hash(("uint", self._n))
 
     @override
     def __repr__(self):
@@ -485,10 +457,6 @@ class BoundedUintTypeConstructor(TypeInfo[int]):
         )
 
     @override
-    def __hash__(self) -> int:
-        return hash(("bounded_uint", self._bound, self._inclusive))
-
-    @override
     def __repr__(self):
         op = "<=" if self._inclusive else "<"
         return f"#{op}{self._bound}"
@@ -522,10 +490,6 @@ class IntTypeConstructor(TypeInfo[int]):
         return isinstance(other, IntTypeConstructor) and self._n == other._n
 
     @override
-    def __hash__(self) -> int:
-        return hash(("int", self._n))
-
-    @override
     def __repr__(self):
         return f"int{self._n}"
 
@@ -555,10 +519,6 @@ class BitsTypeConstructor(TypeInfo[bitarray]):
     @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, BitsTypeConstructor) and self._n == other._n
-
-    @override
-    def __hash__(self) -> int:
-        return hash(("bits", self._n))
 
     @override
     def __repr__(self):
@@ -594,10 +554,6 @@ class TupleTypeConstructor[X](TypeInfo[list[X]]):
             and self._count == other._count
             and self._element_ti == other._element_ti  # pyright: ignore[reportUnknownMemberType]
         )
-
-    @override
-    def __hash__(self) -> int:
-        return hash(("tuple", self._count))
 
     @override
     def __repr__(self) -> str:

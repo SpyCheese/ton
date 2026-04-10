@@ -313,6 +313,23 @@ class ResolvedConstraint:
 type FieldOrConstraint = ResolvedField | ResolvedConstraint
 
 
+def _collect_type_params(expr: ResolvedTypeExpr, out: set[TypeParamDef]) -> None:
+    """Walk a type expression tree and collect all referenced TypeParamDefs."""
+    match expr:
+        case TypeParamRef(param=p):
+            out.add(p)
+        case TypeApply(arguments=args):
+            for a in args:
+                if is_type(a):
+                    _collect_type_params(a, out)
+        case TupleType(element=elem):
+            _collect_type_params(elem, out)
+        case CellRefType(inner=inner):
+            _collect_type_params(inner, out)
+        case AnonymousRecordType():
+            pass
+
+
 @dataclass(eq=False)
 class ResolvedConstructor:
     name: str | None
@@ -326,6 +343,14 @@ class ResolvedConstructor:
     source_order: list[FieldOrConstraint] = field(default_factory=list)
     deser_steps: list[DeserStep] = field(default_factory=list)
     nat_param_values: list[ResolvedNatExpr | None] = field(default_factory=list)
+
+    @functools.cached_property
+    def used_type_params(self) -> frozenset[TypeParamDef]:
+        """Type params actually referenced by this constructor's field types."""
+        result: set[TypeParamDef] = set()
+        for f in self.fields:
+            _collect_type_params(f.type_expr, result)
+        return frozenset(result)
 
 
 @dataclass(frozen=True)
@@ -408,3 +433,11 @@ class ResolvedType:
     @property
     def arity(self):
         return len(self.type_level_params)
+
+    @property
+    def has_sole_constructor(self) -> bool:
+        return len(self.constructors) == 1
+
+    @property
+    def has_unnamed_sole_constructor(self) -> bool:
+        return self.has_sole_constructor and self.constructors[0].name is None

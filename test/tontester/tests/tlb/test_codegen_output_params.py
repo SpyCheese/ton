@@ -3,10 +3,6 @@
 import pytest
 from generated.output_params import (
     HmNodeType,
-    InferredType,
-    LabelType,
-    McInferredType,
-    SizedType,
     UnaryType,
     bit,
     hm_node_fork,
@@ -60,7 +56,7 @@ class TestSized:
 
     def test_empty(self):
         obj = sized(0, len=unary_zero(), data=[])
-        result = SizedType().load_from(obj.serialize().begin_parse())
+        result = sized.load_from(obj.serialize().begin_parse())
         assert isinstance(result, sized)
         assert result.data == []
 
@@ -70,7 +66,7 @@ class TestSized:
             len=unary_succ(2, x=unary_succ(1, x=unary_succ(0, x=unary_zero()))),
             data=[bit(1), bit(0), bit(1)],
         )
-        result = SizedType().load_from(obj.serialize().begin_parse())
+        result = sized.load_from(obj.serialize().begin_parse())
         assert isinstance(result, sized)
         assert len(result.data) == 3
         # Verify by re-serializing individual bits
@@ -88,7 +84,7 @@ class TestInferred:
             UnaryType(), uint32_ti, first=unary_zero(), second=42
         )
         obj = inferred(0, x=inner_pair, y=0)
-        result = InferredType().load_from(obj.serialize().begin_parse())
+        result = inferred.load_from(obj.serialize().begin_parse())
         assert isinstance(result, inferred)
         assert result.n == 0
         assert result.get_output(0) == 0
@@ -101,7 +97,7 @@ class TestInferred:
             UnaryType(), uint32_ti, first=unary_2, second=99
         )
         obj = inferred(2, x=inner_pair, y=3)
-        result = InferredType().load_from(obj.serialize().begin_parse())
+        result = inferred.load_from(obj.serialize().begin_parse())
         assert isinstance(result, inferred)
         assert result.n == 2
         assert result.get_output(0) == 2
@@ -113,7 +109,7 @@ class TestLabel:
 
     def test_roundtrip(self):
         obj = label(8, n=5, s=[bit(1), bit(0), bit(1), bit(1), bit(0)])
-        result = LabelType().load_from(obj.serialize().begin_parse(), 8)
+        result = label.load_from(obj.serialize().begin_parse(), 8)
         assert isinstance(result, label)
         assert result.n == 5
         assert result.get_output(0) == 5
@@ -121,7 +117,7 @@ class TestLabel:
 
     def test_zero_length(self):
         obj = label(8, n=0, s=[])
-        result = LabelType().load_from(obj.serialize().begin_parse(), 8)
+        result = label.load_from(obj.serialize().begin_parse(), 8)
         assert result.n == 0
         assert result.s == []
 
@@ -165,7 +161,7 @@ class TestMcInferred:
         unary_2 = unary_succ(1, x=unary_succ(0, x=unary_zero()))
         inner = mc_left(UnaryType(), uint32_ti, first=unary_2, other=99)
         obj = mc_inferred(2, x=inner, y=3)
-        result = McInferredType().load_from(obj.serialize().begin_parse())
+        result = mc_inferred.load_from(obj.serialize().begin_parse())
         assert isinstance(result, mc_inferred)
         assert result.n == 2
         assert result.y == 3
@@ -175,7 +171,7 @@ class TestMcInferred:
         unary_1 = unary_succ(0, x=unary_zero())
         inner = mc_right(UnaryType(), uint32_ti, val=unary_1, extra=42)
         obj = mc_inferred(1, x=inner, y=1)
-        result = McInferredType().load_from(obj.serialize().begin_parse())
+        result = mc_inferred.load_from(obj.serialize().begin_parse())
         assert isinstance(result, mc_inferred)
         assert result.n == 1
         assert result.y == 1
