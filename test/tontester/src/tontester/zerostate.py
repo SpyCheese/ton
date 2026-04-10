@@ -8,39 +8,29 @@ from bitarray import bitarray
 from block.augmentations import DepthBalanceAug, KeyMaxLtAug
 from block.generated import (
     AccountType,
-    Anon_3Type,
-    Anon_9Type,
-    Anon_cons_3,
-    Anon_cons_9,
+    Anon_4,
+    Anon_10,
     BinTree,
     BinTreeType,
     ConfigParam,
-    ConfigParams_cons,
-    ConfigProposalSetupType,
+    ConfigParams,
     DepthBalanceInfo,
-    DepthBalanceInfoType,
     HashmapAugEType,
-    KeyMaxLtType,
+    KeyMaxLt,
     LibDescr,
-    LibDescrType,
-    McStateExtraType,
     NewConsensusConfig,
     NewConsensusConfigType,
-    OldMcBlocksInfo_cons,
-    OutMsgQueue_cons,
-    OutMsgQueueInfo_cons,
-    OutMsgQueueInfoType,
-    ProcessedInfo_cons,
-    ProcessedUptoType,
+    OldMcBlocksInfo,
+    OutMsgQueue,
+    OutMsgQueueInfo,
+    ProcessedInfo,
     ShardAccount,
-    ShardAccounts_cons,
-    ShardAccountsType,
-    ShardAccountType,
+    ShardAccounts,
     ShardDescr,
     ShardDescrType,
-    ShardHashes_cons,
-    StateInit_cons,
-    StoragePrices_cons,
+    ShardHashes,
+    StateInit,
+    StoragePrices,
     ValidatorDescr,
     ValidatorDescrType,
     account,
@@ -68,8 +58,10 @@ from block.generated import (
     nanograms,
     new_consensus_config_all,
     param_limits,
+    processed_upto,
     shard_ident,
     shard_state,
+    shared_lib_descr,
     simplex_config,
     storage_extra_none,
     storage_info,
@@ -89,12 +81,12 @@ from contract import (
     WalletV1Blueprint,
     ton,
 )
-from pytoniq_core import Address, Builder, Cell, CurrencyCollection, StateInit
+from pytoniq_core import Address, Builder, Cell, CurrencyCollection
+from pytoniq_core import StateInit as PyStateInit
 from tlb.hashmap import HashmapDict
 from tlb.object import (
     CellRefType,
     Ref,
-    RefType,
     UintTypeConstructor,
     UnitTypeInfo,
     VarUIntTypeConstructor,
@@ -209,7 +201,7 @@ class ZerostateBuilder:
         assert self._provider is not None
         return self._provider
 
-    def deploy(self, address: Address, state_init: StateInit, balance: CurrencyCollection):
+    def deploy(self, address: Address, state_init: PyStateInit, balance: CurrencyCollection):
         addr_int = int.from_bytes(address.hash_part, "big")
         self.smcs.append(
             _SmcEntry(
@@ -247,7 +239,7 @@ def _count_cells_and_bits(cell: Cell) -> tuple[int, int]:
 
 
 def _build_account(smc: _SmcEntry, workchain_id: int) -> account:
-    state = StateInit_cons.load_from(smc.state_init_cell.begin_parse())
+    state = StateInit.load_from(smc.state_init_cell.begin_parse())
     acc_storage = account_storage(
         last_trans_lt=0,
         balance=_cc(smc.balance),
@@ -256,7 +248,7 @@ def _build_account(smc: _SmcEntry, workchain_id: int) -> account:
     storage_cell = acc_storage.serialize()
     cells, bits = _count_cells_and_bits(storage_cell)
 
-    state2 = StateInit_cons.load_from(smc.state_init_cell.begin_parse())
+    state2 = StateInit.load_from(smc.state_init_cell.begin_parse())
     return account(
         addr=addr_std(
             anycast=None,
@@ -277,20 +269,20 @@ def _build_account(smc: _SmcEntry, workchain_id: int) -> account:
     )
 
 
-def _build_shard_accounts(smcs: list[_SmcEntry], workchain_id: int) -> ShardAccounts_cons:
+def _build_shard_accounts(smcs: list[_SmcEntry], workchain_id: int) -> ShardAccounts:
     if not smcs:
-        return ShardAccounts_cons(
+        return ShardAccounts(
             field=ahme_empty(
                 256,
-                DepthBalanceInfoType(),
+                depth_balance,
                 extra=depth_balance(split_depth=0, balance=_zero_cc()),
             )
         )
 
     d: HashmapDict[ShardAccount, DepthBalanceInfo] = HashmapDict(
         256,
-        ShardAccountType(),
-        DepthBalanceInfoType(),
+        account_descr,
+        depth_balance,
         DepthBalanceAug(),
     )
     for smc in smcs:
@@ -306,10 +298,10 @@ def _build_shard_accounts(smcs: list[_SmcEntry], workchain_id: int) -> ShardAcco
     aug_e = HashmapAugEType[ShardAccount, DepthBalanceInfo]().load_from(
         cell.begin_parse(),
         256,
-        ShardAccountType(),
-        DepthBalanceInfoType(),
+        account_descr,
+        depth_balance,
     )
-    return ShardAccounts_cons(field=aug_e)
+    return ShardAccounts(field=aug_e)
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +335,6 @@ def _build_config_params(
         ConfigParam_29,
         ConfigParam_30,
         ConfigParam_34,
-        StoragePricesType,
         config_block_limits,
         config_fwd_prices,
         config_gas_prices,
@@ -413,8 +404,8 @@ def _build_config_params(
     params.append(
         ConfigParam_11(
             field=cfg_vote_setup(
-                normal_params=Ref(ConfigProposalSetupType(), normal_setup),
-                critical_params=Ref(ConfigProposalSetupType(), critical_setup),
+                normal_params=Ref(cfg_vote_cfg, normal_setup),
+                critical_params=Ref(cfg_vote_cfg, critical_setup),
             )
         )
     )
@@ -470,16 +461,14 @@ def _build_config_params(
     )
 
     # Param 18: storage prices
-    sp = StoragePrices_cons(
+    sp = StoragePrices(
         utime_since=0,
         bit_price_ps=1,
         cell_price_ps=500,
         mc_bit_price_ps=1000,
         mc_cell_price_ps=500_000,
     )
-    sp_dict: HashmapDict[StoragePrices_cons] = HashmapDict(
-        32, StoragePricesType(), allow_empty=False
-    )
+    sp_dict: HashmapDict[StoragePrices] = HashmapDict(32, StoragePrices, allow_empty=False)
     sp_dict[0] = sp
     params.append(ConfigParam_18(field=sp_dict))
 
@@ -679,23 +668,23 @@ def _build_config_params(
 # ---------------------------------------------------------------------------
 
 
-def _empty_out_msg_queue_info() -> OutMsgQueueInfo_cons:
-    return OutMsgQueueInfo_cons(
-        out_queue=OutMsgQueue_cons(
+def _empty_out_msg_queue_info() -> OutMsgQueueInfo:
+    return OutMsgQueueInfo(
+        out_queue=OutMsgQueue(
             field=ahme_empty(352, UintTypeConstructor(64), extra=0),
         ),
-        proc_info=ProcessedInfo_cons(
-            field=HashmapDict(96, ProcessedUptoType()),
+        proc_info=ProcessedInfo(
+            field=HashmapDict(96, processed_upto),
         ),
         extra=None,
     )
 
 
-def _empty_shard_hashes() -> ShardHashes_cons:
-    return ShardHashes_cons(
+def _empty_shard_hashes() -> ShardHashes:
+    return ShardHashes(
         field=HashmapDict(
             32,
-            RefType[BinTree[ShardDescr]].instantiate(
+            Ref[BinTree[ShardDescr]].instantiate(
                 BinTreeType[ShardDescr].instantiate(ShardDescrType())
             ),
         ),
@@ -710,16 +699,16 @@ def _collect_public_libraries(smcs: list[_SmcEntry]) -> HashmapDict[LibDescr]:
     libs: dict[bytes, tuple[Cell, set[int]]] = {}
 
     for smc in smcs:
-        si = StateInit_cons.load_from(smc.state_init_cell.begin_parse())
+        si = StateInit.load_from(smc.state_init_cell.begin_parse())
         if si.library is None:
             continue
         # Library cell is a Hashmap 256 SimpleLib (non-empty, not HashmapE)
-        from block.generated import SimpleLib, SimpleLibType
+        from block.generated import SimpleLib, simple_lib
 
         lib_dict = HashmapDict[SimpleLib].load_from(
             si.library.begin_parse(),
             256,
-            SimpleLibType(),
+            simple_lib,
             allow_empty=False,
         )
         for lib_hash_int in lib_dict.keys():
@@ -732,7 +721,7 @@ def _collect_public_libraries(smcs: list[_SmcEntry]) -> HashmapDict[LibDescr]:
                 libs[h] = (lib_cell, set())
             libs[h][1].add(smc.address)
 
-    result: HashmapDict[LibDescr] = HashmapDict(256, LibDescrType())
+    result: HashmapDict[LibDescr] = HashmapDict(256, shared_lib_descr)
     for h, (lib_cell, publishers) in libs.items():
         # publishers is a Hashmap 256 True (non-empty)
         pub_dict: HashmapDict[None] = HashmapDict(256, UnitTypeInfo, allow_empty=False)
@@ -766,7 +755,7 @@ def _register_smc3(zs: ZerostateBuilder, wallet_addr: int):
     data = Builder().store_uint(0x11EF55AA, 32).store_uint(wallet_addr, 256).end_cell()
     from pytoniq_core.tlb.account import TickTock
 
-    si = StateInit(
+    si = PyStateInit(
         special=TickTock(tick=True, tock=True),
         code=SMC3_CODE,
         data=data,
@@ -858,26 +847,26 @@ def create_zerostate(
         gen_utime=now_time,
         gen_lt=0,
         min_ref_mc_seqno=0xFFFF_FFFF,
-        out_msg_queue_info=Ref(OutMsgQueueInfoType(), _empty_out_msg_queue_info()),
+        out_msg_queue_info=Ref(OutMsgQueueInfo, _empty_out_msg_queue_info()),
         before_split=0,
         accounts=Ref(
-            ShardAccountsType(),
-            ShardAccounts_cons(
+            ShardAccounts,
+            ShardAccounts(
                 field=ahme_empty(
                     256,
-                    DepthBalanceInfoType(),
+                    depth_balance,
                     extra=depth_balance(split_depth=0, balance=_zero_cc()),
                 )
             ),
         ),
         field=Ref(
-            Anon_3Type(),
-            Anon_cons_3(
+            Anon_4,
+            Anon_4(
                 overload_history=0,
                 underload_history=0,
                 total_balance=_zero_cc(),
                 total_validator_fees=_zero_cc(),
-                libraries=HashmapDict(256, LibDescrType()),
+                libraries=HashmapDict(256, shared_lib_descr),
                 master_ref=None,
             ),
         ),
@@ -947,7 +936,7 @@ def create_zerostate(
 
     mc_extra = masterchain_state_extra(
         shard_hashes=_empty_shard_hashes(),
-        config=ConfigParams_cons(
+        config=ConfigParams(
             config_addr=config_addr_bits,
             config=Ref(
                 HashmapDict[Cell].type_info(32, CellRefType, allow_empty=False),
@@ -957,16 +946,16 @@ def create_zerostate(
             ),
         ),
         field=Ref(
-            Anon_9Type(),
-            Anon_cons_9(
+            Anon_10,
+            Anon_10(
                 flags=0,
                 validator_info=validator_info(
                     validator_list_hash_short=compute_validator_set_hash(validator_keys),
                     catchain_seqno=0,
                     nx_cc_updated=True,
                 ),
-                prev_blocks=OldMcBlocksInfo_cons(
-                    field=ahme_empty(32, KeyMaxLtType(), extra=KeyMaxLtAug().eval_empty()),
+                prev_blocks=OldMcBlocksInfo(
+                    field=ahme_empty(32, KeyMaxLt, extra=KeyMaxLtAug().eval_empty()),
                 ),
                 after_key_block=True,
                 last_key_block=None,
@@ -984,12 +973,12 @@ def create_zerostate(
         gen_utime=now_time,
         gen_lt=0,
         min_ref_mc_seqno=0xFFFF_FFFF,
-        out_msg_queue_info=Ref(OutMsgQueueInfoType(), _empty_out_msg_queue_info()),
+        out_msg_queue_info=Ref(OutMsgQueueInfo, _empty_out_msg_queue_info()),
         before_split=0,
-        accounts=Ref(ShardAccountsType(), shard_accounts),
+        accounts=Ref(ShardAccounts, shard_accounts),
         field=Ref(
-            Anon_3Type(),
-            Anon_cons_3(
+            Anon_4,
+            Anon_4(
                 overload_history=0,
                 underload_history=0,
                 total_balance=_cc(total_balance),
@@ -998,7 +987,7 @@ def create_zerostate(
                 master_ref=None,
             ),
         ),
-        custom=Ref(McStateExtraType(), mc_extra),
+        custom=Ref(masterchain_state_extra, mc_extra),
     )
 
     mc_state_cell = mc_state.serialize()

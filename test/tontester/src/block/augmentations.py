@@ -11,11 +11,8 @@ from tlb.object import TypeInfo, UintTypeConstructor, VarUIntTypeConstructor
 from .generated import (
     CurrencyCollection,
     DepthBalanceInfo,
-    DepthBalanceInfoType,
     KeyExtBlkRef,
     KeyMaxLt,
-    KeyMaxLt_cons,
-    KeyMaxLtType,
     ShardAccount,
     account,
     account_descr,
@@ -57,7 +54,7 @@ class DepthBalanceAug:
 
     @property
     def extra_ti(self) -> TypeInfo[DepthBalanceInfo]:
-        return DepthBalanceInfoType()
+        return depth_balance
 
     def eval_leaf(self, value: ShardAccount) -> DepthBalanceInfo:
         assert isinstance(value, account_descr)
@@ -119,16 +116,16 @@ class KeyMaxLtAug:
 
     @property
     def extra_ti(self) -> TypeInfo[KeyMaxLt]:
-        return KeyMaxLtType()
+        return KeyMaxLt
 
     def eval_leaf(self, value: KeyExtBlkRef) -> KeyMaxLt:
-        return KeyMaxLt_cons(key=value.key, max_end_lt=value.blk_ref.end_lt)
+        return KeyMaxLt(key=value.key, max_end_lt=value.blk_ref.end_lt)
 
     def merge(self, left: KeyMaxLt, right: KeyMaxLt) -> KeyMaxLt:
-        return KeyMaxLt_cons(
+        return KeyMaxLt(
             key=left.key or right.key,
             max_end_lt=max(left.max_end_lt, right.max_end_lt),
         )
 
     def eval_empty(self) -> KeyMaxLt:
-        return KeyMaxLt_cons(key=False, max_end_lt=0)
+        return KeyMaxLt(key=False, max_end_lt=0)
