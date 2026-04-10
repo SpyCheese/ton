@@ -53,6 +53,10 @@ nested_maybe$_ x:(Maybe (Maybe uint32)) = NestedMaybe;
 // Maybe with ^Type
 maybe_ref$_ x:(Maybe ^uint32) = MaybeRef;
 
+// Conditional Maybe — cond?(Maybe X): simplified Maybe is nullable, so
+// the conditional's None (absent) and Maybe's None (nothing) coexist.
+cond_maybe$_ flag:(## 1) x:flag?(Maybe uint32) = CondMaybe;
+
 // VarUInteger/VarInteger simplification
 var_uint$_ {n:#} len:(#< n) value:(uint (len * 8)) = VarUInteger n;
 var_int$_ {n:#} len:(#< n) value:(int (len * 8)) = VarInteger n;

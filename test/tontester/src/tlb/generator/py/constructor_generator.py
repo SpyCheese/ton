@@ -210,7 +210,8 @@ class ConstructorGenerator:
                     sel = NatExpr(f.condition, self.scope).self_
                     sb.line(f"if {sel}:")
                     with sb.block():
-                        sb.line(f"assert self.{name} is not None")
+                        if not strat.is_nullable:
+                            sb.line(f"assert self.{name} is not None")
                         strat.emit_store(f"self.{name}", "builder", sb)
                 else:
                     strat.emit_store(f"self.{name}", "builder", sb)

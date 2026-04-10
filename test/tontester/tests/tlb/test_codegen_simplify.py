@@ -4,6 +4,7 @@ import pytest
 from bitarray import bitarray
 from generated.simplify import (
     coins,
+    cond_maybe,
     dict_field,
     enum_fields,
     inferred_unary,
@@ -183,6 +184,28 @@ class TestMaybeRef:
     def test_nothing_roundtrip(self):
         obj = maybe_ref(x=None)
         result = maybe_ref.load_from(obj.serialize().begin_parse())
+        assert result.x is None
+
+
+class TestCondMaybe:
+    """Conditional field with simplified Maybe: flag?(Maybe uint32)."""
+
+    def test_flag_set_with_value(self):
+        obj = cond_maybe(flag=1, x=42)
+        result = cond_maybe.load_from(obj.serialize().begin_parse())
+        assert result.flag == 1
+        assert result.x == 42
+
+    def test_flag_set_with_nothing(self):
+        obj = cond_maybe(flag=1, x=None)
+        result = cond_maybe.load_from(obj.serialize().begin_parse())
+        assert result.flag == 1
+        assert result.x is None
+
+    def test_flag_unset(self):
+        obj = cond_maybe(flag=0, x=None)
+        result = cond_maybe.load_from(obj.serialize().begin_parse())
+        assert result.flag == 0
         assert result.x is None
 
 
