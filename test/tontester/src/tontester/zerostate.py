@@ -2,6 +2,7 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Never, override
 
 import nacl.signing
 from bitarray import bitarray
@@ -75,6 +76,7 @@ from block.generated import (
 )
 from contract import (
     ConfigBlueprint,
+    ContractBlueprint,
     ElectorBlueprint,
     Provider,
     WalletV1,
@@ -90,6 +92,7 @@ from tlb.object import (
     UintTypeConstructor,
     UnitTypeInfo,
     VarUIntTypeConstructor,
+    ref,
 )
 from tonapi import ton_api
 
@@ -183,10 +186,20 @@ class WorkchainState:
 
 @dataclass
 class _SmcEntry:
-    address: int  # 256-bit address as int
-    state_init_cell: Cell
+    blueprint: ContractBlueprint[object]
     balance: int
-    is_special: bool
+
+    @property
+    def address(self) -> int:
+        return int.from_bytes(self.blueprint.address.hash_part, "big")
+
+    @property
+    def state_init_cell(self) -> Cell:
+        return self.blueprint.state_init.serialize()
+
+    @property
+    def is_special(self) -> bool:
+        return self.blueprint.state_init.special is not None
 
 
 @dataclass(eq=False)
@@ -194,23 +207,9 @@ class ZerostateBuilder:
     """Accumulates smart contracts and produces the final zerostate BOC."""
 
     smcs: list[_SmcEntry] = field(default_factory=list)
-    _provider: Provider | None = None
 
-    @property
-    def runtime_provider(self) -> Provider:
-        assert self._provider is not None
-        return self._provider
-
-    def deploy(self, address: Address, state_init: PyStateInit, balance: CurrencyCollection):
-        addr_int = int.from_bytes(address.hash_part, "big")
-        self.smcs.append(
-            _SmcEntry(
-                address=addr_int,
-                state_init_cell=state_init.serialize(),
-                balance=balance.grams,
-                is_special=state_init.special is not None,
-            )
-        )
+    def deploy(self, smc: ContractBlueprint[object], balance: CurrencyCollection):
+        self.smcs.append(_SmcEntry(blueprint=smc, balance=balance.grams))
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +285,8 @@ def _build_shard_accounts(smcs: list[_SmcEntry], workchain_id: int) -> ShardAcco
         DepthBalanceAug(),
     )
     for smc in smcs:
-        acc = _build_account(smc, workchain_id)
         sa = account_descr(
-            account=Ref(AccountType(), acc.serialize()),
+            account=Ref(AccountType(), _build_account(smc, workchain_id)),
             last_trans_hash=_bits256(b"\x00" * 32),
             last_trans_lt=0,
         )
@@ -404,8 +402,8 @@ def _build_config_params(
     params.append(
         ConfigParam_11(
             field=cfg_vote_setup(
-                normal_params=Ref(cfg_vote_cfg, normal_setup),
-                critical_params=Ref(cfg_vote_cfg, critical_setup),
+                normal_params=ref(normal_setup),
+                critical_params=ref(critical_setup),
             )
         )
     )
@@ -749,7 +747,7 @@ WALLET_LIBRARY = Cell.one_from_boc(
 )
 
 
-def _register_smc3(zs: ZerostateBuilder, wallet_addr: int):
+def _register_smc3(zs: ZerostateBuilder, wallet_addr: int) -> Address:
     """Register SMC#3 (tick-tock test contract) directly into the zerostate."""
     assert SMC3_CODE is not None and SMC3_LIBRARY is not None
     data = Builder().store_uint(0x11EF55AA, 32).store_uint(wallet_addr, 256).end_cell()
@@ -762,8 +760,20 @@ def _register_smc3(zs: ZerostateBuilder, wallet_addr: int):
         library=SMC3_LIBRARY,
     )
     addr = Address((-1, si.serialize().hash))
-    zs.deploy(addr, si, ton(1))
+    zs.smcs.append(_SmcEntry(blueprint=_RawBlueprint(si, addr), balance=ton(1).grams))
     return addr
+
+
+@dataclass
+class _RawBlueprint(ContractBlueprint[Never]):
+    """Minimal ContractBlueprint for contracts not backed by a Blueprint subclass."""
+
+    state_init: PyStateInit
+    address: Address
+
+    @override
+    def materialize(self, provider: Provider) -> Never:
+        raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
@@ -772,7 +782,7 @@ def _register_smc3(zs: ZerostateBuilder, wallet_addr: int):
 
 
 @dataclass
-class ZerostateResult:
+class Zerostate:
     masterchain: WorkchainState
     shardchain: WorkchainState
     _wallet_bp: WalletV1Blueprint
@@ -795,10 +805,6 @@ class ZerostateResult:
         return self._wallet_bp.materialize(provider)
 
 
-# Keep old name for compatibility
-Zerostate = ZerostateResult
-
-
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -810,7 +816,7 @@ def create_zerostate(
     validator_keys: list[Key],
     *,
     basechain_fhash_override: bytes | None = None,
-) -> ZerostateResult:
+) -> Zerostate:
     now_time = int(time.time())
     zs = ZerostateBuilder()
 
@@ -821,22 +827,18 @@ def create_zerostate(
     wallet_bp.address = Address((-1, b"\x00" * 32))
     # Add test library to wallet state_init (for Fift parity — will be removed later)
     wallet_bp.state_init.library = WALLET_LIBRARY
-    wallet_bp.add_to_zerostate(zs, ton(4_999_990_000))
+    zs.deploy(wallet_bp, ton(4_999_990_000))
 
     # --- SMC#3 (test tick-tock) ---
     smc3_addr: Address | None = _register_smc3(zs, 0)  # wallet addr is AllOnes*0 = 0
 
     # --- Elector ---
     elector_bp = ElectorBlueprint()
-    elector_bp.add_to_zerostate(zs, ton(10))
+    zs.deploy(elector_bp, ton(10))
 
     # --- Config params (needs wallet addr for minter) ---
     wallet_addr_int = 0  # AllOnes * 0
     config_params = _build_config_params(config, validator_keys, now_time, wallet_addr_int)
-
-    # We'll add param 12 (workchains) and 31 (special addrs) after building basestate
-    # For now, create the config blueprint without them
-    config_bp = ConfigBlueprint(params=config_params)
 
     # --- Build workchain 0 (base chain) empty shard state ---
     base_state = shard_state(
@@ -847,20 +849,18 @@ def create_zerostate(
         gen_utime=now_time,
         gen_lt=0,
         min_ref_mc_seqno=0xFFFF_FFFF,
-        out_msg_queue_info=Ref(OutMsgQueueInfo, _empty_out_msg_queue_info()),
+        out_msg_queue_info=ref(_empty_out_msg_queue_info()),
         before_split=0,
-        accounts=Ref(
-            ShardAccounts,
+        accounts=ref(
             ShardAccounts(
                 field=ahme_empty(
                     256,
                     depth_balance,
                     extra=depth_balance(split_depth=0, balance=_zero_cc()),
                 )
-            ),
+            )
         ),
-        field=Ref(
-            Anon_4,
+        field=ref(
             Anon_4(
                 overload_history=0,
                 underload_history=0,
@@ -868,7 +868,7 @@ def create_zerostate(
                 total_validator_fees=_zero_cc(),
                 libraries=HashmapDict(256, shared_lib_descr),
                 master_ref=None,
-            ),
+            )
         ),
         custom=None,
     )
@@ -920,8 +920,8 @@ def create_zerostate(
     config_params.append(ConfigParam_31(fundamental_smc_addr=special_dict))
 
     # --- Rebuild config blueprint with all params and deploy ---
-    config_bp = ConfigBlueprint(params=config_params, master_key=config_bp.master_key)
-    _ = config_bp.add_to_zerostate(zs, ton(10))
+    config_bp = ConfigBlueprint(config_params)
+    zs.deploy(config_bp, ton(10))
 
     # --- Build masterchain shard state ---
     total_balance = sum(smc.balance for smc in zs.smcs)
@@ -945,8 +945,7 @@ def create_zerostate(
                 ),
             ),
         ),
-        field=Ref(
-            Anon_10,
+        field=ref(
             Anon_10(
                 flags=0,
                 validator_info=validator_info(
@@ -960,7 +959,7 @@ def create_zerostate(
                 after_key_block=True,
                 last_key_block=None,
                 block_create_stats=None,
-            ),
+            )
         ),
         global_balance=_cc(total_balance),
     )
@@ -973,11 +972,10 @@ def create_zerostate(
         gen_utime=now_time,
         gen_lt=0,
         min_ref_mc_seqno=0xFFFF_FFFF,
-        out_msg_queue_info=Ref(OutMsgQueueInfo, _empty_out_msg_queue_info()),
+        out_msg_queue_info=ref(_empty_out_msg_queue_info()),
         before_split=0,
-        accounts=Ref(ShardAccounts, shard_accounts),
-        field=Ref(
-            Anon_4,
+        accounts=ref(shard_accounts),
+        field=ref(
             Anon_4(
                 overload_history=0,
                 underload_history=0,
@@ -985,9 +983,9 @@ def create_zerostate(
                 total_validator_fees=_zero_cc(),
                 libraries=_collect_public_libraries(zs.smcs),
                 master_ref=None,
-            ),
+            )
         ),
-        custom=Ref(masterchain_state_extra, mc_extra),
+        custom=ref(mc_extra),
     )
 
     mc_state_cell = mc_state.serialize()
@@ -996,7 +994,7 @@ def create_zerostate(
     mc_rhash = mc_state_cell.hash
     _ = (state_dir / "zerostate.boc").write_bytes(mc_boc)
 
-    return ZerostateResult(
+    return Zerostate(
         masterchain=WorkchainState(
             file=state_dir / "zerostate.boc",
             file_hash=mc_fhash,

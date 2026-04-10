@@ -29,6 +29,29 @@ class TypeInfo[T, *Args](Protocol):
         TlbModelError.raise_if_not_empty(cs)
         return result
 
+    def _is_type_info(self) -> Literal[True]:
+        return True
+
+
+class SelfTypeInfo(Protocol):
+    @classmethod
+    def serialize_value(cls, value: Self, builder: Builder) -> None: ...
+
+    @classmethod
+    def load_from(cls, cs: Slice) -> Self: ...
+
+    @classmethod
+    def deserialize(cls, cell: Cell) -> Self: ...
+
+    @classmethod
+    def _is_type_info(cls) -> Literal[True]: ...
+
+
+class SelfTypeInfoTag:
+    @classmethod
+    def _is_type_info(cls) -> Literal[True]:
+        return True
+
 
 @final
 class InstantiatedGenericType[T, *Args](TypeInfo[T]):
@@ -113,7 +136,7 @@ class GenericTLBType(TLBType):
 
 
 @final
-class Ref[X](TLBRecord[TypeInfo[X]], metaclass=GenericTLBType):
+class Ref[X](TLBRecord[TypeInfo[X]], SelfTypeInfoTag, metaclass=GenericTLBType):
     def __init__(self, tx: TypeInfo[X], ref: X | Cell):
         self._tx = tx
         if isinstance(ref, Cell):
@@ -161,6 +184,15 @@ class Ref[X](TLBRecord[TypeInfo[X]], metaclass=GenericTLBType):
     @override
     def __repr__(self):
         return f"Ref(_tx={self._tx}, value={self._value if self._value is not None else self._value_cell})"
+
+
+def ref[T: SelfTypeInfo](value: T) -> Ref[T]:
+    """
+    WARNING: Be very careful not to pass unions as T. They very likely don't satisfy SelfTypeInfo
+    but basedpyright will accept them amyway because of
+    https://github.com/microsoft/pyright/issues/11374 .
+    """
+    return Ref(type(value), value)
 
 
 @final

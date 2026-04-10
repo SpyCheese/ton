@@ -90,8 +90,3 @@ class Blueprint[S: ContractState](ABC):
         msg = MessageAny(info=info, init=self.state_init, body=Cell.empty())
         await provider.send_external(msg)
         return self.materialize(provider)
-
-    def add_to_zerostate[T](
-        self: ContractBlueprint[T], zerostate: Zerostate, balance: CurrencyCollection
-    ):
-        zerostate.deploy(self.address, self.state_init, balance)

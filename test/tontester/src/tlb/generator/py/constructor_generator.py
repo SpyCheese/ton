@@ -127,12 +127,17 @@ class ConstructorGenerator:
                 if isinstance(expr, TypeParamRef) and expr.param in self.type_params:
                     record_args.append(f"TypeInfo[{self.type_var_name(expr.param)}]")
 
+        metaclass = ""
+        if self.c.parent_type.has_sole_constructor:
+            self.ctx.use("SelfTypeInfoTag")
+            metaclass = f", SelfTypeInfoTag, metaclass={'Generic' if record_args else ''}TLBType"
+
         if record_args:
             record_suffix = f"[{', '.join(record_args)}]"
             self.ctx.use("GenericTLBType")
-            return f"{generic_suffix}(TLBRecord{record_suffix}, metaclass=GenericTLBType)"
+            return f"{generic_suffix}(TLBRecord{record_suffix}{metaclass})"
         self.ctx.use("TLBType")
-        return f"{generic_suffix}(TLBRecord[()], metaclass=TLBType)"
+        return f"{generic_suffix}(TLBRecord[()]{metaclass})"
 
     def generate(self, sb: SourceBuilder) -> None:
         self.ctx.use("final", "dataclass", "TLBRecord", "Builder", "Slice", "override")
@@ -234,36 +239,54 @@ class ConstructorGenerator:
                 emitted = True
         return emitted
 
-    def _generate_load_from(self, sb: SourceBuilder) -> None:
-        params = ["cs: Slice"]
-        assertions: list[str] = []
+    def _entry_param_names(self) -> list[str]:
+        """Names of entry params (for forwarding as call arguments)."""
+        names: list[str] = []
+        for tlp in self.c.parent_type.type_level_params:
+            if tlp.is_output:
+                continue
+            name = self.type_scope.lookup(tlp)
+            if tlp.kind == ParamKind.NAT:
+                names.append(name)
+            else:
+                expr = self.c.result_param_exprs.get(tlp.position)
+                if isinstance(expr, TypeParamRef) and expr.param in self.type_params:
+                    names.append(name)
+        return names
 
+    def _entry_params(self) -> list[str]:
+        """Build the typed parameter list for load_from/deserialize from type-level entry params."""
+        params: list[str] = []
         for tlp in self.c.parent_type.type_level_params:
             if tlp.is_output:
                 continue
             name = self.type_scope.lookup(tlp)
             if tlp.kind == ParamKind.NAT:
                 params.append(f"{name}: int")
-                assertions.append(f"assert {name} >= 0")
             else:
                 expr = self.c.result_param_exprs.get(tlp.position)
                 assert isinstance(expr, TypeParamRef)
                 if expr.param in self.type_params:
                     type_var = self.type_scope.lookup_generic(tlp)
                     params.append(f"{name}: TypeInfo[{type_var}]")
+        return params
 
-        params_str = ", ".join(params)
-        sb.line("@override")
-        sb.line("@classmethod")
+    def _return_type(self) -> str:
         if self.type_params:
             generic_vars = ", ".join(self.type_var_name(p) for p in self.type_params)
-            sb.line(f"def load_from(cls, {params_str}) -> {self.cls_name}[{generic_vars}]:")
-        else:
-            sb.line(f"def load_from(cls, {params_str}) -> {self.cls_name}:")
+            return f"{self.cls_name}[{generic_vars}]"
+        return self.cls_name
+
+    def _generate_load_from(self, sb: SourceBuilder) -> None:
+        params_str = ", ".join(["cs: Slice"] + self._entry_params())
+        sb.line("@override")
+        sb.line("@classmethod")
+        sb.line(f"def load_from(cls, {params_str}) -> {self._return_type()}:")
 
         with sb.block():
-            for assertion in assertions:
-                sb.line(assertion)
+            for tlp in self.c.parent_type.type_level_params:
+                if not tlp.is_output and tlp.kind == ParamKind.NAT:
+                    sb.line(f"assert {self.type_scope.lookup(tlp)} >= 0")
             if self.c.tag_bits:
                 self.ctx.use("TlbModelError")
                 tag_val = int(self.c.tag_bits, 2)
@@ -438,28 +461,10 @@ class ConstructorGenerator:
     def _generate_special_deserialize(self, sb: SourceBuilder) -> None:
         """Generate deserialize() override for special cell types (e.g. merkle proofs)."""
         self.ctx.use("Cell", "TlbModelError")
-        params = ["cell: Cell"]
-        for tlp in self.c.parent_type.type_level_params:
-            if tlp.is_output:
-                continue
-            name = self.type_scope.lookup(tlp)
-            if tlp.kind == ParamKind.NAT:
-                params.append(f"{name}: int")
-            else:
-                expr = self.c.result_param_exprs.get(tlp.position)
-                assert isinstance(expr, TypeParamRef)
-                if expr.param in self.type_params:
-                    type_var = self.type_scope.lookup_generic(tlp)
-                    params.append(f"{name}: TypeInfo[{type_var}]")
-        params_str = ", ".join(params)
-        if self.type_params:
-            generic_vars = ", ".join(self.type_var_name(p) for p in self.type_params)
-            ret = f"{self.cls_name}[{generic_vars}]"
-        else:
-            ret = self.cls_name
+        params_str = ", ".join(["cell: Cell"] + self._entry_params())
         sb.line("@override")
         sb.line("@classmethod")
-        sb.line(f"def deserialize(cls, /, {params_str}) -> {ret}:")
+        sb.line(f"def deserialize(cls, /, {params_str}) -> {self._return_type()}:")
         with sb.block():
             sb.line("cs = cell.begin_parse()")
             sb.line("if not cs.is_special():")
@@ -470,19 +475,11 @@ class ConstructorGenerator:
                         f"'expected special cell for {self.cls_name}, got ordinary cell')"
                     )
                 )
-            load_args = ["cs"]
-            for tlp in self.c.parent_type.type_level_params:
-                if tlp.is_output:
-                    continue
-                name = self.type_scope.lookup(tlp)
-                expr = self.c.result_param_exprs.get(tlp.position)
-                if tlp.kind == ParamKind.NAT:
-                    load_args.append(name)
-                elif isinstance(expr, TypeParamRef) and expr.param in self.type_params:
-                    load_args.append(name)
-            sb.line(f"result = cls.load_from({', '.join(load_args)})")
+            load_args = ", ".join(["cs"] + self._entry_param_names())
+            result = self.ctx.tmp("_result")
+            sb.line(f"{result} = cls.load_from({load_args})")
             sb.line("TlbModelError.raise_if_not_empty(cs)")
-            sb.line("return result")
+            sb.line(f"return {result}")
 
     def _generate_inline_properties(self, sb: SourceBuilder) -> None:
         """Generate property accessors for inlined anonymous record sub-fields."""
