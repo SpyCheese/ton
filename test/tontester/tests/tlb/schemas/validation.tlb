@@ -38,3 +38,6 @@ typed_parent$_ inner:(Pair uint32 uint64) = TypedParent;
 container_empty$0 {X:Type} {Y:Type} extra:Y = Container X Y;
 container_full$1 {X:Type} {Y:Type} value:X extra:Y = Container X Y;
 container_parent$_ inner:(Container uint32 uint64) = ContainerParent;
+
+// Conditional field used in constraint — should be rejected by sema
+// cond_constraint$_ flag:(## 1) n:flag?# { n = 1 } = CondConstraint;

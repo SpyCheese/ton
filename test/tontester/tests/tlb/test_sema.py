@@ -789,6 +789,49 @@ class TestSemaErrors:
                 normal$1 y:uint64 = T;
             """)
 
+    def test_conditional_field_in_constraint(self):
+        """Conditional field cannot be used in constraints."""
+        with pytest.raises(SemaError, match="conditional field"):
+            _ = analyze_text("foo$_ flag:(## 1) n:flag?# { n = 1 } = Foo;")
+
+    def test_conditional_field_in_type_arg(self):
+        """Conditional field cannot be used as type argument."""
+        with pytest.raises(SemaError, match="conditional field"):
+            _ = analyze_text(
+                "pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;\n"
+                + "foo$_ flag:(## 1) n:flag?# inner:(Pair (## n) uint32) = Foo;"
+            )
+
+    def test_conditional_field_output_param(self):
+        """Output param cannot be inferred from a conditional field."""
+        with pytest.raises(SemaError, match="conditional field"):
+            _ = analyze_text(
+                "unary_zero$0 = Unary ~0;\n"
+                + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
+                + "bit$_ (## 1) = Bit;\n"
+                + "foo$_ {n:#} flag:(## 1) x:flag?(Unary ~n) data:(n * Bit) = Foo ~n;"
+            )
+
+    def test_conditional_field_breaks_inference(self):
+        """Inference through a type whose exposing field is conditional should fail."""
+        with pytest.raises(SemaError, match="cannot be computed"):
+            _ = analyze_text(
+                "unary_zero$0 = Unary ~0;\n"
+                + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
+                + "generic_opt$_ {X:Type} has_x:(## 1) x:has_x?X = GenericOpt X;\n"
+                + "bar$_ {n:#} inner:(GenericOpt (Unary ~n)) = Bar ~n;"
+            )
+
+    def test_duplicate_type_param_fields_breaks_inference(self):
+        """Two fields exposing same type param make inference incapable."""
+        with pytest.raises(SemaError, match="cannot be computed"):
+            _ = analyze_text(
+                "unary_zero$0 = Unary ~0;\n"
+                + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
+                + "foo$_ {X:Type} t:X u:X = Foo X;\n"
+                + "bar$_ {n:#} inner:(Foo (Unary ~n)) = Bar ~n;"
+            )
+
     def test_special_all_marked(self):
         """All constructors with ! is fine."""
         ts = types_by_name("""

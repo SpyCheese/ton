@@ -531,6 +531,8 @@ def _resolve_identifier(name: str, scope: _Scope, registry: TypeRegistry) -> Res
                 case TypeParamDef():
                     return TypeParamRef(param)
         assert field is not None
+        if field.condition is not None:
+            raise SemaError(f"conditional field '{name}' cannot be used in expressions")
         if field.is_nat_valued:
             return NatFieldValue(field)
         else:

@@ -55,6 +55,15 @@ class TypeStrategy(ABC):
         """Whether this type can already represent None (e.g., Maybe, generic type params)."""
         return False
 
+    def emit_conditional_assert(self, value: str, sb: SourceBuilder) -> None:
+        """Emit assertion that `value` is not None inside a conditional field guard.
+
+        Called when a conditional field (flag?Type) is present. Most strategies
+        emit `assert value is not None`. Nullable strategies (Maybe, type params)
+        override: Maybe does nothing, type params delegate to TypeInfo.assert_nonnull.
+        """
+        sb.line(f"assert {value} is not None")
+
     def emit_get_output(self, _field_expr: str, _position: int) -> str:
         """Return a Python expression for the output param at the given TLP position."""
         assert False, f"{type(self).__name__} does not support emit_get_output"

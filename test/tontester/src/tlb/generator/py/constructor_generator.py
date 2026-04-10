@@ -195,14 +195,22 @@ class ConstructorGenerator:
         sb.line("@override")
         sb.line("def serialize_to(self, builder: Builder) -> None:")
         with sb.block():
-            has_assertions = self._emit_serialize_assertions(sb)
-            if not self.c.fields and self.c.tag_len == 0:
-                if not has_assertions:
-                    sb.line("pass")
-                return
+            has_content = False
+            for p in self.c.params:
+                if isinstance(p, NatParamDef):
+                    sb.line(f"assert self.{self.scope.lookup(p)} >= 0")
+                    has_content = True
+            for step in self.c.deser_steps:
+                if not isinstance(step, CheckConstraint):
+                    continue
+                if step.left.references_type_arg or step.right.references_type_arg:
+                    continue
+                sb.line(f"assert {render_constraint(step, self.scope, use_self=True)}")
+                has_content = True
             if self.c.tag_bits:
                 tag_val = int(self.c.tag_bits, 2)
                 sb.line(f"_ = builder.store_uint({tag_val}, {self.c.tag_len})")
+                has_content = True
             for f in self.c.fields:
                 name = self.scope.lookup(f)
                 strat = self.strategies[IdentityKey(f)]
@@ -210,35 +218,15 @@ class ConstructorGenerator:
                     sel = NatExpr(f.condition, self.scope).self_
                     sb.line(f"if {sel}:")
                     with sb.block():
-                        if not strat.is_nullable:
-                            sb.line(f"assert self.{name} is not None")
+                        strat.emit_conditional_assert(f"self.{name}", sb)
+                        _ = strat.emit_serialize_assertions(f"self.{name}", sb)
                         strat.emit_store(f"self.{name}", "builder", sb)
                 else:
+                    _ = strat.emit_serialize_assertions(f"self.{name}", sb)
                     strat.emit_store(f"self.{name}", "builder", sb)
-
-    def _emit_serialize_assertions(self, sb: SourceBuilder) -> bool:
-        """Emit assertions that validate internal state before serialization.
-
-        Returns True if any assertions were emitted.
-        """
-        emitted = False
-        for p in self.c.params:
-            if isinstance(p, NatParamDef):
-                sb.line(f"assert self.{self.scope.lookup(p)} >= 0")
-                emitted = True
-        for step in self.c.deser_steps:
-            if not isinstance(step, CheckConstraint):
-                continue
-            if step.left.references_type_arg or step.right.references_type_arg:
-                continue
-            sb.line(f"assert {render_constraint(step, self.scope, use_self=True)}")
-            emitted = True
-        for f in self.c.fields:
-            strat = self.strategies[IdentityKey(f)]
-            field_name = self.scope.lookup(f)
-            if strat.emit_serialize_assertions(f"self.{field_name}", sb):
-                emitted = True
-        return emitted
+                has_content = True
+            if not has_content:
+                sb.line("pass")
 
     def _entry_param_names(self) -> list[str]:
         """Names of entry params (for forwarding as call arguments)."""

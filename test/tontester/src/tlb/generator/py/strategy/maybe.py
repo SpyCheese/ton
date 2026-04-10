@@ -52,3 +52,7 @@ class MaybeStrategy(TypeStrategy):
     @override
     def is_nullable(self) -> bool:
         return True
+
+    @override
+    def emit_conditional_assert(self, value: str, sb: SourceBuilder) -> None:
+        pass

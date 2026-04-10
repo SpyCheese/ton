@@ -43,13 +43,14 @@ from .types import (
 def classify_inference(resolved_type: ResolvedType) -> list[InferenceInfo]:
     """For each Type parameter, check if output params can propagate through it.
 
-    A Type param is inference-capable if EVERY constructor has an explicit field
-    whose type is directly TypeParamRef to the corresponding implicit param.
+    A Type param is inference-capable if EVERY constructor has exactly one
+    non-conditional field whose type is directly TypeParamRef to the
+    corresponding implicit param, and no other fields reference that param.
     """
     result: list[InferenceInfo] = []
 
     for tlp in resolved_type.type_level_params:
-        if tlp.kind != ParamKind.TYPE:  # TypeLevelParam still uses ParamKind
+        if tlp.kind != ParamKind.TYPE:
             continue
         i = tlp.position
 
@@ -98,8 +99,10 @@ def _param_for_type_position(
 def _field_exposing_param(
     constructor: ResolvedConstructor, param: TypeParamDef
 ) -> ResolvedField | None:
-    """Find a field whose type is directly TypeParamRef(param)."""
+    """Find a non-conditional field whose type is directly TypeParamRef(param)."""
     for field in constructor.fields:
+        if field.condition is not None:
+            continue
         if isinstance(field.type_expr, TypeParamRef) and field.type_expr.param is param:
             return field
     return None
@@ -281,6 +284,14 @@ def _scan_for_outputs(
         tlp = applied_type.type_level_params[arg_idx]
         if not tlp.is_output:
             continue
+        if source_field.condition is not None:
+            raise SemaError(
+                (
+                    f"constructor '{constructor.name}' of type '{constructor.parent_type.name}': "
+                    f"output parameter '{arg.param.name}' cannot be inferred from "
+                    f"conditional field '{source_field.name}'"
+                )
+            )
         if arg.param in known_params:
             raise SemaError(
                 (

@@ -14,3 +14,8 @@ fixed_bits$_ s:(3 * Bit) = FixedBits;
 
 // Parameterized tuple with nat field
 var_bits$_ n:(## 4) s:(n * Bit) = VarBits;
+
+// Generic conditional: flag?X where X could be nullable (e.g. Maybe)
+nothing$0 {X:Type} = Maybe X;
+just$1 {X:Type} value:X = Maybe X;
+generic_opt$_ {X:Type} has_x:(## 1) x:has_x?X = GenericOpt X;

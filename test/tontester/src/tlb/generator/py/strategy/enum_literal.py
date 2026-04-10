@@ -72,3 +72,8 @@ class EnumLiteralStrategy(TypeStrategy):
     @override
     def is_nullable(self) -> bool:
         return self.info.py_type_str == "None"
+
+    @override
+    def emit_conditional_assert(self, value: str, sb: SourceBuilder) -> None:
+        if not self.is_nullable:
+            sb.line(f"assert {value} is not None")

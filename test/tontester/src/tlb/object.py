@@ -1,6 +1,6 @@
 from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import Callable
-from typing import Literal, Protocol, Self, cast, final, override
+from typing import Literal, Protocol, Self, TypeIs, cast, final, override
 
 from bitarray import bitarray
 from pytoniq_core import Builder, Cell, Slice
@@ -29,6 +29,9 @@ class TypeInfo[T, *Args](Protocol):
         TlbModelError.raise_if_not_empty(cs)
         return result
 
+    def is_nonnull(self, value: T | None) -> TypeIs[T]:
+        return value is not None
+
     def _is_type_info(self) -> Literal[True]:
         return True
 
@@ -46,11 +49,18 @@ class SelfTypeInfo(Protocol):
     @classmethod
     def _is_type_info(cls) -> Literal[True]: ...
 
+    @classmethod
+    def is_nonnull(cls, value: Self | None) -> TypeIs[Self]: ...
+
 
 class SelfTypeInfoTag:
     @classmethod
     def _is_type_info(cls) -> Literal[True]:
         return True
+
+    @classmethod
+    def is_nonnull(cls, value: Self | None) -> TypeIs[Self]:
+        return value is not None
 
 
 @final
@@ -246,6 +256,12 @@ class _EnumTypeConstructor[T](TypeInfo[T]):
         return self._from_tag(cs.load_uint(self._tag_len))
 
     @override
+    def is_nonnull(self, value: T | None) -> TypeIs[T]:
+        if self._tag_len == 0:
+            return True  # Unit type: None is the only valid value
+        return value is not None
+
+    @override
     def __eq__(self, other: object) -> bool:
         return self is other
 
@@ -383,6 +399,10 @@ class MaybeTypeConstructor[X](TypeInfo[X | None]):
         if cs.load_bit():
             return self._inner.load_from(cs)
         return None
+
+    @override
+    def is_nonnull(self, value: X | None) -> TypeIs[X | None]:
+        return True
 
     @override
     def __eq__(self, other: object) -> bool:

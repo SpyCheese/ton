@@ -47,3 +47,7 @@ class TypeParamStrategy(TypeStrategy):
     @override
     def is_nullable(self) -> bool:
         return True
+
+    @override
+    def emit_conditional_assert(self, value: str, sb: SourceBuilder) -> None:
+        sb.line(f"assert self.{self.ti_field}.is_nonnull({value})")

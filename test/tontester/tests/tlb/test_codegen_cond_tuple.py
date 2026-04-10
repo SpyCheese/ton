@@ -3,10 +3,12 @@
 from generated.cond_tuple import bit as ct_bit
 from generated.cond_tuple import (
     fixed_bits,
+    generic_opt,
     multi_opt,
     optional,
     var_bits,
 )
+from tlb.object import MaybeTypeConstructor, UintTypeConstructor, UnitTypeInfo
 
 # ── Conditional fields ────────────────────────────────────────────────
 
@@ -82,3 +84,64 @@ class TestTuple:
         result = var_bits.load_from(obj.serialize().begin_parse())
         assert result.n == 0
         assert result.s == []
+
+
+# ── Generic conditional fields ───────────────────────────────────────
+
+
+class TestGenericOpt:
+    """GenericOpt X: has_x?(X) where X can be non-nullable or nullable."""
+
+    def test_nonnull_type_present(self):
+        """X = uint32 (non-nullable), flag set."""
+        ti = UintTypeConstructor(32)
+        obj = generic_opt[int](ti, has_x=1, x=99)
+        result = generic_opt[int].load_from(obj.serialize().begin_parse(), ti)
+        assert result.has_x == 1
+        assert result.x == 99
+
+    def test_nonnull_type_absent(self):
+        """X = uint32, flag unset."""
+        ti = UintTypeConstructor(32)
+        obj = generic_opt[int](ti, has_x=0, x=None)
+        result = generic_opt[int].load_from(obj.serialize().begin_parse(), ti)
+        assert result.has_x == 0
+        assert result.x is None
+
+    def test_maybe_type_present_with_value(self):
+        """X = Maybe uint32 (nullable), flag set, value present."""
+        ti = MaybeTypeConstructor(UintTypeConstructor(32))
+        obj = generic_opt[int | None](ti, has_x=1, x=42)
+        result = generic_opt[int | None].load_from(obj.serialize().begin_parse(), ti)
+        assert result.has_x == 1
+        assert result.x == 42
+
+    def test_maybe_type_present_with_nothing(self):
+        """X = Maybe uint32 (nullable), flag set, value is Nothing (None)."""
+        ti = MaybeTypeConstructor(UintTypeConstructor(32))
+        obj = generic_opt[int | None](ti, has_x=1, x=None)
+        result = generic_opt[int | None].load_from(obj.serialize().begin_parse(), ti)
+        assert result.has_x == 1
+        assert result.x is None
+
+    def test_maybe_type_absent(self):
+        """X = Maybe uint32, flag unset."""
+        ti = MaybeTypeConstructor(UintTypeConstructor(32))
+        obj = generic_opt[int | None](ti, has_x=0, x=None)
+        result = generic_opt[int | None].load_from(obj.serialize().begin_parse(), ti)
+        assert result.has_x == 0
+        assert result.x is None
+
+    def test_unit_type_present(self):
+        """X = Unit (always None), flag set."""
+        obj = generic_opt[None](UnitTypeInfo, has_x=1, x=None)
+        result = generic_opt[None].load_from(obj.serialize().begin_parse(), UnitTypeInfo)
+        assert result.has_x == 1
+        assert result.x is None
+
+    def test_unit_type_absent(self):
+        """X = Unit, flag unset."""
+        obj = generic_opt[None](UnitTypeInfo, has_x=0, x=None)
+        result = generic_opt[None].load_from(obj.serialize().begin_parse(), UnitTypeInfo)
+        assert result.has_x == 0
+        assert result.x is None
