@@ -34,6 +34,7 @@ class PyContext:
     """Shared state for a single file generation run."""
 
     current_module: Module
+    manifest: PyManifest
     scope: NameScope
     simplify: SimplifyConfig
     used_imports: set[str]
@@ -47,10 +48,12 @@ class PyContext:
         self,
         *,
         current_module: Module,
+        py_module: str,
         simplify: SimplifyConfig | None = None,
         foreign_manifests: Mapping[Module, PyManifest] | None = None,
     ) -> None:
         self.current_module = current_module
+        self.manifest = PyManifest(py_module=py_module)
         self.scope = NameScope()
         self.simplify = simplify or SimplifyConfig.none()
         self.used_imports = set()
@@ -128,11 +131,6 @@ class PyContext:
         source = manifest.type_names[key]
         bound = self.scope.bind(t, source)
         self._register_foreign_import(manifest.py_module, source, bound)
-        # Multi-constructor types also expose `<name>Type` as a TypeInfo class.
-        if not t.has_sole_constructor:
-            self._register_foreign_import(
-                manifest.py_module, f"{source}Type", f"{bound}Type"
-            )
         return bound
 
     def _discover_foreign_constructor(self, c: ResolvedConstructor) -> str:
@@ -162,6 +160,53 @@ class PyContext:
 
     def get_type_scope(self, t: ResolvedType) -> NameScope:
         return self._type_scopes[IdentityKey(t)]
+
+    def bind_type(self, t: ResolvedType, preferred: str) -> str:
+        """Bind a local type's primary Python name and capture it in the manifest."""
+        name = self.scope.bind(t, preferred)
+        self.manifest.type_names[IdentityKey(t)] = name
+        return name
+
+    def bind_constructor(self, c: ResolvedConstructor, preferred: str) -> str:
+        """Bind a local constructor's Python name and capture it in the manifest."""
+        name = self.scope.bind(c, preferred)
+        self.manifest.constructor_names[IdentityKey(c)] = name
+        return name
+
+    def bind_type_info(self, t: ResolvedType) -> str:
+        """Bind the auto-derived TypeInfo class name for a multi-cons type.
+
+        The preferred name is `{type_name}Type`; NameScope suffixes on
+        collision so a user-defined `XType` keeps its bare name. Captured in
+        the manifest.
+        """
+        preferred = f"{self.scope.lookup(t)}Type"
+        name = self.scope.bind_type_info(t, preferred)
+        self.manifest.type_info_names[IdentityKey(t)] = name
+        return name
+
+    def lookup_type_info(self, t: ResolvedType) -> str:
+        """Return the Python name of the TypeInfo class for multi-constructor type `t`."""
+        if self._is_foreign_type(t):
+            return self._discover_foreign_type_info(t)
+        return self.scope.lookup_type_info(t)
+
+    def _discover_foreign_type_info(self, t: ResolvedType) -> str:
+        if self.scope.is_type_info_bound(t):
+            return self.scope.lookup_type_info(t)
+        # Ensure the type itself is bound and imported first.
+        _ = self._discover_foreign_type(t)
+        assert t.origin_module is not None
+        manifest = self.foreign_manifests[t.origin_module]
+        key = IdentityKey(t)
+        assert key in manifest.type_info_names, (
+            f"foreign multi-cons type {t.name!r} has no TypeInfo entry "
+            f"in manifest for module {t.origin_module.name!r}"
+        )
+        source = manifest.type_info_names[key]
+        bound = self.scope.bind_type_info(t, source)
+        self._register_foreign_import(manifest.py_module, source, bound)
+        return bound
 
     def get_constructor(self, c: ResolvedConstructor) -> ConstructorInfo:
         return self._constructors[IdentityKey(c)]

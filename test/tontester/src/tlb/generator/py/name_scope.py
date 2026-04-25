@@ -113,6 +113,7 @@ class NameScope:
     _local_bindings: dict[IdentityKey[Bindable], str]
     _generic_bindings: dict[IdentityKey[BindableForGeneric], str]
     _setter_bindings: dict[IdentityKey[BindableForSetter], str]
+    _type_info_bindings: dict[IdentityKey[ResolvedType], str]
     _parent: NameScope | None
 
     def __init__(self, parent: NameScope | None = None) -> None:
@@ -121,6 +122,7 @@ class NameScope:
         self._local_bindings = {}
         self._generic_bindings = {}
         self._setter_bindings = {}
+        self._type_info_bindings = {}
         self._parent = parent
 
     def _is_taken(self, name: str) -> bool:
@@ -161,6 +163,36 @@ class NameScope:
         self._used.add(name)
         self._setter_bindings[IdentityKey(obj)] = name
         return name
+
+    def bind_type_info(self, t: ResolvedType, preferred: str) -> str:
+        """Bind the auto-derived TypeInfo class name for a multi-cons type.
+
+        Tracked separately from primary names so a user-defined type named
+        `XType` can take the bare `XType` symbol while the TypeInfo of `X`
+        gets a suffix.
+        """
+        name = self._make_unique(preferred)
+        self._used.add(name)
+        self._type_info_bindings[IdentityKey(t)] = name
+        return name
+
+    def lookup_type_info(self, t: ResolvedType) -> str:
+        """Get the TypeInfo class name for `t`. Must have been bound."""
+        key = IdentityKey(t)
+        if key in self._type_info_bindings:
+            return self._type_info_bindings[key]
+        if self._parent is not None:
+            return self._parent.lookup_type_info(t)
+        raise KeyError(f"no TypeInfo binding for {t!r}")
+
+    def is_type_info_bound(self, t: ResolvedType) -> bool:
+        """Check whether `t` already has a TypeInfo binding in this or any parent scope."""
+        key = IdentityKey(t)
+        if key in self._type_info_bindings:
+            return True
+        if self._parent is not None:
+            return self._parent.is_type_info_bound(t)
+        return False
 
     def lookup_setter(self, obj: BindableForSetter) -> str:
         """Get the setter method name for a ResolvedField."""

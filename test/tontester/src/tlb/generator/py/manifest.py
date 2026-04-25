@@ -30,3 +30,7 @@ class PyManifest:
         default_factory=dict
     )
     field_names: dict[IdentityKey[ResolvedField], str] = field(default_factory=dict)
+    # TypeInfo class names for multi-constructor types. Derived as `{X}Type`
+    # by default but reserved through NameScope so user names can take
+    # priority and the TypeInfo gets a suffix on collision.
+    type_info_names: dict[IdentityKey[ResolvedType], str] = field(default_factory=dict)

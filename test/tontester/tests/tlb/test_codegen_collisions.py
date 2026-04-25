@@ -3,6 +3,8 @@
 from generated.collisions import (
     FooType,
     PassType,
+    Tag,
+    TagType,
     bar,
     class_1,
     cls_field,
@@ -13,6 +15,9 @@ from generated.collisions import (
     kw_generic,
     pass_1,
     return_1,
+    tag_blue,
+    tag_red,
+    tt,
 )
 from tlb.object import UintTypeConstructor
 
@@ -81,3 +86,23 @@ class TestNameCollisions:
         obj = kw_generic(_tint=ti, value=42)
         result = kw_generic[int].load_from(obj.serialize().begin_parse(), ti)
         assert result.value == 42
+
+    def test_typeinfo_class_collides_with_user_type(self):
+        """The user type `TagType` and the auto-derived TypeInfo class for
+        the multi-cons `Tag` would both want the bare `TagType` symbol; the
+        user binding must win and the TypeInfo gets a suffix."""
+        # The user-defined `TagType` is a type alias for `tt` and round-trips.
+        user_obj = tt(payload=99)
+        roundtripped = tt.load_from(user_obj.serialize().begin_parse())
+        assert roundtripped.payload == 99
+        assert TagType is tt
+        # The auto-derived TypeInfo for `Tag` still exists under a
+        # collision-suffixed name and dispatches both Tag constructors.
+        from generated.collisions import TagType_1
+
+        decoded_red = TagType_1().load_from(tag_red().serialize().begin_parse())
+        decoded_blue = TagType_1().load_from(tag_blue().serialize().begin_parse())
+        assert isinstance(decoded_red, tag_red)
+        assert isinstance(decoded_blue, tag_blue)
+        # Sanity: the union alias is also exported.
+        assert Tag is not None

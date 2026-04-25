@@ -29,3 +29,9 @@ len_user$_ t:(LenType 8) = LenUser;
 
 // Type param named after Python keyword/builtin
 kw_generic$_ {int:Type} value:int = KwGeneric int;
+
+// User type whose name collides with the auto-derived TypeInfo class name
+// of a sibling multi-cons type (here `Tag`'s TypeInfo would be `TagType`).
+tag_red$0 = Tag;
+tag_blue$1 = Tag;
+tt$_ payload:uint32 = TagType;

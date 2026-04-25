@@ -94,7 +94,7 @@ class UserTypeStrategy(TypeStrategy):
             self._ti_class = base
             self._ti_bare = base
         else:
-            base = f"{self._type_name}Type"
+            base = ctx.lookup_type_info(type_expr.type)
             if self._type_var_args:
                 base = f"{base}[{', '.join(self._type_var_args)}]"
             self._ti_class = base

@@ -97,7 +97,7 @@ class TypeGenerator:
     ) -> None:
         self.ctx.use("final", "Builder", "Slice", "override")
         type_name = self.ctx.scope.lookup(self.t)
-        info_name = f"{type_name}Type"
+        info_name = self.ctx.lookup_type_info(self.t)
 
         generic_suffix = f"[{', '.join(self.type_vars)}]" if self.type_vars else ""
         entry_nat_count = sum(

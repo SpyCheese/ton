@@ -43,10 +43,10 @@ def generate_python(
     config = simplify or SimplifyConfig.none()
     ctx = PyContext(
         current_module=current_module,
+        py_module=py_module,
         simplify=config,
         foreign_manifests=foreign_manifests,
     )
-    manifest = PyManifest(py_module=py_module)
 
     for t in types:
         if t.is_builtin or not t.constructors:
@@ -55,16 +55,21 @@ def generate_python(
         if t.has_unnamed_sole_constructor:
             # Unnamed sole constructor: use the type name directly, don't bind type
             cons = t.constructors[0]
-            cname = ctx.scope.bind(cons, type_name)
-            manifest.constructor_names[IdentityKey(cons)] = cname
+            _ = ctx.bind_constructor(cons, type_name)
         else:
-            tname = ctx.scope.bind(t, type_name)
-            manifest.type_names[IdentityKey(t)] = tname
+            _ = ctx.bind_type(t, type_name)
             for c in t.constructors:
-                cname = ctx.scope.bind(
+                _ = ctx.bind_constructor(
                     c, c.name or _anonymous_constructor_name(type_name, c)
                 )
-                manifest.constructor_names[IdentityKey(c)] = cname
+
+    # Bind TypeInfo class names for multi-constructor types AFTER all type
+    # and constructor names are bound. This way user-defined names take their
+    # bare identifiers and the auto-derived `{X}Type` gets a suffix on collision.
+    for t in types:
+        if t.is_builtin or not t.constructors or t.has_sole_constructor:
+            continue
+        _ = ctx.bind_type_info(t)
 
     # Pre-bind all field names so cross-type inference chain lookups work.
     type_generators: list[TypeGenerator] = []
@@ -83,7 +88,7 @@ def generate_python(
             cons_scope = ctx.get_constructor(c).scope
             for f in c.fields:
                 if cons_scope.is_bound(f):
-                    manifest.field_names[IdentityKey(f)] = cons_scope.lookup(f)
+                    ctx.manifest.field_names[IdentityKey(f)] = cons_scope.lookup(f)
 
     body = SourceBuilder()
     for tg in type_generators:
@@ -94,4 +99,4 @@ def generate_python(
     sb.blank()
     sb.line(body.build().rstrip())
     sb.blank()
-    return sb.build(), manifest
+    return sb.build(), ctx.manifest
