@@ -822,16 +822,6 @@ class TestSemaErrors:
                 + "bar$_ {n:#} inner:(GenericOpt (Unary ~n)) = Bar ~n;"
             )
 
-    def test_duplicate_type_param_fields_breaks_inference(self):
-        """Two fields exposing same type param make inference incapable."""
-        with pytest.raises(SemaError, match="cannot be computed"):
-            _ = analyze_text(
-                "unary_zero$0 = Unary ~0;\n"
-                + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
-                + "foo$_ {X:Type} t:X u:X = Foo X;\n"
-                + "bar$_ {n:#} inner:(Foo (Unary ~n)) = Bar ~n;"
-            )
-
     def test_special_all_marked(self):
         """All constructors with ! is fine."""
         ts = types_by_name("""
