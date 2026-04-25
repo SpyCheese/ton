@@ -8,7 +8,8 @@ Regular (non-augmented) hashmaps use UnitTypeInfo as the extra type,
 which takes 0 bits on the wire.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass
 from typing import Protocol, final, override
 
 from bitarray import bitarray
@@ -79,21 +80,48 @@ def _label_bits(label: HmLabel) -> bitarray:
             return bitarray([v]) * n
 
 
-def _iter_edge[V, E](
-    edge: ahm_edge[V, E], prefix: bitarray, key_bits: int
-) -> Iterator[tuple[int, V]]:
-    """Lazily yield (key, value) pairs in sorted order from a hashmap edge."""
-    prefix = prefix + _label_bits(edge.label)
+def _walk_cell[V, E](
+    cell: Cell,
+    prefix: bitarray,
+    key_bits: int,
+    value_ti: TypeInfo[V],
+    extra_ti: TypeInfo[E],
+    skip: Callable[[bitarray], bool] | None = None,
+) -> Iterator[_Leaf[V] | _Segment[E]]:
+    """Walk a hashmap subtree rooted at `cell` with `prefix` already consumed.
+
+    Yields each leaf as `_Leaf(key, value)`. If `skip(prefix)` returns True
+    for a subtree, that subtree's cell is yielded as `_Segment` and not
+    descended into — its `.ref` is never accessed, so pruned cells never
+    force a deserialization.
+    """
+    if skip is not None and skip(prefix):
+        yield _Segment(prefix=bitarray(prefix), cell=cell)
+        return
+    edge = ahm_edge[V, E].load_from(cell.begin_parse(), key_bits - len(prefix), value_ti, extra_ti)
+    full = prefix + _label_bits(edge.label)
     match edge.node:
         case ahmn_leaf(value=value):
-            yield (ba2int(prefix), value)
-        case ahmn_fork(left=left, right=right):
-            yield from _iter_edge(left.ref, prefix + bitarray([False]), key_bits)
-            yield from _iter_edge(right.ref, prefix + bitarray([True]), key_bits)
+            yield _Leaf(key=ba2int(full), value=value)
+        case ahmn_fork(left=l, right=r):
+            yield from _walk_cell(
+                l.cell, full + bitarray([False]), key_bits, value_ti, extra_ti, skip
+            )
+            yield from _walk_cell(
+                r.cell, full + bitarray([True]), key_bits, value_ti, extra_ti, skip
+            )
 
 
-def _lookup_edge[V, E](edge: ahm_edge[V, E], key: bitarray, pos: int) -> V | None:
-    """Look up a single key by traversing the tree."""
+def _lookup_cell[V, E](
+    cell: Cell,
+    key: bitarray,
+    pos: int,
+    key_bits: int,
+    value_ti: TypeInfo[V],
+    extra_ti: TypeInfo[E],
+) -> V | None:
+    """Look up a single key, descending only the matching branch at each fork."""
+    edge = ahm_edge[V, E].load_from(cell.begin_parse(), key_bits - pos, value_ti, extra_ti)
     label = _label_bits(edge.label)
     if key[pos : pos + len(label)] != label:
         return None
@@ -101,11 +129,9 @@ def _lookup_edge[V, E](edge: ahm_edge[V, E], key: bitarray, pos: int) -> V | Non
     match edge.node:
         case ahmn_leaf(value=value):
             return value
-        case ahmn_fork(left=left, right=right):
-            if key[pos]:
-                return _lookup_edge(right.ref, key, pos + 1)
-            else:
-                return _lookup_edge(left.ref, key, pos + 1)
+        case ahmn_fork(left=l, right=r):
+            child = r.cell if key[pos] else l.cell
+            return _lookup_cell(child, key, pos + 1, key_bits, value_ti, extra_ti)
 
 
 def _merge_sorted[V](
@@ -139,25 +165,6 @@ def _merge_sorted[V](
             t = next(tree, None)
 
 
-def _common_prefix(keys: list[bitarray], lo: int, hi: int, pos: int) -> bitarray:
-    first = keys[lo]
-    length = 0
-    while pos + length < len(first):
-        bit = first[pos + length]
-        if all(keys[i][pos + length] == bit for i in range(lo, hi)):
-            length += 1
-        else:
-            break
-    return first[pos : pos + length]
-
-
-def _split_at_bit(keys: list[bitarray], lo: int, hi: int, pos: int) -> int:
-    for i in range(lo, hi):
-        if keys[i][pos]:
-            return i
-    return hi
-
-
 def _serialize_label(builder: Builder, label: bitarray, max_len: int) -> None:
     # k = ceil(log2(max_len + 1))
     # hml_short ('0'): 2n + 2 bits
@@ -179,9 +186,9 @@ def _serialize_label(builder: Builder, label: bitarray, max_len: int) -> None:
 class HashmapDict[V, E = None]:
     """Lazy dictionary backed by a HashmapAugE n X Y cell.
 
-    Reads traverse the tree on demand. The parsed root is cached after
-    first access. Writes go into a sorted overlay (SortedDict) and are
-    merged with the tree during iteration and serialization.
+    Reads traverse the tree on demand from the source cell. Writes go into
+    a sorted overlay (SortedDict) and are merged with the tree during
+    iteration and serialization.
     """
 
     def __init__(
@@ -199,8 +206,6 @@ class HashmapDict[V, E = None]:
         self._aug = aug
         self._cell = cell
         self._allow_empty = allow_empty
-        self._root: ahm_edge[V, E] | None = None
-        self._root_parsed = False
         self._overlay: SortedDict[int, V | _Deleted] = SortedDict()
 
     @property
@@ -223,23 +228,17 @@ class HashmapDict[V, E = None]:
     def allow_empty(self) -> bool:
         return self._allow_empty
 
-    def _get_root(self) -> ahm_edge[V, E] | None:
-        if not self._root_parsed:
-            if self._cell is not None:
-                cs = self._cell.begin_parse()
-                self._root = ahm_edge[V, E].load_from(
-                    cs, self._key_bits, self._value_ti, self._extra_ti
-                )
-            self._root_parsed = True
-        return self._root
-
     def _key_ba(self, key: int) -> bitarray:
         return int2ba(key, self._key_bits)
 
     def _tree_iter(self) -> Iterator[tuple[int, V]]:
-        root = self._get_root()
-        if root is not None:
-            yield from _iter_edge(root, bitarray(), self._key_bits)
+        if self._cell is None:
+            return
+        for item in _walk_cell(
+            self._cell, bitarray(), self._key_bits, self._value_ti, self._extra_ti
+        ):
+            assert isinstance(item, _Leaf)
+            yield (item.key, item.value)
 
     def _overlay_live(self) -> Iterator[tuple[int, V]]:
         for k, v in self._overlay.items():
@@ -249,16 +248,20 @@ class HashmapDict[V, E = None]:
     def is_empty(self) -> bool:
         return next(self.items(), None) is None
 
+    def _lookup(self, key: int) -> V | None:
+        if self._cell is None:
+            return None
+        return _lookup_cell(
+            self._cell, self._key_ba(key), 0, self._key_bits, self._value_ti, self._extra_ti
+        )
+
     def __getitem__(self, key: int) -> V:
         if key in self._overlay:
             val = self._overlay[key]
             if isinstance(val, _Deleted):
                 raise KeyError(key)
             return val
-        root = self._get_root()
-        if root is None:
-            raise KeyError(key)
-        result = _lookup_edge(root, self._key_ba(key), 0)
+        result = self._lookup(key)
         if result is None:
             raise KeyError(key)
         return result
@@ -276,10 +279,7 @@ class HashmapDict[V, E = None]:
             return False
         if key in self._overlay:
             return not isinstance(self._overlay[key], _Deleted)
-        root = self._get_root()
-        if root is None:
-            return False
-        return _lookup_edge(root, self._key_ba(key), 0) is not None
+        return self._lookup(key) is not None
 
     def get(self, key: int, default: V | None = None) -> V | None:
         try:
@@ -324,28 +324,59 @@ class HashmapDict[V, E = None]:
             self._serialize_hashmap(builder)
 
     def _serialize_hashmap_e(self, builder: Builder) -> None:
-        entries = list(self.items())
-        if not entries:
+        items = self._collect_items()
+        if not items:
             _ = builder.store_uint(0, 1)
             self._aug.extra_ti.serialize_value(self._aug.eval_empty(), builder)
-        else:
-            root_cell, root_extra = self._build_root(entries)
-            _ = builder.store_uint(1, 1)
-            _ = builder.store_ref(root_cell)
-            self._aug.extra_ti.serialize_value(root_extra, builder)
+            return
+        root_cell, root_extra = _build_from_items(
+            items, 0, self._key_bits, self._value_ti, self._aug
+        )
+        _ = builder.store_uint(1, 1)
+        _ = builder.store_ref(root_cell)
+        self._aug.extra_ti.serialize_value(root_extra, builder)
 
     def _serialize_hashmap(self, builder: Builder) -> None:
-        entries = list(self.items())
-        assert entries, "non-empty Hashmap cannot be serialized as empty"
-        root_cell, _ = self._build_root(entries)
+        items = self._collect_items()
+        assert items, "non-empty Hashmap cannot be serialized as empty"
+        root_cell, _ = _build_from_items(items, 0, self._key_bits, self._value_ti, self._aug)
         _ = builder.store_slice(root_cell.begin_parse())
 
-    def _build_root(self, entries: list[tuple[int, V]]) -> tuple[Cell, E]:
-        keys = [int2ba(k, self._key_bits) for k, _ in entries]
-        vals = [v for _, v in entries]
-        return _build_hashmap(
-            keys, vals, 0, len(keys), 0, self._key_bits, self._value_ti, self._aug
-        )
+    def _collect_items(self) -> list[_Item[V, E]]:
+        """Merge tree leaves and overlay-live entries into a single sorted list.
+
+        Subtrees with no overlay activity in their key range are emitted as
+        opaque `_Segment`s — their cells are reused without ever accessing
+        `.ref`, so pruned cells outside the overlay's reach are never
+        deserialized.
+        """
+
+        def overlay_misses(prefix: bitarray) -> bool:
+            pad = self._key_bits - len(prefix)
+            low = ba2int(prefix + bitarray([False] * pad)) if pad else ba2int(prefix)
+            high = ba2int(prefix + bitarray([True] * pad)) if pad else low
+            return next(self._overlay.irange(low, high), None) is None
+
+        items: list[_Item[V, E]] = []
+        if self._cell is not None:
+            for item in _walk_cell(
+                self._cell,
+                bitarray(),
+                self._key_bits,
+                self._value_ti,
+                self._extra_ti,
+                skip=overlay_misses,
+            ):
+                # Overlay-superseded leaves are dropped; the live overlay
+                # value will be added below.
+                if isinstance(item, _Leaf) and item.key in self._overlay:
+                    continue
+                items.append(item)
+        for k, v in self._overlay.items():
+            if not isinstance(v, _Deleted):
+                items.append(_Leaf(key=k, value=v))
+        items.sort(key=lambda i: _sort_key(i, self._key_bits))
+        return items
 
     @classmethod
     def load_from(
@@ -407,37 +438,96 @@ class HashmapDictTypeInfo[V](InstantiableTypeInfo[HashmapDict[V], int, TypeInfo[
         return "HashmapDict"
 
 
-def _build_hashmap[V, E](
-    keys: list[bitarray],
-    vals: list[V],
-    lo: int,
-    hi: int,
+@dataclass(frozen=True)
+class _Leaf[V]:
+    """A (key, value) pair to be embedded in the rebuilt tree."""
+
+    key: int
+    value: V
+
+
+@dataclass(frozen=True)
+class _Segment[E]:
+    """An opaque subtree to be embedded as-is by reusing its cell.
+
+    `prefix` is the bit-path from the root to this segment's start (the cell's
+    own internal label is not part of `prefix`).
+    """
+
+    prefix: bitarray
+    cell: Cell
+
+
+type _Item[V, E] = _Leaf[V] | _Segment[E]
+
+
+def _sort_key[V, E](item: _Item[V, E], key_bits: int) -> bitarray:
+    if isinstance(item, _Leaf):
+        return int2ba(item.key, key_bits)
+    return item.prefix + bitarray([False] * (key_bits - len(item.prefix)))
+
+
+def _item_bits[V, E](item: _Item[V, E], key_bits: int) -> bitarray:
+    """The known bit-prefix of an item: full key for leaves, prefix for segments."""
+    if isinstance(item, _Leaf):
+        return int2ba(item.key, key_bits)
+    return item.prefix
+
+
+def _build_from_items[V, E](
+    items: Sequence[_Item[V, E]],
     pos: int,
     key_bits: int,
     value_ti: TypeInfo[V],
     aug: Augmentation[V, E],
 ) -> tuple[Cell, E]:
-    """Build a hashmap cell from sorted key/value arrays. Returns (cell, extra)."""
-    assert lo < hi
-    prefix = _common_prefix(keys, lo, hi, pos)
-    pos += len(prefix)
+    """Build a hashmap edge cell from a sorted list of leaves and segments."""
+    assert items, "cannot build from empty items"
+
+    # Single item: a leaf becomes a fresh leaf cell; a segment is plugged in
+    # by reusing its cell directly.
+    if len(items) == 1:
+        item = items[0]
+        if isinstance(item, _Segment):
+            assert len(item.prefix) == pos
+            if isinstance(aug, _UnitAug):
+                return (item.cell, None)  # pyright: ignore[reportReturnType]
+            edge = ahm_edge[V, E].load_from(
+                item.cell.begin_parse(), key_bits - pos, value_ti, aug.extra_ti
+            )
+            return (item.cell, edge.node.extra)
+        b = Builder()
+        _serialize_label(b, int2ba(item.key, key_bits)[pos:], key_bits - pos)
+        extra = aug.eval_leaf(item.value)
+        aug.extra_ti.serialize_value(extra, b)
+        value_ti.serialize_value(item.value, b)
+        return (b.end_cell(), extra)
+
+    # Multiple items — find longest common prefix, then split at next bit.
+    bits = [_item_bits(it, key_bits) for it in items]
+    label_len = 0
+    while True:
+        bit_pos = pos + label_len
+        if any(bit_pos >= len(b) for b in bits):
+            break
+        first = bits[0][bit_pos]
+        if any(b[bit_pos] != first for b in bits[1:]):
+            break
+        label_len += 1
+    label = bits[0][pos : pos + label_len]
+    split_pos = pos + label_len
+    split_idx = next(i for i, b in enumerate(bits) if b[split_pos])
+
+    left_cell, left_extra = _build_from_items(
+        items[:split_idx], split_pos + 1, key_bits, value_ti, aug
+    )
+    right_cell, right_extra = _build_from_items(
+        items[split_idx:], split_pos + 1, key_bits, value_ti, aug
+    )
     b = Builder()
-    _serialize_label(b, prefix, key_bits - (pos - len(prefix)))
-    if hi - lo == 1:
-        extra = aug.eval_leaf(vals[lo])
-        aug.extra_ti.serialize_value(extra, b)
-        value_ti.serialize_value(vals[lo], b)
-        return (b.end_cell(), extra)
-    else:
-        split = _split_at_bit(keys, lo, hi, pos)
-        left_cell, left_extra = _build_hashmap(
-            keys, vals, lo, split, pos + 1, key_bits, value_ti, aug
-        )
-        right_cell, right_extra = _build_hashmap(
-            keys, vals, split, hi, pos + 1, key_bits, value_ti, aug
-        )
-        _ = b.store_ref(left_cell)
-        _ = b.store_ref(right_cell)
-        extra = aug.merge(left_extra, right_extra)
-        aug.extra_ti.serialize_value(extra, b)
-        return (b.end_cell(), extra)
+    _serialize_label(b, label, key_bits - pos)
+    _ = b.store_ref(left_cell)
+    _ = b.store_ref(right_cell)
+    extra = aug.merge(left_extra, right_extra)
+    aug.extra_ti.serialize_value(extra, b)
+    return (b.end_cell(), extra)

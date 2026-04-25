@@ -229,6 +229,83 @@ class TestHashmapDict:
                 items.append(item)
         assert items == [(0, 100)]
 
+    def _build_dict_with_pruned_right(self):
+        """Helper: build a HashmapDict whose right subtree has been replaced
+        by a pruned branch. Returns (dict, original_pruned_cell)."""
+        from bitarray import bitarray
+        from pytoniq_core import Cell
+        from pytoniq_core.boc.exotic import CellTypes
+
+        hme_cell = _build_hme(8, {0: 100, 128: 200}).end_cell()
+        cs = hme_cell.begin_parse()
+        assert cs.load_bit() == 1
+        root_cell = cs.load_ref()
+        root_cs = root_cell.begin_parse()
+        assert root_cs.load_bit() == 0  # hml_short
+        assert root_cs.load_bit() == 0  # unary zero
+        left_ref = root_cs.load_ref()
+        right_ref = root_cs.load_ref()
+
+        pb_builder = Builder()
+        _ = pb_builder.store_uint(1, 8)
+        _ = pb_builder.store_uint(1, 8)
+        hash_bits = bitarray()
+        hash_bits.frombytes(right_ref.get_hash(0))  # pyright: ignore[reportUnknownMemberType]
+        _ = pb_builder.store_bits(hash_bits)
+        _ = pb_builder.store_uint(right_ref.get_depth(0), 16)
+        pb_cs = pb_builder.end_cell().begin_parse()
+        pruned_right = Cell(
+            pb_cs.load_bits(pb_cs.remaining_bits), [], cell_type=CellTypes.pruned_branch
+        )
+
+        new_root_builder = Builder()
+        _ = new_root_builder.store_uint(0, 1)
+        _ = new_root_builder.store_uint(0, 1)
+        _ = new_root_builder.store_ref(left_ref)
+        _ = new_root_builder.store_ref(pruned_right)
+        new_root_cell = new_root_builder.end_cell()
+
+        hme_builder = Builder()
+        _ = hme_builder.store_uint(1, 1)
+        _ = hme_builder.store_ref(new_root_cell)
+        d = HashmapDict[int].load_from(
+            hme_builder.end_cell().begin_parse(), 8, UintTypeConstructor(32)
+        )
+        return d, pruned_right
+
+    def test_serialize_after_adding_to_unpruned_side(self):
+        """Adding a key on the unpruned side must serialize without forcing
+        the pruned subtree to be loaded."""
+        d, pruned_right = self._build_dict_with_pruned_right()
+        # Add a new key on the LEFT side (key 1, prefix 00000001).
+        d[1] = 999
+        # Serializing must succeed without touching the pruned right subtree.
+        b = Builder()
+        d.serialize_to(b)
+        new_cell = b.end_cell()
+
+        # The pruned right subtree must be preserved verbatim in the output.
+        new_cs = new_cell.begin_parse()
+        assert new_cs.load_bit() == 1
+        new_root_cell = new_cs.load_ref()
+        new_root_cs = new_root_cell.begin_parse()
+        # Skip the label (still empty: hml_short + unary zero)
+        assert new_root_cs.load_bit() == 0
+        assert new_root_cs.load_bit() == 0
+        _new_left = new_root_cs.load_ref()
+        new_right = new_root_cs.load_ref()
+        assert new_right.get_hash(0) == pruned_right.get_hash(0)
+
+        # And re-loading the result lets us read back the new + original left keys.
+        d2 = HashmapDict[int].load_from(
+            new_cell.begin_parse(), 8, UintTypeConstructor(32)
+        )
+        assert d2[0] == 100
+        assert d2[1] == 999
+        # Right side still pruned — accessing 128 still raises.
+        with pytest.raises(Exception):
+            _ = d2[128]
+
     def test_large_keys(self):
         """256-bit keys (like account addresses)."""
         entries = {0: 1, 2**256 - 1: 2, 2**128: 3}

@@ -239,14 +239,6 @@ class TestHashmapSimplification:
         assert result.data[255] == 999
         assert result.extra == 7
 
-    def test_lazy_access(self):
-        """Dict is lazy — entries are only parsed on access."""
-        obj = self._make_dict_field({42: 123})
-        result = dict_field.load_from(obj.serialize().begin_parse())
-        assert not result.data._root_parsed  # pyright: ignore[reportPrivateUsage]
-        assert result.data[42] == 123
-        assert result.data._root_parsed  # pyright: ignore[reportPrivateUsage]
-
     def test_mutation_roundtrip(self):
         obj = self._make_dict_field({1: 100, 2: 200}, extra=1)
         result = dict_field.load_from(obj.serialize().begin_parse())
