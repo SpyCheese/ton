@@ -550,8 +550,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
-    { name = "sortedcontainers" },
-    { name = "sortedcontainers-stubs" },
     { name = "tontester" },
     { name = "types-gdb" },
 ]
@@ -566,8 +564,6 @@ dev = [
 requires-dist = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
-    { name = "sortedcontainers", specifier = ">=2.4.0" },
-    { name = "sortedcontainers-stubs", specifier = ">=2.4.3" },
     { name = "tontester", editable = "test/tontester" },
     { name = "types-gdb" },
 ]
@@ -587,6 +583,8 @@ dependencies = [
     { name = "plotly" },
     { name = "pytoniq-core" },
     { name = "requests" },
+    { name = "sortedcontainers" },
+    { name = "sortedcontainers-stubs" },
     { name = "watchfiles" },
 ]
 
@@ -596,6 +594,8 @@ requires-dist = [
     { name = "plotly" },
     { name = "pytoniq-core" },
     { name = "requests" },
+    { name = "sortedcontainers" },
+    { name = "sortedcontainers-stubs" },
     { name = "watchfiles" },
 ]
 
