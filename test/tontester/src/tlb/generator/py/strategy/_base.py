@@ -75,3 +75,18 @@ class TypeStrategy(ABC):
         any assertions were emitted. Default: no assertions (for primitives).
         """
         return False
+
+    def init_param_type(self) -> str | None:
+        """Widened type accepted by the dataclass __init__, or None if the
+        regular `py_type()` is sufficient. Strategies that want callers to
+        be able to pass a more permissive value (e.g. a plain `Mapping`
+        where a `HashmapDict` is stored) override this and pair it with
+        `emit_init_assignment`."""
+        return None
+
+    def emit_init_assignment(self, target: str, source: str, sb: SourceBuilder) -> None:
+        """Emit the assignment that populates `target` (an attribute access
+        like `self.field`) from the __init__ parameter `source`. Default is
+        a direct assignment; strategies that widen the init param override
+        to emit a normalization."""
+        sb.line(f"{target} = {source}")

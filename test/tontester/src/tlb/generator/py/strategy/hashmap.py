@@ -102,6 +102,24 @@ class HashmapStrategy(TypeStrategy):
             )
         )
 
+    @override
+    def init_param_type(self) -> str:
+        return f"{self.py_type()} | Mapping[int, {self._val_py_type}]"
+
+    @override
+    def emit_init_assignment(self, target: str, source: str, sb: SourceBuilder) -> None:
+        self._ctx.use("Mapping")
+        allow = "True" if self._allow_empty else "False"
+        # Use self_-form expressions: by the time a field is assigned, the
+        # constructor's params have already been written to `self`.
+        sb.line(
+            (
+                f"{target} = {self.py_type()}.of({source}, "
+                f"key_bits={self._key_bits_self.self_}, "
+                f"value_ti={self._val_ti_self}, allow_empty={allow})"
+            )
+        )
+
 
 @final
 class HashmapAugStrategy(TypeStrategy):
@@ -195,5 +213,21 @@ class HashmapAugStrategy(TypeStrategy):
                 f"{target} = {self.py_type()}.load_from("
                 f"{cs}, {self._key_bits.local}, {self._val_ti}, "
                 f"extra_ti={self._extra_ti}, aug={self._aug_class}())"
+            )
+        )
+
+    @override
+    def init_param_type(self) -> str:
+        return f"{self.py_type()} | Mapping[int, {self._val_py_type}]"
+
+    @override
+    def emit_init_assignment(self, target: str, source: str, sb: SourceBuilder) -> None:
+        self._ctx.use("Mapping")
+        sb.line(
+            (
+                f"{target} = {self.py_type()}.of({source}, "
+                f"key_bits={self._key_bits_self.self_}, "
+                f"value_ti={self._val_ti_self}, extra_ti={self._extra_ti_self}, "
+                f"aug={self._aug_class}())"
             )
         )

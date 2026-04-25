@@ -154,8 +154,12 @@ class ConstructorGenerator:
         if self.type_params:
             self.ctx.use("TypeInfo")
 
+        needs_custom_init = any(
+            self.strategies[IdentityKey(f)].init_param_type() is not None for f in self.c.fields
+        )
+
         sb.line("@final")
-        sb.line("@dataclass")
+        sb.line("@dataclass(init=False)" if needs_custom_init else "@dataclass")
         sb.line(f"class {self.cls_name}{self._class_header()}:")
 
         with sb.block():
@@ -172,6 +176,10 @@ class ConstructorGenerator:
                     py_type = f"{py_type} | None"
                 sb.line(f"{self.scope.lookup(f)}: {py_type}")
 
+            if needs_custom_init:
+                sb.blank()
+                self._generate_init(sb)
+
             sb.blank()
             self._generate_serialize_to(sb)
             sb.blank()
@@ -187,6 +195,37 @@ class ConstructorGenerator:
                 self._generate_special_deserialize(sb)
             if self.inlined_fields:
                 self._generate_inline_properties(sb)
+
+    def _generate_init(self, sb: SourceBuilder) -> None:
+        """Emit a custom keyword-only __init__ for constructors whose fields
+        accept widened input types (e.g. HashmapDict | Mapping). Each
+        field's strategy emits its own assignment line — strategies that
+        don't widen fall back to a direct `self.X = X` assign."""
+        params: list[str] = ["self"]
+        for p in self.c.params:
+            match p:
+                case TypeParamDef():
+                    if p in self.type_params:
+                        params.append(f"{self.scope.lookup(p)}: TypeInfo[{self.type_var_name(p)}]")
+                case NatParamDef():
+                    params.append(f"{self.scope.lookup(p)}: int")
+        for f in self.c.fields:
+            strat = self.strategies[IdentityKey(f)]
+            ty = strat.init_param_type() or strat.py_type()
+            if f.condition is not None:
+                ty = f"{ty} | None"
+            params.append(f"{self.scope.lookup(f)}: {ty}")
+        sb.line(f"def __init__({', '.join(params)}) -> None:")
+        with sb.block():
+            for p in self.c.params:
+                if isinstance(p, TypeParamDef) and p not in self.type_params:
+                    continue
+                name = self.scope.lookup(p)
+                sb.line(f"self.{name} = {name}")
+            for f in self.c.fields:
+                strat = self.strategies[IdentityKey(f)]
+                name = self.scope.lookup(f)
+                strat.emit_init_assignment(f"self.{name}", name, sb)
 
     def _generate_serialize_to(
         self,

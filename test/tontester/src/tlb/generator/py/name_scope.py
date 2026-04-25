@@ -31,6 +31,8 @@ _PYTHON_KEYWORDS: frozenset[str] = frozenset(keyword.kwlist) | frozenset(keyword
 
 _FIELD_RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
     {
+        "HashmapDict",  # referenced in custom __init__ body for HashmapDict.of(...)
+        "self",  # would clash with the implicit method receiver — Python errors
         "serialize_to",
         "serialize",
         "load_from",
@@ -42,6 +44,7 @@ _FIELD_RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
 _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
     {
         "Anon",  # reserved so anonymous types start at Anon_1
+        "Augmentation",
         "BitsTypeConstructor",
         "BoolTypeInfo",
         "BoundedUintTypeConstructor",
@@ -55,6 +58,7 @@ _RESERVED: frozenset[str] = _PYTHON_KEYWORDS | frozenset(
         "HashmapDict",
         "InstantiableTypeInfo",
         "IntTypeConstructor",
+        "Mapping",
         "MaybeTypeConstructor",
         "None",
         "Ref",

@@ -294,7 +294,7 @@ class TestHashmapDict:
         assert new_root_cs.load_bit() == 0
         _new_left = new_root_cs.load_ref()
         new_right = new_root_cs.load_ref()
-        assert new_right.get_hash(0) == pruned_right.get_hash(0)
+        assert new_right.get_hash(0) == pruned_right.get_hash(0)  # pyright: ignore[reportUnknownMemberType]
 
         # And re-loading the result lets us read back the new + original left keys.
         d2 = HashmapDict[int].load_from(

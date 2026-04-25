@@ -230,6 +230,7 @@ class PyContext:
         return name
 
     _IMPORTS: dict[str, list[str]] = {
+        "collections.abc": ["Mapping"],
         "dataclasses": ["dataclass"],
         "typing": ["Literal", "final", "override"],
         "bitarray": ["bitarray"],

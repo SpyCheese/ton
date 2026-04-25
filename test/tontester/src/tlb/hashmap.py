@@ -8,7 +8,7 @@ Regular (non-augmented) hashmaps use UnitTypeInfo as the extra type,
 which takes 0 bits on the wire.
 """
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, final, override
 
@@ -415,6 +415,31 @@ class HashmapDict[V, E = None]:
     ) -> TypeInfo[HashmapDict[V]]:
         """Create a TypeInfo for HashmapDict — used by Ref[Hashmap] and generics."""
         return HashmapDictTypeInfo[V]().instantiate(key_bits, value_ti, allow_empty)
+
+    @classmethod
+    def of(
+        cls,
+        src: HashmapDict[V, E] | Mapping[int, V],
+        *,
+        key_bits: int,
+        value_ti: TypeInfo[V],
+        extra_ti: TypeInfo[E] = UnitTypeInfo,
+        aug: Augmentation[V, E] = UnitAug,
+        allow_empty: bool = True,
+    ) -> HashmapDict[V, E]:
+        """Coerce a HashmapDict-or-Mapping into a HashmapDict.
+
+        If `src` is already a HashmapDict it is returned unchanged. Otherwise
+        the entries are copied into a fresh HashmapDict with the given
+        configuration. Used by generated dataclass constructors so callers
+        can pass a plain `dict` for empty/small dict fields.
+        """
+        if isinstance(src, HashmapDict):
+            return src
+        d = cls(key_bits, value_ti, extra_ti, aug, allow_empty=allow_empty)
+        for k, v in src.items():
+            d[k] = v
+        return d
 
 
 @final

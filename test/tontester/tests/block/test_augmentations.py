@@ -339,6 +339,34 @@ class TestKeyMaxLtAug:
 # ── End-to-end: HashmapDict with a real aug round-trips ─────────────────
 
 
+class TestMappingInit:
+    """Generated dataclasses with HashmapDict fields accept a plain Mapping
+    in __init__; HashmapDict.of normalizes to a real HashmapDict."""
+
+    def test_empty_dict_for_simple_hashmap_field(self):
+        from block.generated import ShardHashes
+
+        sh = ShardHashes(field={})
+        assert sh.field.is_empty()
+
+    def test_pre_built_hashmap_passes_through(self):
+        from block.generated import ProcessedInfo, processed_upto
+        from tlb.hashmap import HashmapDict
+
+        d: HashmapDict[processed_upto, None] = HashmapDict(96, processed_upto)
+        info = ProcessedInfo(field=d)
+        assert info.field is d
+
+    def test_augmented_field_accepts_dict(self):
+        from block.generated import OldMcBlocksInfo
+
+        info = OldMcBlocksInfo(field={})
+        assert info.field.is_empty()
+        # The aug must still be wired correctly so serialize_to passes.
+        b = Builder()
+        info.serialize_to(b)
+
+
 class TestHashmapDictWithAug:
     def test_shard_accounts_roundtrip_extra_matches(self):
         """Insert several entries into a HashmapDict[ShardAccount,

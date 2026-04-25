@@ -10,13 +10,9 @@ from block.generated import (
     AccountType,
     Anon_4,
     Anon_10,
-    BinTree,
-    BinTreeType,
     ConfigParam,
     ConfigParams,
     DepthBalanceAug,
-    DepthBalanceInfo,
-    EnqueuedMsg,
     KeyExtBlkRef,
     KeyMaxLt,
     KeyMaxLtAug,
@@ -25,13 +21,9 @@ from block.generated import (
     NewConsensusConfigType,
     OldMcBlocksInfo,
     OutMsgQueue,
-    OutMsgQueueAug,
     OutMsgQueueInfo,
     ProcessedInfo,
-    ShardAccount,
     ShardAccounts,
-    ShardDescr,
-    ShardDescrType,
     ShardHashes,
     StateInit,
     StoragePrices,
@@ -61,7 +53,6 @@ from block.generated import (
     nanograms,
     new_consensus_config_all,
     param_limits,
-    processed_upto,
     shard_ident,
     shard_state,
     shared_lib_descr,
@@ -91,7 +82,6 @@ from tlb.hashmap import HashmapDict
 from tlb.object import (
     CellRefType,
     Ref,
-    UintTypeConstructor,
     UnitTypeInfo,
     VarUIntTypeConstructor,
     ref,
@@ -100,12 +90,6 @@ from tonapi import ton_api
 
 from .key import Key
 from .validator_set import compute_validator_set_hash
-
-
-def _shard_json_repr(shard: int):
-    if shard >= (1 << 63):
-        return shard - (1 << 64)
-    return shard
 
 
 def _bits256(data: bytes) -> bitarray:
@@ -130,14 +114,14 @@ def _grams(amount: int):
 def _zero_cc():
     return currencies(
         grams=_zero_grams(),
-        other=extra_currencies(dict=HashmapDict(32, VarUIntTypeConstructor(32))),
+        other=extra_currencies({}),
     )
 
 
 def _cc(grams: int):
     return currencies(
         grams=_grams(grams),
-        other=extra_currencies(dict=HashmapDict(32, VarUIntTypeConstructor(32))),
+        other=extra_currencies({}),
     )
 
 
@@ -265,7 +249,7 @@ def _build_account(smc: _SmcEntry, workchain_id: int) -> account:
 
 
 def _build_shard_accounts(smcs: list[_SmcEntry], workchain_id: int) -> ShardAccounts:
-    d: HashmapDict[ShardAccount, DepthBalanceInfo] = HashmapDict(
+    d = HashmapDict(
         256,
         account_descr,
         depth_balance,
@@ -325,7 +309,7 @@ def _build_config_params(
     # Param 0: config address (AllOnes * 5)
     params.append(ConfigParam_0(config_addr=_bits256_int(_ALL_ONES * 5)))
 
-    # Param 1: elector address (AllOnes * 3)Grams
+    # Param 1: elector address (AllOnes * 3)
     params.append(ConfigParam_1(elector_addr=_bits256_int(_ALL_ONES * 3)))
 
     # Param 2: minter address (wallet)
@@ -645,29 +629,6 @@ def _build_config_params(
 # ---------------------------------------------------------------------------
 
 
-def _empty_out_msg_queue_info() -> OutMsgQueueInfo:
-    return OutMsgQueueInfo(
-        out_queue=OutMsgQueue(
-            field=HashmapDict(352, EnqueuedMsg, UintTypeConstructor(64), OutMsgQueueAug()),
-        ),
-        proc_info=ProcessedInfo(
-            field=HashmapDict(96, processed_upto),
-        ),
-        extra=None,
-    )
-
-
-def _empty_shard_hashes() -> ShardHashes:
-    return ShardHashes(
-        field=HashmapDict(
-            32,
-            Ref[BinTree[ShardDescr]].instantiate(
-                BinTreeType[ShardDescr].instantiate(ShardDescrType())
-            ),
-        ),
-    )
-
-
 def _collect_public_libraries(smcs: list[_SmcEntry]) -> HashmapDict[LibDescr]:
     """Collect public libraries from all registered contracts, matching C++ store_public_libraries."""
     from block.generated import shared_lib_descr
@@ -771,7 +732,7 @@ class Zerostate:
     def as_block(self):
         return ton_api.TonNode_blockIdExt(
             workchain=-1,
-            shard=_shard_json_repr(0x8000_0000_0000_0000),
+            shard=0x8000_0000_0000_0000 - (1 << 64),
             seqno=0,
             root_hash=self.masterchain.root_hash,
             file_hash=self.masterchain.file_hash,
@@ -828,7 +789,13 @@ def create_zerostate(
         gen_utime=now_time,
         gen_lt=0,
         min_ref_mc_seqno=0xFFFF_FFFF,
-        out_msg_queue_info=ref(_empty_out_msg_queue_info()),
+        out_msg_queue_info=ref(
+            OutMsgQueueInfo(
+                out_queue=OutMsgQueue({}),
+                proc_info=ProcessedInfo({}),
+                extra=None,
+            )
+        ),
         before_split=0,
         accounts=ref(
             ShardAccounts(
@@ -910,7 +877,7 @@ def create_zerostate(
     config_addr_bits = _bits256_int(int.from_bytes(b"\x55" * 32, "big"))
 
     mc_extra = masterchain_state_extra(
-        shard_hashes=_empty_shard_hashes(),
+        shard_hashes=ShardHashes({}),
         config=ConfigParams(
             config_addr=config_addr_bits,
             config=Ref(
@@ -947,7 +914,13 @@ def create_zerostate(
         gen_utime=now_time,
         gen_lt=0,
         min_ref_mc_seqno=0xFFFF_FFFF,
-        out_msg_queue_info=ref(_empty_out_msg_queue_info()),
+        out_msg_queue_info=ref(
+            OutMsgQueueInfo(
+                out_queue=OutMsgQueue({}),
+                proc_info=ProcessedInfo({}),
+                extra=None,
+            )
+        ),
         before_split=0,
         accounts=ref(shard_accounts),
         field=ref(
