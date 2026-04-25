@@ -17,6 +17,7 @@ def generate_tlb_python(
     simplify: SimplifyConfig | None = None,
     imports: Mapping[str, AnalyzedModule] | None = None,
     foreign_manifests: Mapping[Module, PyManifest] | None = None,
+    aug_source_path: Path | None = None,
 ) -> tuple[AnalyzedModule, PyManifest]:
     """Generate Python code from a TL-B schema file.
 
@@ -24,17 +25,22 @@ def generate_tlb_python(
     `imports` provides analyzed modules to satisfy `//@import` directives.
     `foreign_manifests` provides Python-name maps for those modules so the
     generated code can reference them via `from … import …`.
+    `aug_source_path` is an optional file whose content is spliced at the
+    bottom of the generated module — used to attach hand-written
+    augmentation classes without creating a circular import.
     """
     text = schema_path.read_text()
     analyzed = analyze_text(
         text, current_module=Module(schema_path.stem), imports=imports
     )
+    aug_source = aug_source_path.read_text() if aug_source_path is not None else None
     code, manifest = generate_python(
         analyzed.types,
         current_module=analyzed.module,
         py_module=py_module,
         simplify=simplify,
         foreign_manifests=foreign_manifests,
+        aug_source=aug_source,
     )
     _ = out_path.write_text(code)
     print(f"  {schema_path.name} -> {out_path.name}")
@@ -122,6 +128,11 @@ if __name__ == "__main__":
 
     # Generate block.tlb (full simplifications for the block module)
     block_module_out = repo_root / "test/tontester/src/block/generated.py"
+    block_aug_source = repo_root / "test/tontester/src/block/_aug_source.py"
     _ = generate_tlb_python(
-        block_tlb, block_module_out, py_module="block.generated", simplify=simplify_all
+        block_tlb,
+        block_module_out,
+        py_module="block.generated",
+        simplify=simplify_all,
+        aug_source_path=block_aug_source,
     )

@@ -1,5 +1,12 @@
 """Augmentation implementations for HashmapAugE types used in block.tlb.
 
+This module is INPUT-ONLY for the codegen — it is never imported at
+runtime. The codegen reads its source at generation time and splices the
+class/function definitions into block/generated.py, where they reference
+generated types directly. The `from .generated import …` line below is
+present purely so basedpyright can type-check this file; it is stripped
+during the splice.
+
 These match the C++ augmentation logic in crypto/block/block-parse.cpp.
 """
 

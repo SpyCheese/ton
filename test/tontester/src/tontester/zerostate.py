@@ -6,7 +6,6 @@ from typing import Never, override
 
 import nacl.signing
 from bitarray import bitarray
-from block.augmentations import DepthBalanceAug, KeyMaxLtAug
 from block.generated import (
     AccountType,
     Anon_4,
@@ -15,9 +14,11 @@ from block.generated import (
     BinTreeType,
     ConfigParam,
     ConfigParams,
+    DepthBalanceAug,
     DepthBalanceInfo,
     HashmapAugEType,
     KeyMaxLt,
+    KeyMaxLtAug,
     LibDescr,
     NewConsensusConfig,
     NewConsensusConfigType,

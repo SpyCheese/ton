@@ -63,7 +63,14 @@ class PyContext:
         self._type_scopes = {}
         self._constructors = {}
 
-    def _register_foreign_import(self, py_module: str, source: str, bound: str) -> None:
+    def runtime_import_names(self, module: str) -> set[str] | None:
+        """Return the runtime-library names available for `module`, or None
+        if `module` is not one the codegen knows how to emit imports from."""
+        if module not in self._IMPORTS:
+            return None
+        return set(self._IMPORTS[module])
+
+    def register_foreign_import(self, py_module: str, source: str, bound: str) -> None:
         existing = self.foreign_imports.setdefault(py_module, {})
         if source in existing:
             assert existing[source] == bound, (
@@ -130,7 +137,7 @@ class PyContext:
         )
         source = manifest.type_names[key]
         bound = self.scope.bind(t, source)
-        self._register_foreign_import(manifest.py_module, source, bound)
+        self.register_foreign_import(manifest.py_module, source, bound)
         return bound
 
     def _discover_foreign_constructor(self, c: ResolvedConstructor) -> str:
@@ -149,7 +156,7 @@ class PyContext:
         )
         source = manifest.constructor_names[key]
         bound = self.scope.bind(c, source)
-        self._register_foreign_import(manifest.py_module, source, bound)
+        self.register_foreign_import(manifest.py_module, source, bound)
         return bound
 
     def set_type_scope(self, t: ResolvedType, scope: NameScope) -> None:
@@ -205,7 +212,7 @@ class PyContext:
         )
         source = manifest.type_info_names[key]
         bound = self.scope.bind_type_info(t, source)
-        self._register_foreign_import(manifest.py_module, source, bound)
+        self.register_foreign_import(manifest.py_module, source, bound)
         return bound
 
     def get_constructor(self, c: ResolvedConstructor) -> ConstructorInfo:

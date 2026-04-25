@@ -1,3 +1,4 @@
+import pytest
 from tlb.generator.identity_key import IdentityKey
 from tlb.generator.py import generate_python
 from tlb.generator.sema import analyze_text
@@ -179,3 +180,113 @@ class TestPyManifest:
         assert IdentityKey(currency) not in other_manifest.type_names
         assert block_manifest.py_module == "block.generated"
         assert other_manifest.py_module == "other.generated"
+
+
+class TestAugSourceValidation:
+    def _gen(self, schema: str, aug: str) -> str:
+        analyzed = analyze_text(schema, current_module=Module("ms"))
+        code, _ = generate_python(
+            analyzed.types,
+            current_module=analyzed.module,
+            py_module="ms.generated",
+            aug_source=aug,
+        )
+        return code
+
+    def test_class_collides_with_user_type(self):
+        # User schema defines `Foo` (sole-cons named); aug source tries to add
+        # another top-level class with the same name.
+        with pytest.raises(Exception, match="collides"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "class Foo:\n    pass\n",
+            )
+
+    def test_class_collides_with_constructor(self):
+        # User schema's constructor `foo` becomes a top-level dataclass.
+        with pytest.raises(Exception, match="collides"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "class foo:\n    pass\n",
+            )
+
+    def test_function_collides_with_runtime_import(self):
+        # The aug source tries to define a top-level `final`, which clashes
+        # with the `from typing import final` codegen emits.
+        with pytest.raises(Exception, match="collides"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "from typing import final\n\ndef final():\n    pass\n",
+            )
+
+    def test_top_level_if_rejected(self):
+        with pytest.raises(Exception, match="only docstrings, imports, classes"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "if True:\n    pass\n",
+            )
+
+    def test_bare_import_rejected(self):
+        with pytest.raises(Exception, match="bare `import"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "import os\n",
+            )
+
+    def test_unknown_module_rejected(self):
+        with pytest.raises(Exception, match="unrecognized import module"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "from somewhere import thing\n",
+            )
+
+    def test_self_import_unknown_name_rejected(self):
+        with pytest.raises(Exception, match="not defined in this module"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "from .generated import Nonexistent\n",
+            )
+
+    def test_runtime_import_unknown_name_rejected(self):
+        with pytest.raises(Exception, match="not in codegen"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "from typing import bogus_name\n",
+            )
+
+    def test_runtime_import_alias_rejected(self):
+        with pytest.raises(Exception, match="alias not supported"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "from typing import final as f\n",
+            )
+
+    def test_valid_aug_source_with_helpers(self):
+        # Module-level helper functions are allowed and don't collide.
+        code = self._gen(
+            "foo$_ x:uint32 = Foo;",
+            (
+                "from .generated import foo\n"
+                "from typing import final\n"
+                "\n"
+                "def _zero() -> int:\n"
+                "    return 0\n"
+                "\n"
+                "@final\n"
+                "class MyAug:\n"
+                "    def value(self) -> foo:\n"
+                "        return foo(x=_zero())\n"
+            ),
+        )
+        assert "class MyAug:" in code
+        assert "def _zero" in code
+        # Imports were stripped; codegen emitted them itself.
+        assert code.count("from typing import") == 1
+        assert "from .generated" not in code
+
+    def test_duplicate_top_level_name_rejected(self):
+        with pytest.raises(Exception, match="duplicate top-level"):
+            _ = self._gen(
+                "foo$_ x:uint32 = Foo;",
+                "class Bar:\n    pass\n\nclass Bar:\n    pass\n",
+            )
