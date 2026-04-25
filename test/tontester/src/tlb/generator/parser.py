@@ -21,6 +21,7 @@ from .ast_nodes import (
     GetBit,
     Identifier,
     ImplicitParam,
+    Import,
     InlineRecord,
     IntConst,
     Multiply,
@@ -155,7 +156,15 @@ class Parser:
 
     def parse(self) -> Schema:
         schema = Schema()
+        while self._at(TokenType.IMPORT):
+            tok = self._advance()
+            schema.imports.append(Import(path=tok.value))
         while not self._at_end():
+            if self._at(TokenType.IMPORT):
+                raise ParseError(
+                    "//@import directives must appear before any constructor",
+                    self._peek(),
+                )
             schema.constructors.append(self._parse_constructor_def())
         return schema
 

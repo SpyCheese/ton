@@ -11,6 +11,7 @@ from .resolve import TypeRegistry, register_types, resolve_constructors
 from .types import (
     AnonymousRecordType,
     CellRefType,
+    Module,
     NatAdd,
     NatFieldValue,
     NatGetBit,
@@ -30,6 +31,8 @@ from .types import (
     WellKnownType,
     is_type,
 )
+
+_REFERENCE_MODULE = Module(name="<well-known>")
 
 _REFERENCE_SCHEMA = """
 unit$_ = Unit;
@@ -98,7 +101,7 @@ _WELL_KNOWN_NAMES: list[tuple[WellKnownType, str]] = [
 def _build_references() -> list[tuple[WellKnownType, str, ResolvedType]]:
     tokens = Lexer(_REFERENCE_SCHEMA).tokenize()
     schema = Parser(tokens).parse()
-    registry = TypeRegistry()
+    registry = TypeRegistry(_REFERENCE_MODULE)
     register_types(schema, registry)
     resolve_constructors(schema, registry)
     types_by_name = {t.name: t for t in registry.all_user_types()}

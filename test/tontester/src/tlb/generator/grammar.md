@@ -21,6 +21,10 @@ Special compound tokens: `#` (bare, the nat type), `##`, `#<`, `#<=`
 
 Keywords: `Type`
 
+Directives: a comment starting with `//@` is parsed as a directive, not a comment.
+Currently only `//@import <path>` is recognized; the path runs to end of line and
+is taken verbatim (after trimming surrounding whitespace).
+
 ## Tag Encoding
 
 Hex tags: each hex digit = 4 bits. Trailing `_` strips trailing zeros then the
@@ -34,7 +38,9 @@ Anonymous constructors without tags have zero-bit tags.
 ## Syntactic Grammar
 
 ```ebnf
-schema              = { constructor_def }
+schema              = { import_directive } { constructor_def }
+
+import_directive    = '//@import' <path-to-end-of-line>
 
 constructor_def     = [ '!' ] ( IDENT | '_' ) [ HEX_TAG | BIN_TAG ]
                       field_list '=' IDENT { result_param } ';'

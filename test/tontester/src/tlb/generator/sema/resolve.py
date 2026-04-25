@@ -4,6 +4,8 @@ Phase 1: Register all type names and determine arities/param kinds.
 Phase 2: Resolve each constructor's fields and expressions.
 """
 
+from dataclasses import dataclass, field
+
 from ..ast_nodes import (
     Add,
     Apply,
@@ -29,6 +31,7 @@ from .builtins import CellRef_type, NatLess_type, create_builtin_registry
 from .types import (
     AnonymousRecordType,
     CellRefType,
+    Module,
     NatAdd,
     NatFieldValue,
     NatGetBit,
@@ -56,10 +59,12 @@ from .types import (
 
 
 class TypeRegistry:
+    current_module: Module
     _types: dict[str, ResolvedType]
     _anon_types: list[ResolvedType]
 
-    def __init__(self) -> None:
+    def __init__(self, current_module: Module) -> None:
+        self.current_module = current_module
         self._types = create_builtin_registry()
         self._anon_types = []
 
@@ -67,19 +72,77 @@ class TypeRegistry:
         return self._types.get(name)
 
     def register(self, name: str) -> ResolvedType:
-        if name in self._types:
-            return self._types[name]
-        t = ResolvedType(name=name)
+        """Register a type defined in the current module, or return the
+        existing entry. Builtins are returned untouched — callers detect
+        and reject redefinitions."""
+        existing = self._types.get(name)
+        if existing is not None:
+            return existing
+        t = ResolvedType(name=name, origin_module=self.current_module)
         self._types[name] = t
         return t
 
     def register_anonymous(self) -> ResolvedType:
-        t = ResolvedType(name="")
+        t = ResolvedType(name="", origin_module=self.current_module)
         self._anon_types.append(t)
         return t
 
+    def add_imported(self, m: AnalyzedModule) -> None:
+        """Pre-populate the registry with types from an already-analyzed module.
+
+        Only types native to `m` are imported (no transitive re-export). Names
+        already defined in the current module silently win — the import is
+        skipped. A collision between two different imported modules with no
+        local shadow is an ambiguity error.
+        """
+        if m.module == self.current_module:
+            raise SemaError(f"module '{m.module.name}' cannot import itself")
+        for t in m.types:
+            if t.is_builtin:
+                continue
+            if t.origin_module != m.module:
+                # Defensive: types that m itself imported are not re-exported.
+                continue
+            existing = self._types.get(t.name)
+            if existing is t:
+                continue  # idempotent — same module imported twice
+            if existing is None:
+                self._types[t.name] = t
+                continue
+            assert not existing.is_builtin, (
+                f"import '{t.name}' from '{m.module.name}' collides with a builtin"
+            )
+            if existing.origin_module == self.current_module:
+                continue  # local definition shadows the import
+            assert existing.origin_module is not None
+            raise SemaError(
+                (
+                    f"ambiguous import: '{t.name}' is imported from both "
+                    f"'{existing.origin_module.name}' and '{m.module.name}' "
+                    "with no local definition to disambiguate"
+                )
+            )
+
     def all_user_types(self) -> list[ResolvedType]:
-        return [t for t in self._types.values() if not t.is_builtin] + self._anon_types
+        """Types defined by the current module (excluding imports and builtins)."""
+        return [
+            t
+            for t in self._types.values()
+            if not t.is_builtin and t.origin_module == self.current_module
+        ] + self._anon_types
+
+
+@dataclass
+class AnalyzedModule:
+    """The result of running sema on a single TL-B module.
+
+    Drivers build these incrementally and pass them to `analyze` of dependent
+    modules via the `imports` dict.
+    """
+
+    module: Module
+    registry: TypeRegistry
+    types: list[ResolvedType] = field(default_factory=list)
 
 
 def register_types(schema: Schema, registry: TypeRegistry) -> None:

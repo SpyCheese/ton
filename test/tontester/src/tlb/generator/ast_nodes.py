@@ -204,9 +204,23 @@ class Constructor:
     is_special: bool = False
 
 
+# ── Imports ───────────────────────────────────────────────────────────
+
+
+@dataclass
+class Import:
+    """A `//@import <path>` directive at the top of a schema file.
+
+    The path is opaque to sema/parser — drivers map it to an analyzed module.
+    """
+
+    path: str
+
+
 # ── Top-level schema ─────────────────────────────────────────────────
 
 
 @dataclass
 class Schema:
     constructors: list[Constructor] = field(default_factory=list)
+    imports: list[Import] = field(default_factory=list)

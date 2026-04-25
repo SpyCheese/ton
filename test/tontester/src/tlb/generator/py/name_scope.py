@@ -226,6 +226,15 @@ class NameScope:
             return self._parent.lookup(obj)
         raise KeyError(f"no binding for {obj!r}")
 
+    def is_bound(self, obj: Bindable) -> bool:
+        """Check whether `obj` already has a binding in this scope or any parent."""
+        key = IdentityKey(obj)
+        if key in self._bindings:
+            return True
+        if self._parent is not None:
+            return self._parent.is_bound(obj)
+        return False
+
     def lookup_generic(self, obj: BindableForGeneric) -> str:
         """Get the type variable name for a TypeLevelParam."""
         key = IdentityKey(obj)

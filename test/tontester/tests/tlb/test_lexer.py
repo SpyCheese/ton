@@ -236,6 +236,72 @@ class TestConstructorLineLexing:
         ]
 
 
+class TestImportDirective:
+    def _import_token(self, text: str) -> Token:
+        toks = [t for t in lex(text) if t.type != TokenType.EOF]
+        assert len(toks) == 1
+        assert toks[0].type == TokenType.IMPORT
+        return toks[0]
+
+    def test_basic(self):
+        tok = self._import_token("//@import block.tlb")
+        assert tok.value == "block.tlb"
+
+    def test_trailing_newline(self):
+        tok = self._import_token("//@import block.tlb\n")
+        assert tok.value == "block.tlb"
+
+    def test_extra_whitespace(self):
+        tok = self._import_token("//@import   block.tlb   \n")
+        assert tok.value == "block.tlb"
+
+    def test_path_with_slashes(self):
+        tok = self._import_token("//@import path/to/block.tlb\n")
+        assert tok.value == "path/to/block.tlb"
+
+    def test_position_tracking(self):
+        tok = self._import_token("//@import block.tlb\n")
+        assert tok.line == 1
+        assert tok.col == 1
+
+    def test_followed_by_constructor(self):
+        toks = [t.type for t in lex("//@import block.tlb\nfoo = Foo;") if t.type != TokenType.EOF]
+        assert toks == [
+            TokenType.IMPORT,
+            TokenType.IDENT,
+            TokenType.EQUALS,
+            TokenType.IDENT,
+            TokenType.SEMICOLON,
+        ]
+
+    def test_multiple_imports(self):
+        toks = [t for t in lex("//@import a.tlb\n//@import b.tlb\n") if t.type != TokenType.EOF]
+        assert [t.type for t in toks] == [TokenType.IMPORT, TokenType.IMPORT]
+        assert [t.value for t in toks] == ["a.tlb", "b.tlb"]
+
+    def test_plain_comment_unchanged(self):
+        # //@ at column-3 of a regular comment should still take effect — but
+        # a line that starts with `//` (no `@`) is just a comment.
+        toks = [t.type for t in lex("// not a directive\nfoo") if t.type != TokenType.EOF]
+        assert toks == [TokenType.IDENT]
+
+    def test_missing_path(self):
+        with pytest.raises(LexerError, match="requires a path"):
+            _ = lex("//@import\n")
+
+    def test_missing_path_only_whitespace(self):
+        with pytest.raises(LexerError, match="requires a path"):
+            _ = lex("//@import   \n")
+
+    def test_unknown_directive(self):
+        with pytest.raises(LexerError, match="unknown directive"):
+            _ = lex("//@frobnicate foo\n")
+
+    def test_empty_directive_name(self):
+        with pytest.raises(LexerError, match="expected directive name"):
+            _ = lex("//@\n")
+
+
 class TestBlockTlb:
     def test_lex_full_block_tlb(self):
         with open("crypto/block/block.tlb") as f:

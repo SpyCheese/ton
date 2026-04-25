@@ -40,9 +40,9 @@ class UserTypeStrategy(TypeStrategy):
 
         # Unnamed sole constructors have no separate type binding.
         if cons is not None and type_expr.type.has_unnamed_sole_constructor:
-            self._type_name = ctx.scope.lookup(cons)
+            self._type_name = ctx.lookup_constructor(cons)
         else:
-            self._type_name = ctx.scope.lookup(type_expr.type)
+            self._type_name = ctx.lookup_type(type_expr.type)
 
         # Type-level lists (for py_type and assertions — always all TLPs)
         self._type_var_args: list[str] = []
@@ -88,7 +88,7 @@ class UserTypeStrategy(TypeStrategy):
         # _ti_class: used with .instantiate() and .load_from()
         # _ti_bare: the TypeInfo expression when there are no args
         if cons is not None:
-            base = ctx.scope.lookup(cons)
+            base = ctx.lookup_constructor(cons)
             if ti_type_var_args:
                 base = f"{base}[{', '.join(ti_type_var_args)}]"
             self._ti_class = base

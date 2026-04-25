@@ -16,6 +16,11 @@ class SemaError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class Module:
+    name: str
+
+
 class ParamKind(Enum):
     NAT = auto()
     TYPE = auto()
@@ -420,6 +425,8 @@ class ResolvedType:
     produces_nat: bool = False
     is_builtin: bool = False
     is_special: bool = False  # all constructors have ! prefix (exotic cell type)
+
+    origin_module: Module | None = None
 
     # Computed properties
     is_enum: bool = False

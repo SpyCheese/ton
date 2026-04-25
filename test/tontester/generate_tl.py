@@ -1,22 +1,44 @@
+from collections.abc import Mapping
 from pathlib import Path
 
-from tlb.generator.py import generate_python
-from tlb.generator.sema import analyze_text
-from tlb.generator.sema.types import WellKnownType
+from tlb.generator.py import PyManifest, generate_python
+from tlb.generator.sema import AnalyzedModule, analyze_text
+from tlb.generator.sema.types import Module, WellKnownType
 from tlb.generator.simplify_config import SimplifyConfig
 
 import tl
 
 
 def generate_tlb_python(
-    schema_path: Path, out_path: Path, simplify: SimplifyConfig | None = None
-) -> None:
-    """Generate Python code from a TL-B schema file."""
+    schema_path: Path,
+    out_path: Path,
+    *,
+    py_module: str,
+    simplify: SimplifyConfig | None = None,
+    imports: Mapping[str, AnalyzedModule] | None = None,
+    foreign_manifests: Mapping[Module, PyManifest] | None = None,
+) -> tuple[AnalyzedModule, PyManifest]:
+    """Generate Python code from a TL-B schema file.
+
+    `py_module` is the dotted import path the produced file lives at.
+    `imports` provides analyzed modules to satisfy `//@import` directives.
+    `foreign_manifests` provides Python-name maps for those modules so the
+    generated code can reference them via `from … import …`.
+    """
     text = schema_path.read_text()
-    _, types = analyze_text(text)
-    code = generate_python(types, simplify=simplify)
+    analyzed = analyze_text(
+        text, current_module=Module(schema_path.stem), imports=imports
+    )
+    code, manifest = generate_python(
+        analyzed.types,
+        current_module=analyzed.module,
+        py_module=py_module,
+        simplify=simplify,
+        foreign_manifests=foreign_manifests,
+    )
     _ = out_path.write_text(code)
     print(f"  {schema_path.name} -> {out_path.name}")
+    return analyzed, manifest
 
 
 if __name__ == "__main__":
@@ -60,7 +82,26 @@ if __name__ == "__main__":
         ("validation", None),
     ]
     for name, config in test_schemas:
-        generate_tlb_python(tlb_schemas / f"{name}.tlb", tlb_out / f"{name}.py", simplify=config)
+        _ = generate_tlb_python(
+            tlb_schemas / f"{name}.tlb",
+            tlb_out / f"{name}.py",
+            py_module=f"generated.{name}",
+            simplify=config,
+        )
+
+    # Cross-module test pair: imports_user.tlb imports types from imports_base.tlb.
+    base_analyzed, base_manifest = generate_tlb_python(
+        tlb_schemas / "imports_base.tlb",
+        tlb_out / "imports_base.py",
+        py_module="generated.imports_base",
+    )
+    _ = generate_tlb_python(
+        tlb_schemas / "imports_user.tlb",
+        tlb_out / "imports_user.py",
+        py_module="generated.imports_user",
+        imports={"imports_base.tlb": base_analyzed},
+        foreign_manifests={base_analyzed.module: base_manifest},
+    )
 
     # Generate hashmap helper (with bit/unary simplifications only)
     hashmap_simplify = SimplifyConfig(
@@ -68,13 +109,19 @@ if __name__ == "__main__":
     )
     hashmap_tlb = repo_root / "test/tontester/src/tlb/hashmap_auto.tlb"
     hashmap_out = repo_root / "test/tontester/src/tlb/hashmap_auto.py"
-    generate_tlb_python(hashmap_tlb, hashmap_out, simplify=hashmap_simplify)
+    _ = generate_tlb_python(
+        hashmap_tlb, hashmap_out, py_module="tlb.hashmap_auto", simplify=hashmap_simplify
+    )
 
     # Generate block.tlb (test copy with inline_only for existing e2e tests)
     block_tlb = repo_root / "crypto/block/block.tlb"
     block_out = tlb_out / "block.py"
-    generate_tlb_python(block_tlb, block_out, simplify=inline_only)
+    _ = generate_tlb_python(
+        block_tlb, block_out, py_module="generated.block", simplify=inline_only
+    )
 
     # Generate block.tlb (full simplifications for the block module)
     block_module_out = repo_root / "test/tontester/src/block/generated.py"
-    generate_tlb_python(block_tlb, block_module_out, simplify=simplify_all)
+    _ = generate_tlb_python(
+        block_tlb, block_module_out, py_module="block.generated", simplify=simplify_all
+    )

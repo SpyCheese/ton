@@ -11,6 +11,7 @@ from tlb.generator.sema.types import (
     MatchFail,
     MatchTag,
     MatchTree,
+    Module,
     NatLiteral,
     NatTypeArg,
     ResolvedConstructor,
@@ -18,11 +19,13 @@ from tlb.generator.sema.types import (
     SemaError,
 )
 
+_TEST_MODULE = Module("<test>")
+
 
 def analyze_type(
     text: str, type_name: str
 ) -> tuple[MatchTree, dict[str | None, ResolvedConstructor], ResolvedType]:
-    _, user_types = analyze_text(text)
+    user_types = analyze_text(text, current_module=_TEST_MODULE).types
     ts = {t.name: t for t in user_types}
     t = ts[type_name]
     assert t.match_tree is not None
@@ -33,7 +36,7 @@ def analyze_cons(
     text: str, type_name: str
 ) -> tuple[MatchTree, list[ResolvedConstructor], ResolvedType]:
     """Like analyze_type but returns constructors as list (for anonymous constructors)."""
-    _, user_types = analyze_text(text)
+    user_types = analyze_text(text, current_module=_TEST_MODULE).types
     ts = {t.name: t for t in user_types}
     t = ts[type_name]
     assert t.match_tree is not None
@@ -91,7 +94,7 @@ class TestSingleConstructor:
     def test_undefined_type_error(self):
         """Referencing an undefined type is an error."""
         with pytest.raises(SemaError, match="undefined type"):
-            _ = analyze_text("foo$_ x:^Bar = Foo;")
+            _ = analyze_text("foo$_ x:^Bar = Foo;", current_module=_TEST_MODULE)
 
 
 # ── Two-constructor bit dispatch ──────────────────────────────────────
@@ -239,13 +242,16 @@ class TestTypedefFollowing:
 
     def test_typedef_to_multictor_prefix_conflict(self):
         with pytest.raises(SemaError, match="ambiguous"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 x$00 = Inner;
                 y$01 = Inner;
                 z$1 = Inner;
                 _ Inner = Outer;
                 other#ff q:uint32 = Outer;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_recursive_type_no_hang(self):
         tree, c, _ = analyze_type(
@@ -259,12 +265,15 @@ class TestTypedefFollowing:
 
     def test_cellref_field_not_followed(self):
         with pytest.raises(SemaError, match="ambiguous"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 a#_ x:^(Inner) = T;
                 b#_ y:^(Other) = T;
                 inner#ab z:uint32 = Inner;
                 other#cd z:uint32 = Other;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_msgaddress_pattern(self):
         """Two anonymous typedefs to MsgAddressInt ($10/$11) and MsgAddressExt ($00/$01)."""
@@ -287,12 +296,15 @@ class TestTypedefFollowing:
 
     def test_typedef_with_same_inner_tag(self):
         with pytest.raises(SemaError, match="ambiguous"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 inner1#ab x:uint32 = A;
                 inner2#ab y:uint32 = B;
                 _ A = T;
                 _ B = T;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_interleaved_typedef_expansion(self):
         """A:$01/$11, B:$10/$00. Expands into 4 leaves, all bit dispatch."""
@@ -402,7 +414,9 @@ class TestConstraintDispatch:
 
     def test_constant_with_shared_value_error(self):
         with pytest.raises(SemaError, match="ambiguous"):
-            _ = analyze_text("a#_ x:uint32 = T 0; b#_ y:uint64 = T 0;")
+            _ = analyze_text(
+                "a#_ x:uint32 = T 0; b#_ y:uint64 = T 0;", current_module=_TEST_MODULE
+            )
 
     def test_split_on_second_param(self):
         tree, cons, t = analyze_cons(
@@ -417,10 +431,13 @@ class TestConstraintDispatch:
 
     def test_no_nat_params_error(self):
         with pytest.raises(SemaError, match="ambiguous"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 a#_ {X:Type} x:X = T X;
                 b#_ {X:Type} y:X = T X;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
 
 # ── Mixed dispatch ────────────────────────────────────────────────────
@@ -445,11 +462,14 @@ class TestMixedDispatch:
 
     def test_shardstate_no_inner_tag(self):
         with pytest.raises(SemaError, match="ambiguous"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 _ x:uint32 = ShardStateUnsplit;
                 _ ShardStateUnsplit = ShardState;
                 split_state#5f327da5 left:^uint32 right:^uint32 = ShardState;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_shardstate_with_tagged_inner(self):
         """Inner type has #ab, split_state has #cd. First bit 1 (common), then diverge."""
@@ -537,7 +557,7 @@ class TestBlockTlb:
     def block_types(self) -> dict[str, ResolvedType]:
         with open("crypto/block/block.tlb") as f:
             text = f.read()
-        _, user_types = analyze_text(text)
+        user_types = analyze_text(text, current_module=_TEST_MODULE).types
         return {t.name: t for t in user_types}
 
     def test_all_types_have_match_trees(self, block_types: dict[str, ResolvedType]):

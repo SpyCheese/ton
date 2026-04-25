@@ -12,6 +12,7 @@ from tlb.generator.ast_nodes import (
     GetBit,
     Identifier,
     ImplicitParam,
+    Import,
     InlineRecord,
     IntConst,
     Multiply,
@@ -407,6 +408,35 @@ message$_ {X:Type} info:CommonMsgInfo init:(Maybe (Either StateInit ^StateInit))
 
 
 # ── Error reporting ───────────────────────────────────────────────────
+
+
+class TestImports:
+    def test_no_imports(self):
+        schema = parse("foo = Foo;")
+        assert schema.imports == []
+
+    def test_single_import(self):
+        schema = parse("//@import block.tlb\n")
+        assert schema.imports == [Import(path="block.tlb")]
+        assert schema.constructors == []
+
+    def test_import_then_constructor(self):
+        schema = parse("//@import block.tlb\nfoo = Foo;")
+        assert schema.imports == [Import(path="block.tlb")]
+        assert len(schema.constructors) == 1
+        assert schema.constructors[0].name == "foo"
+
+    def test_multiple_imports(self):
+        schema = parse("//@import a.tlb\n//@import b.tlb\nfoo = Foo;")
+        assert schema.imports == [Import(path="a.tlb"), Import(path="b.tlb")]
+
+    def test_import_after_constructor_rejected(self):
+        with pytest.raises(ParseError, match="before any constructor"):
+            _ = parse("foo = Foo;\n//@import block.tlb\n")
+
+    def test_import_between_constructors_rejected(self):
+        with pytest.raises(ParseError, match="before any constructor"):
+            _ = parse("foo = Foo;\n//@import block.tlb\nbar = Bar;\n")
 
 
 class TestErrors:

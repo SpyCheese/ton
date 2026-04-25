@@ -40,6 +40,8 @@ class TokenType(Enum):
     LT = auto()            # <
     GT = auto()            # >
 
+    IMPORT = auto()        # //@import <path>
+
     EOF = auto()
 # fmt: on
 
@@ -115,6 +117,9 @@ class Lexer:
                 _ = self._advance()
                 continue
             if ch == "/" and self._peek_at(1) == "/":
+                # //@... is a directive — leave it for tokenize() to handle.
+                if self._peek_at(2) == "@":
+                    break
                 while not self._at_end() and self._peek() != "\n":
                     _ = self._advance()
                 continue
@@ -192,6 +197,27 @@ class Lexer:
         # Bare # (the nat type)
         return self._make(TokenType.HASH, "#", line, col)
 
+    def _lex_directive(self, line: int, col: int) -> Token:
+        """Lex a //@<name> ... directive. Currently only //@import <path> is recognized."""
+        _ = self._advance()  # /
+        _ = self._advance()  # /
+        _ = self._advance()  # @
+        name = self._read_ident_tail()
+        if not name:
+            raise LexerError("expected directive name after '//@'", line, col)
+        if name == "import":
+            while not self._at_end() and self._peek() in " \t":
+                _ = self._advance()
+            start = self._pos
+            while not self._at_end() and self._peek() != "\n":
+                self._pos += 1
+                self._col += 1
+            path = self._text[start : self._pos].rstrip()
+            if not path:
+                raise LexerError("'//@import' requires a path", line, col)
+            return self._make(TokenType.IMPORT, path, line, col)
+        raise LexerError(f"unknown directive '//@{name}'", line, col)
+
     def _lex_dollar(self, line: int, col: int) -> Token:
         """Lex a token starting with $."""
         _ = self._advance()  # consume $
@@ -240,7 +266,9 @@ class Lexer:
             line, col = self._line, self._col
             ch = self._peek()
 
-            if ch == "#":
+            if ch == "/" and self._peek_at(1) == "/" and self._peek_at(2) == "@":
+                tokens.append(self._lex_directive(line, col))
+            elif ch == "#":
                 tokens.append(self._lex_hash(line, col))
             elif ch == "$":
                 tokens.append(self._lex_dollar(line, col))

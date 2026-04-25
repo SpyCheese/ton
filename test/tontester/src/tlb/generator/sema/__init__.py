@@ -10,11 +10,16 @@ Phases:
 7. Classify types (enum, typedef)
 """
 
+from collections.abc import Mapping
+
 from ..ast_nodes import Constructor, Schema
 from ..lexer import Lexer
 from ..parser import Parser
 from .deser import build_deser_plan, classify_inference
 from .match import build_match_tree
+from .resolve import (
+    AnalyzedModule as AnalyzedModule,
+)
 from .resolve import (
     TypeRegistry,
     check_type_arities,
@@ -26,22 +31,41 @@ from .tags import assign_tags
 from .types import (
     AnonymousRecordType,
     CellRefType,
+    Module,
     ResolvedType,
     ResolvedTypeExpr,
+    SemaError,
     TupleType,
     TypeApply,
 )
 from .well_known import classify_well_known
 
 
-def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
+def analyze(
+    schema: Schema,
+    *,
+    current_module: Module,
+    imports: Mapping[str, AnalyzedModule] | None = None,
+) -> AnalyzedModule:
     """Run semantic analysis on a parsed schema.
 
-    Returns the type registry and a list of user-defined resolved types.
+    `current_module` identifies the module being analyzed; types defined here
+    will carry it as their `origin_module`. `imports` maps `//@import` paths
+    to already-analyzed modules.
     """
-    registry = TypeRegistry()
+    available_imports = imports or {}
+    registry = TypeRegistry(current_module)
 
+    # Register local types first so they shadow same-named imports.
     register_types(schema, registry)
+
+    # Resolve and load imports.
+    for imp in schema.imports:
+        target = available_imports.get(imp.path)
+        if target is None:
+            raise SemaError(f"unresolved import '{imp.path}': not found in imports dict")
+        registry.add_imported(target)
+
     resolve_constructors(schema, registry)
 
     user_types = registry.all_user_types()
@@ -72,14 +96,19 @@ def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
 
     user_types = _toposort(user_types)
 
-    return registry, user_types
+    return AnalyzedModule(module=current_module, registry=registry, types=user_types)
 
 
-def analyze_text(text: str) -> tuple[TypeRegistry, list[ResolvedType]]:
+def analyze_text(
+    text: str,
+    *,
+    current_module: Module,
+    imports: Mapping[str, AnalyzedModule] | None = None,
+) -> AnalyzedModule:
     """Convenience: lex, parse, and analyze a TL-B schema string."""
     tokens = Lexer(text).tokenize()
     schema = Parser(tokens).parse()
-    return analyze(schema)
+    return analyze(schema, current_module=current_module, imports=imports)
 
 
 def _classify_type(rt: ResolvedType) -> None:

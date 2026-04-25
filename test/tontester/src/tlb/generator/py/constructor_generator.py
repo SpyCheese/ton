@@ -383,16 +383,14 @@ class ConstructorGenerator:
         cons_fields = inf_step.type.inference[inf_step.param_idx].constructor_field
         field_names: set[str] = set()
         for inf_cons, inf_field in cons_fields.items():
-            inf_scope = self.ctx.get_constructor(inf_cons).scope
-            field_names.add(inf_scope.lookup(inf_field))
+            field_names.add(self.ctx.lookup_field(inf_cons, inf_field))
         if len(field_names) == 1:
             return f"{expr}.{next(iter(field_names))}"
         tmp = self.ctx.tmp("_inf")
         items = list(cons_fields.items())
         for i, (inf_cons, inf_field) in enumerate(items):
-            cons_name = self.ctx.scope.lookup(inf_cons)
-            inf_scope = self.ctx.get_constructor(inf_cons).scope
-            field_name = inf_scope.lookup(inf_field)
+            cons_name = self.ctx.lookup_constructor(inf_cons)
+            field_name = self.ctx.lookup_field(inf_cons, inf_field)
             if i == 0:
                 sb.line(f"if isinstance({expr}, {cons_name}):")
             elif i < len(items) - 1:

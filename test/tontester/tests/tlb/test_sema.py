@@ -2,6 +2,7 @@ import pytest
 from tlb.generator.ast_nodes import CompareOp
 from tlb.generator.sema import analyze_text
 from tlb.generator.sema.types import (
+    Module,
     BindOutputParam,
     BindParam,
     CellRefType,
@@ -30,9 +31,11 @@ from tlb.generator.sema.types import (
     TypeParamRef,
 )
 
+_TEST_MODULE = Module("<test>")
+
 
 def types_by_name(text: str) -> dict[str, ResolvedType]:
-    _, user_types = analyze_text(text)
+    user_types = analyze_text(text, current_module=_TEST_MODULE).types
     return {t.name: t for t in user_types}
 
 
@@ -115,7 +118,8 @@ class TestExpressionResolution:
             _ = analyze_text(
                 "nothing$0 {X:Type} = Maybe X;\n"
                 + "just$1 {X:Type} value:X = Maybe X;\n"
-                + "foo$_ {n:#} x:(Maybe n?uint32) = Foo n;"
+                + "foo$_ {n:#} x:(Maybe n?uint32) = Foo n;",
+                current_module=_TEST_MODULE,
             )
 
     def test_unconditional_field_has_none_condition(self):
@@ -148,7 +152,9 @@ class TestExpressionResolution:
     def test_tuple_type_times_type_error(self):
         """Type * Type is an error."""
         with pytest.raises(SemaError, match="nat expression"):
-            _ = analyze_text("foo$_ x:(Bit * Bit) = Foo; bit$_ (## 1) = Bit;")
+            _ = analyze_text(
+                "foo$_ x:(Bit * Bit) = Foo; bit$_ (## 1) = Bit;", current_module=_TEST_MODULE
+            )
 
     def test_getbit(self):
         """flags.3 is a NatGetBit expression."""
@@ -170,14 +176,16 @@ class TestExpressionResolution:
 
     def test_undefined_type_error(self):
         with pytest.raises(SemaError, match="undefined"):
-            _ = analyze_text("foo$_ x:Nonexistent = Foo;")
+            _ = analyze_text("foo$_ x:Nonexistent = Foo;", current_module=_TEST_MODULE)
 
     def test_undefined_lowercase_error(self):
         with pytest.raises(SemaError, match="undefined"):
-            _ = analyze_text("foo$_ {n:#} x:(## unknown) = Foo n;")
+            _ = analyze_text(
+                "foo$_ {n:#} x:(## unknown) = Foo n;", current_module=_TEST_MODULE
+            )
 
     def test_empty_schema(self):
-        _, user_types = analyze_text("")
+        user_types = analyze_text("", current_module=_TEST_MODULE).types
         assert user_types == []
 
 
@@ -203,7 +211,7 @@ class TestTags:
     def test_auto_tag_matches_cpp_reference(self):
         """CRC32 auto-tags match the C++ tlbc reference implementation (block-auto.cpp)."""
         with open("/home/danklishch/code/ton/src/crypto/block/block.tlb") as f:
-            _, types = analyze_text(f.read())
+            types = analyze_text(f.read(), current_module=_TEST_MODULE).types
         by_name = {t.name: t for t in types}
 
         # Values from block-auto.cpp check_tag methods
@@ -532,25 +540,31 @@ bar$_ {n:#} x:(Pair (Pair (Unary ~n) uint32) uint64) y:(## n) = Bar ~n;
     def test_no_inference_through_maybe(self):
         """Maybe is NOT inference-capable, so using it to infer an output param is an error."""
         with pytest.raises(SemaError, match="cannot be computed"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
 nothing$0 {X:Type} = Maybe X;
 just$1 {X:Type} value:X = Maybe X;
 unary_zero$0 = Unary ~0;
 unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
 baz$_ {n:#} x:(Maybe (Unary ~n)) = Baz ~n;
-""")
+""",
+                current_module=_TEST_MODULE,
+            )
 
     def test_output_consistency_error(self):
         """All constructors must agree on which positions are output (~)."""
         with pytest.raises(SemaError, match="negated"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
 foo$0 {n:#} x:uint32 = T ~n;
 bar$1 {n:#} x:uint32 = T n;
-""")
+""",
+                current_module=_TEST_MODULE,
+            )
 
     def test_nat_less_nonconst_implicit_constraint(self):
         """#< n with non-constant n generates an implicit n > 0 constraint."""
-        _, types = analyze_text("foo$_ {n:#} x:(#< n) = Foo n;")
+        types = analyze_text("foo$_ {n:#} x:(#< n) = Foo n;", current_module=_TEST_MODULE).types
         con = types[0].constructors[0]
         n_param = con.params[0]
         assert isinstance(n_param, NatParamDef)
@@ -569,11 +583,12 @@ bar$1 {n:#} x:uint32 = T n;
 
     def test_nat_less_nonconst_nested_in_generic(self):
         """#< n nested inside a generic type still gets the implicit n > 0 constraint."""
-        _, types = analyze_text(
+        types = analyze_text(
             "nothing$0 {X:Type} = Maybe X;\n"
             + "just$1 {X:Type} value:X = Maybe X;\n"
-            + "foo$_ {n:#} x:(Maybe (#< n)) = Foo n;"
-        )
+            + "foo$_ {n:#} x:(Maybe (#< n)) = Foo n;",
+            current_module=_TEST_MODULE,
+        ).types
         foo_type = next(t for t in types if t.name == "Foo")
         con = foo_type.constructors[0]
         n_param = con.params[0]
@@ -682,43 +697,43 @@ hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode
 class TestSemaErrors:
     def test_inconsistent_arity(self):
         with pytest.raises(SemaError, match="inconsistent arity"):
-            _ = analyze_text("foo$0 x:uint32 = T x; bar$1 = T;")
+            _ = analyze_text("foo$0 x:uint32 = T x; bar$1 = T;", current_module=_TEST_MODULE)
 
     def test_builtin_redefinition(self):
         with pytest.raises(SemaError, match="cannot redefine"):
-            _ = analyze_text("foo$_ = Cell;")
+            _ = analyze_text("foo$_ = Cell;", current_module=_TEST_MODULE)
 
     def test_duplicate_constructor_name(self):
         with pytest.raises(SemaError, match="duplicate constructor name"):
-            _ = analyze_text("foo$0 = T; foo$1 = T;")
+            _ = analyze_text("foo$0 = T; foo$1 = T;", current_module=_TEST_MODULE)
 
     def test_duplicate_param_name(self):
         with pytest.raises(SemaError, match="duplicate parameter name"):
-            _ = analyze_text("foo$_ {n:#} {n:Type} = T;")
+            _ = analyze_text("foo$_ {n:#} {n:Type} = T;", current_module=_TEST_MODULE)
 
     def test_type_param_not_in_result(self):
         """Type param declared but not used in result params."""
         with pytest.raises(SemaError, match="not found in result params"):
-            _ = analyze_text("foo$_ {X:Type} x:uint32 = T;")
+            _ = analyze_text("foo$_ {X:Type} x:uint32 = T;", current_module=_TEST_MODULE)
 
     def test_duplicate_field_name(self):
         with pytest.raises(SemaError, match="duplicate field name"):
-            _ = analyze_text("foo$_ a:uint32 a:uint64 = T;")
+            _ = analyze_text("foo$_ a:uint32 a:uint64 = T;", current_module=_TEST_MODULE)
 
     def test_nat_less_zero(self):
         """#< 0 is invalid — no values exist below 0."""
         with pytest.raises(SemaError, match="#< 0 is invalid"):
-            _ = analyze_text("foo$_ n:(#< 0) = T;")
+            _ = analyze_text("foo$_ n:(#< 0) = T;", current_module=_TEST_MODULE)
 
     def test_nat_less_type_param(self):
         """#< requires a nat argument, not a type."""
         with pytest.raises(SemaError, match="expects a nat argument"):
-            _ = analyze_text("foo$_ {T:Type} n:(#< T) = Foo T;")
+            _ = analyze_text("foo$_ {T:Type} n:(#< T) = Foo T;", current_module=_TEST_MODULE)
 
     def test_nat_leq_type_param(self):
         """#<= requires a nat argument, not a type."""
         with pytest.raises(SemaError, match="expects a nat argument"):
-            _ = analyze_text("foo$_ {T:Type} n:(#<= T) = Foo T;")
+            _ = analyze_text("foo$_ {T:Type} n:(#<= T) = Foo T;", current_module=_TEST_MODULE)
 
     def test_nat_less_type_param_nested(self):
         """#< with Type param nested inside a generic is still rejected."""
@@ -726,22 +741,26 @@ class TestSemaErrors:
             _ = analyze_text(
                 "nothing$0 {X:Type} = Maybe X;\n"
                 + "just$1 {X:Type} value:X = Maybe X;\n"
-                + "foo$_ {T:Type} x:(Maybe (#< T)) = Foo T;"
+                + "foo$_ {T:Type} x:(Maybe (#< T)) = Foo T;",
+                current_module=_TEST_MODULE,
             )
 
     def test_wrong_arity(self):
         """Applying a type with wrong number of arguments."""
         with pytest.raises(SemaError, match="expects 1 arguments, got 2"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 nothing$0 {X:Type} = Maybe X;
                 just$1 {X:Type} value:X = Maybe X;
                 foo$_ x:(Maybe uint32 uint64) = Foo;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_field_ref_in_input_result_param(self):
         """Non-output result params cannot reference explicit fields."""
         with pytest.raises(SemaError, match="cannot reference field"):
-            _ = analyze_text("foo$_ x:uint32 = T x;")
+            _ = analyze_text("foo$_ x:uint32 = T x;", current_module=_TEST_MODULE)
 
     def test_output_value_can_reference_field(self):
         """Output values CAN reference nat-valued fields (like hml_long)."""
@@ -756,50 +775,65 @@ class TestSemaErrors:
     def test_uncomputable_param(self):
         """Param that can't be bound from type args, fields, or constraints."""
         with pytest.raises(SemaError, match="cannot be computed"):
-            _ = analyze_text("foo$_ {n:#} x:uint32 = T;")
+            _ = analyze_text("foo$_ {n:#} x:uint32 = T;", current_module=_TEST_MODULE)
 
     def test_output_consistency(self):
         """All constructors must agree on ~ positions."""
         with pytest.raises(SemaError, match="negated"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 foo$0 {n:#} x:uint32 = T ~n;
                 bar$1 {n:#} x:uint32 = T n;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_multiple_negated_in_constraint(self):
         """Constraint with two ~ params should error."""
         with pytest.raises(SemaError, match="multiple negated"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 foo$_ {n:#} {m:#} {l:#} {(~n) = (~m) + l} x:uint32 = T;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_zero_arity_applied_with_args(self):
         """Applying a zero-arity type with arguments should error."""
         with pytest.raises(SemaError, match="expects 0 arguments"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 foo$_ = Foo;
                 bar$_ x:(Foo uint32) = Bar;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_special_consistency_error(self):
         """All constructors must agree on ! (special cell) prefix."""
         with pytest.raises(SemaError, match="special"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 !merkle$0 x:uint32 = T;
                 normal$1 y:uint64 = T;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_conditional_field_in_constraint(self):
         """Conditional field cannot be used in constraints."""
         with pytest.raises(SemaError, match="conditional field"):
-            _ = analyze_text("foo$_ flag:(## 1) n:flag?# { n = 1 } = Foo;")
+            _ = analyze_text(
+                "foo$_ flag:(## 1) n:flag?# { n = 1 } = Foo;", current_module=_TEST_MODULE
+            )
 
     def test_conditional_field_in_type_arg(self):
         """Conditional field cannot be used as type argument."""
         with pytest.raises(SemaError, match="conditional field"):
             _ = analyze_text(
                 "pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;\n"
-                + "foo$_ flag:(## 1) n:flag?# inner:(Pair (## n) uint32) = Foo;"
+                + "foo$_ flag:(## 1) n:flag?# inner:(Pair (## n) uint32) = Foo;",
+                current_module=_TEST_MODULE,
             )
 
     def test_conditional_field_output_param(self):
@@ -809,7 +843,8 @@ class TestSemaErrors:
                 "unary_zero$0 = Unary ~0;\n"
                 + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
                 + "bit$_ (## 1) = Bit;\n"
-                + "foo$_ {n:#} flag:(## 1) x:flag?(Unary ~n) data:(n * Bit) = Foo ~n;"
+                + "foo$_ {n:#} flag:(## 1) x:flag?(Unary ~n) data:(n * Bit) = Foo ~n;",
+                current_module=_TEST_MODULE,
             )
 
     def test_conditional_field_breaks_inference(self):
@@ -819,7 +854,8 @@ class TestSemaErrors:
                 "unary_zero$0 = Unary ~0;\n"
                 + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
                 + "generic_opt$_ {X:Type} has_x:(## 1) x:has_x?X = GenericOpt X;\n"
-                + "bar$_ {n:#} inner:(GenericOpt (Unary ~n)) = Bar ~n;"
+                + "bar$_ {n:#} inner:(GenericOpt (Unary ~n)) = Bar ~n;",
+                current_module=_TEST_MODULE,
             )
 
     def test_special_all_marked(self):
@@ -837,27 +873,36 @@ class TestSemaErrors:
     def test_multiplicative_constraint_unsolvable(self):
         """Constraints with ~ inside multiplication can't be solved."""
         with pytest.raises(SemaError, match="cannot be computed"):
-            _ = analyze_text("foo$_ {n:#} {m:#} {n = (~m) * 2} x:uint32 = T n;")
+            _ = analyze_text(
+                "foo$_ {n:#} {m:#} {n = (~m) * 2} x:uint32 = T n;",
+                current_module=_TEST_MODULE,
+            )
 
     def test_duplicate_output_param(self):
         """Same param at multiple output positions should error."""
         with pytest.raises(SemaError, match="multiple output"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 pair$_ {X:Type} {Y:Type} first:X second:Y = Pair X Y;
                 unary_zero$0 = Unary ~0;
                 unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
                 infer_both$_ {n:#} {m:#} pair:(Pair (Unary ~n) (Unary ~m)) = InferBoth ~n ~m;
                 foo$_ {n:#} x:(InferBoth ~n ~n) = Foo;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
     def test_duplicate_output_param_across_fields(self):
         """Same param bound from output positions in two separate fields should error."""
         with pytest.raises(SemaError, match="multiple output"):
-            _ = analyze_text("""
+            _ = analyze_text(
+                """
                 unary_zero$0 = Unary ~0;
                 unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
                 foo$_ {n:#} x:(Unary ~n) y:(Unary ~n) = Foo;
-            """)
+            """,
+                current_module=_TEST_MODULE,
+            )
 
 
 # ── Inline records ───────────────────────────────────────────────────
@@ -866,7 +911,9 @@ class TestSemaErrors:
 class TestInlineRecords:
     def test_inline_record_creates_anonymous_type(self):
         """Inline record [a:uint32 b:uint8] produces an anonymous ResolvedType."""
-        _, types = analyze_text("foo$_ inner:[a:uint32 b:uint8] = Foo;")
+        types = analyze_text(
+            "foo$_ inner:[a:uint32 b:uint8] = Foo;", current_module=_TEST_MODULE
+        ).types
         # Should have Foo and an anonymous type
         anon_types = [t for t in types if t.name == ""]
         assert len(anon_types) == 1
@@ -878,14 +925,18 @@ class TestInlineRecords:
 
     def test_inline_record_has_match_tree(self):
         """Anonymous types go through match tree building."""
-        _, types = analyze_text("foo$_ inner:[a:uint32] = Foo;")
+        types = analyze_text(
+            "foo$_ inner:[a:uint32] = Foo;", current_module=_TEST_MODULE
+        ).types
         anon = [t for t in types if t.name == ""][0]
         assert anon.match_tree is not None
         assert isinstance(anon.match_tree, MatchConstructor)
 
     def test_inline_record_has_deser_plan(self):
         """Anonymous types go through deser plan generation."""
-        _, types = analyze_text("foo$_ inner:[a:uint32 b:uint8] = Foo;")
+        types = analyze_text(
+            "foo$_ inner:[a:uint32 b:uint8] = Foo;", current_module=_TEST_MODULE
+        ).types
         anon = [t for t in types if t.name == ""][0]
         steps = anon.constructors[0].deser_steps
         reads = [s for s in steps if isinstance(s, ReadField)]
@@ -893,25 +944,31 @@ class TestInlineRecords:
 
     def test_inline_record_in_cell_ref(self):
         """^[x:uint32 y:uint32] creates a cell-referenced anonymous type."""
-        _, types = analyze_text("foo$_ inner:^[x:uint32 y:uint32] = Foo;")
+        types = analyze_text(
+            "foo$_ inner:^[x:uint32 y:uint32] = Foo;", current_module=_TEST_MODULE
+        ).types
         ts = {t.name: t for t in types}
         foo_field = ts["Foo"].constructors[0].fields[0]
         assert isinstance(foo_field.type_expr, CellRefType)
 
     def test_nested_inline_records(self):
         """Inline record can contain another inline record."""
-        _, types = analyze_text("foo$_ inner:[a:uint32 b:[x:uint8 y:uint8]] = Foo;")
+        types = analyze_text(
+            "foo$_ inner:[a:uint32 b:[x:uint8 y:uint8]] = Foo;", current_module=_TEST_MODULE
+        ).types
         anon_types = [t for t in types if t.name == ""]
         assert len(anon_types) == 2  # outer and inner
 
     def test_inline_record_scope_isolation(self):
         """Type params from outer scope don't leak into inline records."""
         with pytest.raises(SemaError, match="undefined"):
-            _ = analyze_text("foo$_ {T:Type} inner:[a:T] = Foo T;")
+            _ = analyze_text("foo$_ {T:Type} inner:[a:T] = Foo T;", current_module=_TEST_MODULE)
 
     def test_inline_record_with_own_type_param(self):
         """Inline record with its own type param, applied to outer T."""
-        _, types = analyze_text("foo$_ {T:Type} inner:([{X:Type} a:X] T) = Foo T;")
+        types = analyze_text(
+            "foo$_ {T:Type} inner:([{X:Type} a:X] T) = Foo T;", current_module=_TEST_MODULE
+        ).types
         anon = [t for t in types if t.name == ""][0]
         assert anon.arity == 1
         assert [p.kind for p in anon.type_level_params] == [ParamKind.TYPE]
@@ -919,16 +976,17 @@ class TestInlineRecords:
     def test_unbound_type_var_in_inline_record(self):
         """Referencing undefined type inside inline record is an error."""
         with pytest.raises(SemaError, match="undefined"):
-            _ = analyze_text("foo$_ inner:[a:T] = Foo;")
+            _ = analyze_text("foo$_ inner:[a:T] = Foo;", current_module=_TEST_MODULE)
 
     def test_inline_record_nat_param_is_internal(self):
         """Nat params in inline records are internal (arity=0), resolved by deser plan."""
-        _, types = analyze_text(
+        types = analyze_text(
             "unary_zero$0 = Unary ~0;\n"
             + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
             + "bit$_ (## 1) = Bit;\n"
-            + "foo$_ x:[{n:#} len:(Unary ~n) data:(n * Bit)] = Foo;"
-        )
+            + "foo$_ x:[{n:#} len:(Unary ~n) data:(n * Bit)] = Foo;",
+            current_module=_TEST_MODULE,
+        ).types
         anon = [t for t in types if t.name == ""][0]
         assert anon.arity == 0  # nat params don't contribute to arity
         assert anon.constructors[0].params[0].name == "n"
@@ -939,11 +997,12 @@ class TestInlineRecords:
 
     def test_inline_record_mixed_params(self):
         """Inline record with both type param (external) and nat param (internal)."""
-        _, types = analyze_text(
+        types = analyze_text(
             "unary_zero$0 = Unary ~0;\n"
             + "unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);\n"
-            + "foo$_ {T:Type} x:([{X:Type} {n:#} a:X len:(Unary ~n)] T) = Foo T;"
-        )
+            + "foo$_ {T:Type} x:([{X:Type} {n:#} a:X len:(Unary ~n)] T) = Foo T;",
+            current_module=_TEST_MODULE,
+        ).types
         anon = [t for t in types if t.name == ""][0]
         assert anon.arity == 1  # only type param X contributes
         assert [p.kind for p in anon.type_level_params] == [ParamKind.TYPE]
@@ -952,11 +1011,128 @@ class TestInlineRecords:
 # ── Full block.tlb ───────────────────────────────────────────────────
 
 
+class TestImports:
+    def test_no_imports_origin_module_set(self):
+        m = Module("foo")
+        types = analyze_text("foo$_ = Foo;", current_module=m).types
+        foo = next(t for t in types if t.name == "Foo")
+        assert foo.origin_module == m
+
+    def test_anonymous_types_carry_origin_module(self):
+        m = Module("inline")
+        types = analyze_text("foo$_ x:[a:uint32] = Foo;", current_module=m).types
+        anon = next(t for t in types if t.name == "")
+        assert anon.origin_module == m
+
+    def test_import_makes_type_visible(self):
+        block_mod = Module("block")
+        block = analyze_text(
+            "currency$_ amount:uint64 = Currency;", current_module=block_mod
+        )
+        types = analyze_text(
+            "//@import block.tlb\nwallet$_ bal:Currency = Wallet;",
+            current_module=Module("user"),
+            imports={"block.tlb": block},
+        ).types
+        wallet = next(t for t in types if t.name == "Wallet")
+        field_type = wallet.constructors[0].fields[0].type_expr
+        assert isinstance(field_type, TypeApply)
+        assert field_type.type.name == "Currency"
+        assert field_type.type.origin_module == block_mod
+        # Imported types are not in the consuming module's type list.
+        assert "Currency" not in {t.name for t in types}
+
+    def test_unresolved_import(self):
+        with pytest.raises(SemaError, match="unresolved import"):
+            _ = analyze_text(
+                "//@import missing.tlb\nfoo$_ = Foo;",
+                current_module=Module("user"),
+                imports={},
+            )
+
+    def test_self_import_rejected(self):
+        block_mod = Module("block")
+        block = analyze_text("foo$_ = Foo;", current_module=block_mod)
+        with pytest.raises(SemaError, match="cannot import itself"):
+            _ = analyze_text(
+                "//@import self.tlb\nbar$_ = Bar;",
+                current_module=block_mod,
+                imports={"self.tlb": block},
+            )
+
+    def test_local_shadows_import_silently(self):
+        block_mod = Module("block")
+        block = analyze_text(
+            "currency$_ amount:uint64 = Currency;", current_module=block_mod
+        )
+        user_mod = Module("user")
+        types = analyze_text(
+            "//@import block.tlb\ncurrency$_ x:uint32 = Currency;",
+            current_module=user_mod,
+            imports={"block.tlb": block},
+        ).types
+        currency = next(t for t in types if t.name == "Currency")
+        assert currency.origin_module == user_mod
+        field_type = currency.constructors[0].fields[0].type_expr
+        assert isinstance(field_type, TypeApply)
+        assert field_type.type.name == "uint32"
+
+    def test_ambiguous_import_without_local_shadow(self):
+        a_mod, b_mod = Module("a"), Module("b")
+        a = analyze_text("foo$_ = Foo;", current_module=a_mod)
+        b = analyze_text("foo$_ = Foo;", current_module=b_mod)
+        with pytest.raises(SemaError, match="ambiguous import"):
+            _ = analyze_text(
+                "//@import a.tlb\n//@import b.tlb\nbar$_ = Bar;",
+                current_module=Module("user"),
+                imports={"a.tlb": a, "b.tlb": b},
+            )
+
+    def test_ambiguous_import_resolved_by_local_shadow(self):
+        a_mod, b_mod = Module("a"), Module("b")
+        a = analyze_text("foo$_ x:uint8 = Foo;", current_module=a_mod)
+        b = analyze_text("foo$_ y:uint16 = Foo;", current_module=b_mod)
+        user_mod = Module("user")
+        types = analyze_text(
+            "//@import a.tlb\n//@import b.tlb\nfoo$_ z:uint32 = Foo;",
+            current_module=user_mod,
+            imports={"a.tlb": a, "b.tlb": b},
+        ).types
+        foo = next(t for t in types if t.name == "Foo")
+        assert foo.origin_module == user_mod
+
+    def test_no_transitive_reexport(self):
+        base_mod, mid_mod = Module("base"), Module("mid")
+        base = analyze_text("bar$_ = Bar;", current_module=base_mod)
+        mid = analyze_text(
+            "//@import base.tlb\nmid$_ b:Bar = Mid;",
+            current_module=mid_mod,
+            imports={"base.tlb": base},
+        )
+        # Importing only mid does NOT make Bar visible.
+        with pytest.raises(SemaError, match="undefined type"):
+            _ = analyze_text(
+                "//@import mid.tlb\nu$_ b:Bar = U;",
+                current_module=Module("user"),
+                imports={"mid.tlb": mid},
+            )
+
+    def test_idempotent_double_import(self):
+        # The same AnalyzedModule reachable under two import paths is fine.
+        block_mod = Module("block")
+        block = analyze_text("foo$_ = Foo;", current_module=block_mod)
+        _ = analyze_text(
+            "//@import block.tlb\n//@import alias.tlb\nbar$_ x:Foo = Bar;",
+            current_module=Module("user"),
+            imports={"block.tlb": block, "alias.tlb": block},
+        )
+
+
 class TestBlockTlb:
     def test_analyze_block_tlb(self):
         with open("crypto/block/block.tlb") as f:
             text = f.read()
-        _, user_types = analyze_text(text)
+        user_types = analyze_text(text, current_module=_TEST_MODULE).types
         type_names = {t.name for t in user_types}
         assert "Hashmap" in type_names
         assert "HashmapE" in type_names
