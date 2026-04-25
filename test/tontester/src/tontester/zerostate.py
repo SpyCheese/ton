@@ -16,7 +16,8 @@ from block.generated import (
     ConfigParams,
     DepthBalanceAug,
     DepthBalanceInfo,
-    HashmapAugEType,
+    EnqueuedMsg,
+    KeyExtBlkRef,
     KeyMaxLt,
     KeyMaxLtAug,
     LibDescr,
@@ -24,6 +25,7 @@ from block.generated import (
     NewConsensusConfigType,
     OldMcBlocksInfo,
     OutMsgQueue,
+    OutMsgQueueAug,
     OutMsgQueueInfo,
     ProcessedInfo,
     ShardAccount,
@@ -40,7 +42,6 @@ from block.generated import (
     account_descr,
     account_storage,
     addr_std,
-    ahme_empty,
     block_grams_created,
     block_limits,
     capabilities,
@@ -138,12 +139,6 @@ def _cc(grams: int):
         grams=_grams(grams),
         other=extra_currencies(dict=HashmapDict(32, VarUIntTypeConstructor(32))),
     )
-
-
-def _hashmap_to_cell[V, E](d: HashmapDict[V, E]) -> Cell:
-    b = Builder()
-    d.serialize_to(b)
-    return b.end_cell()
 
 
 GRAM = 1_000_000_000
@@ -270,15 +265,6 @@ def _build_account(smc: _SmcEntry, workchain_id: int) -> account:
 
 
 def _build_shard_accounts(smcs: list[_SmcEntry], workchain_id: int) -> ShardAccounts:
-    if not smcs:
-        return ShardAccounts(
-            field=ahme_empty(
-                256,
-                depth_balance,
-                extra=depth_balance(split_depth=0, balance=_zero_cc()),
-            )
-        )
-
     d: HashmapDict[ShardAccount, DepthBalanceInfo] = HashmapDict(
         256,
         account_descr,
@@ -292,15 +278,7 @@ def _build_shard_accounts(smcs: list[_SmcEntry], workchain_id: int) -> ShardAcco
             last_trans_lt=0,
         )
         d[smc.address] = sa
-
-    cell = _hashmap_to_cell(d)
-    aug_e = HashmapAugEType[ShardAccount, DepthBalanceInfo]().load_from(
-        cell.begin_parse(),
-        256,
-        account_descr,
-        depth_balance,
-    )
-    return ShardAccounts(field=aug_e)
+    return ShardAccounts(field=d)
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +648,7 @@ def _build_config_params(
 def _empty_out_msg_queue_info() -> OutMsgQueueInfo:
     return OutMsgQueueInfo(
         out_queue=OutMsgQueue(
-            field=ahme_empty(352, UintTypeConstructor(64), extra=0),
+            field=HashmapDict(352, EnqueuedMsg, UintTypeConstructor(64), OutMsgQueueAug()),
         ),
         proc_info=ProcessedInfo(
             field=HashmapDict(96, processed_upto),
@@ -854,11 +832,7 @@ def create_zerostate(
         before_split=0,
         accounts=ref(
             ShardAccounts(
-                field=ahme_empty(
-                    256,
-                    depth_balance,
-                    extra=depth_balance(split_depth=0, balance=_zero_cc()),
-                )
+                field=HashmapDict(256, account_descr, depth_balance, DepthBalanceAug()),
             )
         ),
         field=ref(
@@ -955,7 +929,7 @@ def create_zerostate(
                     nx_cc_updated=True,
                 ),
                 prev_blocks=OldMcBlocksInfo(
-                    field=ahme_empty(32, KeyMaxLt, extra=KeyMaxLtAug().eval_empty()),
+                    field=HashmapDict(32, KeyExtBlkRef, KeyMaxLt, KeyMaxLtAug()),
                 ),
                 after_key_block=True,
                 last_key_block=None,

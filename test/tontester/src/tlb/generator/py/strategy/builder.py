@@ -17,6 +17,7 @@ from ...sema.types import (
     NatLiteral,
     ResolvedExpr,
     ResolvedNatExpr,
+    ResolvedType,
     ResolvedTypeExpr,
     TupleType,
     TypeApply,
@@ -84,10 +85,17 @@ class StrategyBuilder:
 
     ctx: PyContext
     scope: NameScope
+    parent_type: ResolvedType | None
 
-    def __init__(self, ctx: PyContext, scope: NameScope) -> None:
+    def __init__(
+        self,
+        ctx: PyContext,
+        scope: NameScope,
+        parent_type: ResolvedType | None = None,
+    ) -> None:
         self.ctx = ctx
         self.scope = scope
+        self.parent_type = parent_type
 
     @staticmethod
     def _to_nat(expr: ResolvedExpr) -> ResolvedNatExpr:
@@ -181,6 +189,16 @@ class StrategyBuilder:
                         self,
                         allow_empty=(t.well_known == WellKnownType.HASHMAP_E),
                     )
+                if t.well_known == WellKnownType.HASHMAP_AUG_E:
+                    aug_class = self._aug_for_parent()
+                    if aug_class is not None:
+                        from .hashmap import HashmapAugStrategy
+
+                        return HashmapAugStrategy(
+                            type_expr, self.ctx, self.scope, self, aug_class=aug_class
+                        )
+                    # No aug configured — fall through to the unsimplified
+                    # generic class so loading still works.
                 if t.well_known in (WellKnownType.VAR_UINTEGER, WellKnownType.VAR_INTEGER):
                     from .varint import VarIntStrategy
 
@@ -200,6 +218,14 @@ class StrategyBuilder:
         from .user_type import UserTypeStrategy
 
         return UserTypeStrategy(type_expr, self.ctx, self.scope, builder=self)
+
+    def _aug_for_parent(self) -> str | None:
+        """Look up the aug class for this build's containing type, if any."""
+        if self.parent_type is None:
+            return None
+        if self.parent_type.origin_module is None:
+            return None
+        return self.ctx.simplify.aug_for(self.parent_type.origin_module, self.parent_type.name)
 
     def _build_maybe(self, type_expr: TypeApply) -> TypeStrategy:
         """Build strategy for simplified Maybe X → X | None.

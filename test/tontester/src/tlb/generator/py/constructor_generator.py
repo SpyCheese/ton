@@ -142,7 +142,7 @@ class ConstructorGenerator:
     def generate(self, sb: SourceBuilder) -> None:
         self.ctx.use("final", "dataclass", "TLBRecord", "Builder", "Slice", "override")
 
-        builder = StrategyBuilder(self.ctx, self.scope)
+        builder = StrategyBuilder(self.ctx, self.scope, parent_type=self.c.parent_type)
         for f in self.c.fields:
             self.strategies[IdentityKey(f)] = builder.build(f.type_expr)
 
@@ -470,7 +470,7 @@ class ConstructorGenerator:
 
     def _generate_inline_properties(self, sb: SourceBuilder) -> None:
         """Generate property accessors for inlined anonymous record sub-fields."""
-        builder = StrategyBuilder(self.ctx, self.scope)
+        builder = StrategyBuilder(self.ctx, self.scope, parent_type=self.c.parent_type)
         for parent_field, anon_type, is_cell_ref in self.inlined_fields:
             field_name = self.scope.lookup(parent_field)
             anon_cons = anon_type.constructors[0]

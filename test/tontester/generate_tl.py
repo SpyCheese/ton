@@ -126,13 +126,28 @@ if __name__ == "__main__":
         block_tlb, block_out, py_module="generated.block", simplify=inline_only
     )
 
-    # Generate block.tlb (full simplifications for the block module)
+    # Generate block.tlb (full simplifications for the block module).
+    # Only typedefs with hand-written augmentations are entered here; the
+    # rest of HashmapAugE typedefs in block.tlb fall through to generic
+    # (unsimplified) HashmapAugE handling.
+    block_module = Module("block")
+    block_aug_classes: dict[tuple[Module, str], str] = {
+        (block_module, "OutMsgQueue"): "OutMsgQueueAug",
+        (block_module, "DispatchQueue"): "DispatchQueueAug",
+        (block_module, "ShardAccounts"): "DepthBalanceAug",
+        (block_module, "OldMcBlocksInfo"): "KeyMaxLtAug",
+    }
+    block_simplify = SimplifyConfig(
+        simplify=simplify_all.simplify,
+        inline_records=simplify_all.inline_records,
+        aug_classes=block_aug_classes,
+    )
     block_module_out = repo_root / "test/tontester/src/block/generated.py"
     block_aug_source = repo_root / "test/tontester/src/block/_aug_source.py"
     _ = generate_tlb_python(
         block_tlb,
         block_module_out,
         py_module="block.generated",
-        simplify=simplify_all,
+        simplify=block_simplify,
         aug_source_path=block_aug_source,
     )

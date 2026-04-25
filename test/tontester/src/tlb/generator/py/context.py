@@ -259,7 +259,7 @@ class PyContext:
             "VarIntTypeConstructor",
             "VarUIntTypeConstructor",
         ],
-        "tlb.hashmap": ["HashmapDict", "UnitAug"],
+        "tlb.hashmap": ["Augmentation", "HashmapDict", "UnitAug"],
     }
 
     def emit_imports(self, sb: SourceBuilder) -> None:
