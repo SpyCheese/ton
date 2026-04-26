@@ -26,9 +26,7 @@ class PyManifest:
 
     py_module: str
     type_names: dict[IdentityKey[ResolvedType], str] = field(default_factory=dict)
-    constructor_names: dict[IdentityKey[ResolvedConstructor], str] = field(
-        default_factory=dict
-    )
+    constructor_names: dict[IdentityKey[ResolvedConstructor], str] = field(default_factory=dict)
     field_names: dict[IdentityKey[ResolvedField], str] = field(default_factory=dict)
     # TypeInfo class names for multi-constructor types. Derived as `{X}Type`
     # by default but reserved through NameScope so user names can take

@@ -2,7 +2,6 @@ import pytest
 from tlb.generator.ast_nodes import CompareOp
 from tlb.generator.sema import analyze_text
 from tlb.generator.sema.types import (
-    Module,
     BindOutputParam,
     BindParam,
     CellRefType,
@@ -12,6 +11,7 @@ from tlb.generator.sema.types import (
     MatchConstructor,
     MatchFail,
     MatchTag,
+    Module,
     NatAdd,
     NatFieldValue,
     NatGetBit,
@@ -180,9 +180,7 @@ class TestExpressionResolution:
 
     def test_undefined_lowercase_error(self):
         with pytest.raises(SemaError, match="undefined"):
-            _ = analyze_text(
-                "foo$_ {n:#} x:(## unknown) = Foo n;", current_module=_TEST_MODULE
-            )
+            _ = analyze_text("foo$_ {n:#} x:(## unknown) = Foo n;", current_module=_TEST_MODULE)
 
     def test_empty_schema(self):
         user_types = analyze_text("", current_module=_TEST_MODULE).types
@@ -925,9 +923,7 @@ class TestInlineRecords:
 
     def test_inline_record_has_match_tree(self):
         """Anonymous types go through match tree building."""
-        types = analyze_text(
-            "foo$_ inner:[a:uint32] = Foo;", current_module=_TEST_MODULE
-        ).types
+        types = analyze_text("foo$_ inner:[a:uint32] = Foo;", current_module=_TEST_MODULE).types
         anon = [t for t in types if t.name == ""][0]
         assert anon.match_tree is not None
         assert isinstance(anon.match_tree, MatchConstructor)
@@ -1026,9 +1022,7 @@ class TestImports:
 
     def test_import_makes_type_visible(self):
         block_mod = Module("block")
-        block = analyze_text(
-            "currency$_ amount:uint64 = Currency;", current_module=block_mod
-        )
+        block = analyze_text("currency$_ amount:uint64 = Currency;", current_module=block_mod)
         types = analyze_text(
             "//@import block.tlb\nwallet$_ bal:Currency = Wallet;",
             current_module=Module("user"),
@@ -1062,9 +1056,7 @@ class TestImports:
 
     def test_local_shadows_import_silently(self):
         block_mod = Module("block")
-        block = analyze_text(
-            "currency$_ amount:uint64 = Currency;", current_module=block_mod
-        )
+        block = analyze_text("currency$_ amount:uint64 = Currency;", current_module=block_mod)
         user_mod = Module("user")
         types = analyze_text(
             "//@import block.tlb\ncurrency$_ x:uint32 = Currency;",

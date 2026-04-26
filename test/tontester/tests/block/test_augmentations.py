@@ -41,7 +41,6 @@ from pytoniq_core import Builder, Slice
 from tlb.hashmap import HashmapDict
 from tlb.object import AnyType, Ref, VarUIntTypeConstructor
 
-
 # ── Fixtures ────────────────────────────────────────────────────────────
 
 
@@ -119,7 +118,9 @@ def _make_message(*, info: int_msg_info | ext_in_msg_info | ext_out_msg_info) ->
     )
 
 
-def _make_message_ref(info: int_msg_info | ext_in_msg_info | ext_out_msg_info) -> Ref[message[Slice]]:
+def _make_message_ref(
+    info: int_msg_info | ext_in_msg_info | ext_out_msg_info,
+) -> Ref[message[Slice]]:
     return Ref(message[Slice].instantiate(AnyType), _make_message(info=info))
 
 
@@ -140,7 +141,8 @@ def _msg_envelope_v2(
 
 
 def _msg_envelope_old(
-    *, inner_info: int_msg_info | ext_in_msg_info | ext_out_msg_info | None = None,
+    *,
+    inner_info: int_msg_info | ext_in_msg_info | ext_out_msg_info | None = None,
 ) -> msg_envelope:
     info = inner_info if inner_info is not None else _ext_out_info(0)
     return msg_envelope(
@@ -215,12 +217,8 @@ class TestDepthBalanceAug:
         assert result.balance.grams.amount == 350
 
     def test_merge_sums_extras_per_currency(self):
-        a = depth_balance(
-            split_depth=0, balance=_balance(grams=0, extras={1: 50, 2: 100})
-        )
-        b = depth_balance(
-            split_depth=0, balance=_balance(grams=0, extras={1: 25, 3: 7})
-        )
+        a = depth_balance(split_depth=0, balance=_balance(grams=0, extras={1: 50, 2: 100}))
+        b = depth_balance(split_depth=0, balance=_balance(grams=0, extras={1: 25, 3: 7}))
         merged = DepthBalanceAug().merge(a, b).balance.other.dict
         assert merged[1] == 75
         assert merged[2] == 100

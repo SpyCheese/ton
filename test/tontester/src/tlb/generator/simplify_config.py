@@ -24,9 +24,7 @@ class SimplifyConfig:
 
     simplify: frozenset[WellKnownType] = field(default_factory=frozenset)
     inline_records: bool = False
-    aug_classes: Mapping[tuple[Module, str], str] = field(
-        default_factory=_empty_aug_classes
-    )
+    aug_classes: Mapping[tuple[Module, str], str] = field(default_factory=_empty_aug_classes)
 
     @staticmethod
     def all() -> SimplifyConfig:

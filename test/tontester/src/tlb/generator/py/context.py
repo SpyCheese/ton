@@ -132,8 +132,7 @@ class PyContext:
         )
         key = IdentityKey(t)
         assert key in manifest.type_names, (
-            f"foreign type {t.name!r} not present in manifest for module "
-            f"{t.origin_module.name!r}"
+            f"foreign type {t.name!r} not present in manifest for module {t.origin_module.name!r}"
         )
         source = manifest.type_names[key]
         bound = self.scope.bind(t, source)
@@ -271,7 +270,6 @@ class PyContext:
         for py_module in sorted(self.foreign_imports):
             names_map = self.foreign_imports[py_module]
             parts = [
-                src if src == bnd else f"{src} as {bnd}"
-                for src, bnd in sorted(names_map.items())
+                src if src == bnd else f"{src} as {bnd}" for src, bnd in sorted(names_map.items())
             ]
             sb.line(f"from {py_module} import {', '.join(parts)}")

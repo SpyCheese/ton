@@ -414,9 +414,7 @@ class TestConstraintDispatch:
 
     def test_constant_with_shared_value_error(self):
         with pytest.raises(SemaError, match="ambiguous"):
-            _ = analyze_text(
-                "a#_ x:uint32 = T 0; b#_ y:uint64 = T 0;", current_module=_TEST_MODULE
-            )
+            _ = analyze_text("a#_ x:uint32 = T 0; b#_ y:uint64 = T 0;", current_module=_TEST_MODULE)
 
     def test_split_on_second_param(self):
         tree, cons, t = analyze_cons(

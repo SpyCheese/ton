@@ -183,15 +183,11 @@ class HashmapAugStrategy(TypeStrategy):
     def type_info_expr(self) -> str:
         # Augmented HashmapDict can't be expressed as a TypeInfo without
         # carrying the aug — that path isn't needed for current uses.
-        raise AssertionError(
-            "TODO: HashmapAugStrategy used as a generic argument is not supported"
-        )
+        raise AssertionError("TODO: HashmapAugStrategy used as a generic argument is not supported")
 
     @override
     def type_info_expr_self(self) -> str:
-        raise AssertionError(
-            "TODO: HashmapAugStrategy used as a generic argument is not supported"
-        )
+        raise AssertionError("TODO: HashmapAugStrategy used as a generic argument is not supported")
 
     @override
     def emit_serialize_assertions(self, field_name: str, sb: SourceBuilder) -> bool:

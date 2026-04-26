@@ -30,9 +30,7 @@ def generate_tlb_python(
     augmentation classes without creating a circular import.
     """
     text = schema_path.read_text()
-    analyzed = analyze_text(
-        text, current_module=Module(schema_path.stem), imports=imports
-    )
+    analyzed = analyze_text(text, current_module=Module(schema_path.stem), imports=imports)
     aug_source = aug_source_path.read_text() if aug_source_path is not None else None
     code, manifest = generate_python(
         analyzed.types,
@@ -122,9 +120,7 @@ if __name__ == "__main__":
     # Generate block.tlb (test copy with inline_only for existing e2e tests)
     block_tlb = repo_root / "crypto/block/block.tlb"
     block_out = tlb_out / "block.py"
-    _ = generate_tlb_python(
-        block_tlb, block_out, py_module="generated.block", simplify=inline_only
-    )
+    _ = generate_tlb_python(block_tlb, block_out, py_module="generated.block", simplify=inline_only)
 
     # Generate block.tlb (full simplifications for the block module).
     # Only typedefs with hand-written augmentations are entered here; the

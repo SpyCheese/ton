@@ -26,9 +26,7 @@ class TestPyManifest:
         assert manifest.type_names[IdentityKey(foo)] == "Foo"
 
     def test_captures_constructor_names(self):
-        analyzed, _, manifest = _gen(
-            "bool_false$0 = Bool; bool_true$1 = Bool;"
-        )
+        analyzed, _, manifest = _gen("bool_false$0 = Bool; bool_true$1 = Bool;")
         bool_t = next(t for t in analyzed.types if t.name == "Bool")
         names = sorted(manifest.constructor_names[IdentityKey(c)] for c in bool_t.constructors)
         assert names == ["bool_false", "bool_true"]
@@ -58,7 +56,9 @@ class TestPyManifest:
             "currency$_ amount:uint64 = Currency;",
             current_module=Module("block"),
         )
-        _, block_manifest = generate_python(block.types, current_module=block.module, py_module="block.generated")
+        _, block_manifest = generate_python(
+            block.types, current_module=block.module, py_module="block.generated"
+        )
         consumer = analyze_text(
             "//@import block.tlb\nwallet$_ bal:Currency = Wallet;",
             current_module=Module("user"),
@@ -83,7 +83,9 @@ class TestPyManifest:
             "bool_false$0 = Bool; bool_true$1 = Bool;",
             current_module=Module("block"),
         )
-        _, block_manifest = generate_python(block.types, current_module=block.module, py_module="block.generated")
+        _, block_manifest = generate_python(
+            block.types, current_module=block.module, py_module="block.generated"
+        )
         consumer = analyze_text(
             "//@import block.tlb\nflag$_ b:Bool = Flag;",
             current_module=Module("user"),
@@ -105,15 +107,13 @@ class TestPyManifest:
             "foo$_ x:uint32 = Block;",
             current_module=Module("block"),
         )
-        _, block_manifest = generate_python(block.types, current_module=block.module, py_module="block.generated")
+        _, block_manifest = generate_python(
+            block.types, current_module=block.module, py_module="block.generated"
+        )
         # Consumer has its own `foo` constructor for an unrelated local type;
         # importing `Block` triggers binding `foo` from the foreign module too.
         consumer = analyze_text(
-            (
-                "//@import block.tlb\n"
-                "foo$_ y:uint16 = Local;\n"
-                "user$_ b:Block = User;"
-            ),
+            ("//@import block.tlb\nfoo$_ y:uint16 = Local;\nuser$_ b:Block = User;"),
             current_module=Module("user"),
             imports={"block.tlb": block},
         )
@@ -131,7 +131,9 @@ class TestPyManifest:
             "currency$_ amount:uint64 = Currency;",
             current_module=Module("block"),
         )
-        _, block_manifest = generate_python(block.types, current_module=block.module, py_module="block.generated")
+        _, block_manifest = generate_python(
+            block.types, current_module=block.module, py_module="block.generated"
+        )
         consumer = analyze_text(
             "//@import block.tlb\nwallet$_ bal:Currency = Wallet;",
             current_module=Module("user"),
@@ -148,7 +150,9 @@ class TestPyManifest:
 
     def test_unused_foreign_module_no_import(self):
         block = analyze_text("foo$_ x:uint32 = Foo;", current_module=Module("block"))
-        _, block_manifest = generate_python(block.types, current_module=block.module, py_module="block.generated")
+        _, block_manifest = generate_python(
+            block.types, current_module=block.module, py_module="block.generated"
+        )
         # Consumer imports block but never references any of its types.
         consumer = analyze_text(
             "//@import block.tlb\nlocal$_ x:uint32 = Local;",
@@ -169,8 +173,12 @@ class TestPyManifest:
             current_module=Module("block"),
         )
         other = analyze_text("foo$_ x:uint32 = Foo;", current_module=Module("other"))
-        _, block_manifest = generate_python(block.types, current_module=block.module, py_module="block.generated")
-        _, other_manifest = generate_python(other.types, current_module=other.module, py_module="other.generated")
+        _, block_manifest = generate_python(
+            block.types, current_module=block.module, py_module="block.generated"
+        )
+        _, other_manifest = generate_python(
+            other.types, current_module=other.module, py_module="other.generated"
+        )
         currency = next(t for t in block.types if t.name == "Currency")
         foo = next(t for t in other.types if t.name == "Foo")
         # Each manifest contains only its own module's bindings.

@@ -109,10 +109,7 @@ def _splice_aug_source(aug_source: str, ctx: PyContext) -> str:
                 )
             if name in introduced:
                 raise _AugSourceError(
-                    (
-                        f"line {node.lineno}: duplicate top-level name "
-                        f"{name!r} in aug source"
-                    )
+                    (f"line {node.lineno}: duplicate top-level name {name!r} in aug source")
                 )
             introduced.add(name)
         kept.append(node)
@@ -197,10 +194,7 @@ def _validate_aug_import(
                     )
                 if name not in runtime_names:
                     raise _AugSourceError(
-                        (
-                            f"line {node.lineno}: {name!r} not in codegen's "
-                            f"import list for {mod!r}"
-                        )
+                        (f"line {node.lineno}: {name!r} not in codegen's import list for {mod!r}")
                     )
                 ctx.use(name)
             return
@@ -210,10 +204,7 @@ def _validate_aug_import(
         for name, asname in aliased:
             if name not in foreign_names:
                 raise _AugSourceError(
-                    (
-                        f"line {node.lineno}: {name!r} not exported by "
-                        f"foreign module {mod!r}"
-                    )
+                    (f"line {node.lineno}: {name!r} not exported by foreign module {mod!r}")
                 )
             ctx.register_foreign_import(mod, name, asname)
         return
@@ -278,9 +269,7 @@ def generate_python(
         else:
             _ = ctx.bind_type(t, type_name)
             for c in t.constructors:
-                _ = ctx.bind_constructor(
-                    c, c.name or _anonymous_constructor_name(type_name, c)
-                )
+                _ = ctx.bind_constructor(c, c.name or _anonymous_constructor_name(type_name, c))
 
     # Bind TypeInfo class names for multi-constructor types AFTER all type
     # and constructor names are bound. This way user-defined names take their

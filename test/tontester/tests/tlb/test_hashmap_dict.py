@@ -297,9 +297,7 @@ class TestHashmapDict:
         assert new_right.get_hash(0) == pruned_right.get_hash(0)  # pyright: ignore[reportUnknownMemberType]
 
         # And re-loading the result lets us read back the new + original left keys.
-        d2 = HashmapDict[int].load_from(
-            new_cell.begin_parse(), 8, UintTypeConstructor(32)
-        )
+        d2 = HashmapDict[int].load_from(new_cell.begin_parse(), 8, UintTypeConstructor(32))
         assert d2[0] == 100
         assert d2[1] == 999
         # Right side still pruned — accessing 128 still raises.
