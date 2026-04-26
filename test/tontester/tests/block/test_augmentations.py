@@ -4,6 +4,7 @@ from bitarray import bitarray
 from block.generated import (
     AccountDispatchQueue,
     AccountType,
+    CommonMsgInfo,
     DepthBalanceAug,
     DispatchQueueAug,
     EnqueuedMsg,
@@ -26,7 +27,6 @@ from block.generated import (
     ext_in_msg_info,
     ext_out_msg_info,
     extra_currencies,
-    int_msg_info,
     interm_addr_regular,
     left,
     message,
@@ -39,7 +39,7 @@ from block.generated import (
 )
 from pytoniq_core import Builder, Slice
 from tlb.hashmap import HashmapDict
-from tlb.object import AnyType, Ref, VarUIntTypeConstructor
+from tlb.object import AnyType, Ref
 
 # ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -54,12 +54,9 @@ def _bits(n: int, width: int = 256) -> bitarray:
 
 
 def _balance(grams: int = 0, extras: dict[int, int] | None = None) -> currencies:
-    extras_dict: HashmapDict[int, None] = HashmapDict(32, VarUIntTypeConstructor(32))
-    for k, v in (extras or {}).items():
-        extras_dict[k] = v
     return currencies(
         grams=nanograms(amount=grams),
-        other=extra_currencies(dict=extras_dict),
+        other=extra_currencies(extras or {}),
     )
 
 
@@ -107,7 +104,7 @@ def _make_addr_std(workchain: int = 0, address_int: int = 1) -> addr_std:
     return addr_std(anycast=None, workchain_id=workchain, address=_bits(address_int))
 
 
-def _make_message(*, info: int_msg_info | ext_in_msg_info | ext_out_msg_info) -> message[Slice]:
+def _make_message(*, info: CommonMsgInfo) -> message[Slice]:
     """Build a Message[Slice] with a trivial empty-slice body and no init."""
     empty_slice = Builder().end_cell().begin_parse()
     return message[Slice](
@@ -118,16 +115,14 @@ def _make_message(*, info: int_msg_info | ext_in_msg_info | ext_out_msg_info) ->
     )
 
 
-def _make_message_ref(
-    info: int_msg_info | ext_in_msg_info | ext_out_msg_info,
-) -> Ref[message[Slice]]:
+def _make_message_ref(info: CommonMsgInfo) -> Ref[message[Slice]]:
     return Ref(message[Slice].instantiate(AnyType), _make_message(info=info))
 
 
 def _msg_envelope_v2(
     *,
     emitted_lt: int | None,
-    inner_info: int_msg_info | ext_in_msg_info | ext_out_msg_info | None = None,
+    inner_info: CommonMsgInfo | None = None,
 ) -> msg_envelope_v2:
     info = inner_info if inner_info is not None else _ext_out_info(0)
     return msg_envelope_v2(
@@ -142,7 +137,7 @@ def _msg_envelope_v2(
 
 def _msg_envelope_old(
     *,
-    inner_info: int_msg_info | ext_in_msg_info | ext_out_msg_info | None = None,
+    inner_info: CommonMsgInfo | None = None,
 ) -> msg_envelope:
     info = inner_info if inner_info is not None else _ext_out_info(0)
     return msg_envelope(
