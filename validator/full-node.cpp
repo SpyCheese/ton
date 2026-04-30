@@ -142,7 +142,6 @@ void FullNodeImpl::update_adnl_id(adnl::AdnlNodeIdShort adnl_id, td::Promise<td:
       td::actor::send_closure(s.second.actor, &FullNodeShard::update_adnl_id, adnl_id, ig.get_promise());
     }
   }
-  local_id_ = adnl_id_.pubkey_hash();
 
   for (auto &p : custom_overlays_) {
     update_custom_overlay(p.second);
@@ -780,8 +779,9 @@ void FullNodeImpl::update_custom_overlay(CustomOverlayInfo &overlay) {
         overlay.actors_[local_id] = std::move(it->second);
         old_actors.erase(it);
       } else {
+        auto adnl_sender = (params.use_quic_ ? td::actor::ActorId<adnl::AdnlSenderEx>{quic_} : rldp2_);
         overlay.actors_[local_id] = td::actor::create_actor<FullNodeCustomOverlay>(
-            "CustomOverlay", local_id, params, zero_state_file_hash_, opts_, keyring_, adnl_, rldp_, rldp2_, overlays_,
+            "CustomOverlay", local_id, params, zero_state_file_hash_, opts_, keyring_, adnl_, adnl_sender, overlays_,
             validator_manager_, actor_id(this));
       }
     }
@@ -917,6 +917,7 @@ CustomOverlayParams CustomOverlayParams::fetch(const ton_api::engine_validator_c
     c.sender_shards_.push_back(create_shard_id(shard));
   }
   c.skip_public_msg_send_ = f.skip_public_msg_send_;
+  c.use_quic_ = f.use_quic_;
   return c;
 }
 

@@ -94,7 +94,7 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
   void set_default_mtu(td::uint64 mtu);
   void set_peer_mtu(adnl::AdnlNodeIdShort peer_id, td::uint64 mtu);
 
-  constexpr static size_t DEFAULT_FLOOD_CONTROL = 10;
+  constexpr static size_t DEFAULT_FLOOD_CONTROL = 1000;
 
   QuicServer(td::UdpSocketFd fd, td::Ed25519::PrivateKey server_key, td::uint64 defaukt_mtu, td::BufferSlice alpn,
              std::unique_ptr<Callback> callback, Options options,
@@ -115,9 +115,11 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
 
       Entry operator+(const Entry &other) const {
         Entry res = {.total_conns = total_conns + other.total_conns, .impl_stats = impl_stats + other.impl_stats};
-        res.impl_stats.mean_rtt = (static_cast<double>(total_conns) * impl_stats.mean_rtt +
-                                   static_cast<double>(other.total_conns) * other.impl_stats.mean_rtt) /
-                                  static_cast<double>(total_conns + other.total_conns);
+        auto tc = total_conns + other.total_conns;
+        if (tc > 0)
+          res.impl_stats.mean_rtt = (static_cast<double>(total_conns) * impl_stats.mean_rtt +
+                                     static_cast<double>(other.total_conns) * other.impl_stats.mean_rtt) /
+                                    static_cast<double>(tc);
         return res;
       }
 
@@ -126,8 +128,9 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
         res.impl_stats.mean_rtt = impl_stats.mean_rtt;
         return res;
       }
+    };
 
-    } summary = {};
+    Entry summary = {.total_conns = 0};
     std::unordered_map<QuicConnectionId, Entry> per_conn = {};
   };
 
