@@ -40,6 +40,7 @@ enum TokenType {
   tok_self,
 
   tok_annotation_at,
+  tok_doc_comment,
   tok_colon,
   tok_asm,
   tok_builtin,
@@ -125,6 +126,7 @@ enum TokenType {
   tok_double_arrow,
   tok_as,
   tok_is,
+  tok_not_is,
   tok_double_question,
 
   tok_tolk,
@@ -171,7 +173,7 @@ public:
     Token cur_token;
   };
 
-  explicit Lexer(const SrcFile* file);
+  explicit Lexer(SrcFilePtr file);
   Lexer(const Lexer&) = delete;
   Lexer &operator=(const Lexer&) = delete;
 

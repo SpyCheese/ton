@@ -16,6 +16,8 @@
 */
 #include "tolk.h"
 
+#include <cctype>
+
 namespace tolk {
 
 /*
@@ -23,6 +25,21 @@ namespace tolk {
  *   PEEPHOLE OPTIMIZER
  * 
  */
+
+// detect "8 STU" and "19 THROWIF", but skip "DUP 8 STU" and "SMTH 19 THROWIF" (that can come from `asm` functions)
+static bool is_single_arg_op_ending_with(std::string_view op, std::string_view suffix) {
+  if (!op.ends_with(suffix) || op.size() == suffix.size()) {
+    return false;
+  }
+
+  std::string_view prefix = op.substr(0, op.size() - suffix.size());
+  for (char c : prefix) {
+    if (std::isspace(static_cast<unsigned char>(c))) {
+      return false;
+    }
+  }
+  return true;
+}
 
 void Optimizer::unpack() {
   int len = static_cast<int>(asm_code.size());
@@ -32,7 +49,7 @@ void Optimizer::unpack() {
     if (cur->is_very_custom()) {
       break;
     }
-    if (cur->is_comment()) {
+    if (cur->is_debug_mark()) {
       continue;
     }
     op_[i++] = cur;
@@ -52,10 +69,14 @@ void Optimizer::apply() {
   // asm_code = [ ... "a b", "2DUP", "a b a b" ... ]
   // (the forwarding comment "a b a b" remains the layout after Q operations, since the replacement is identical,
   //  but if Q>1, we have no stack info between them)
+  std::vector<AsmOp> reappend_debug_marks;
   int delete_count = 0;
   for (int i = 0, end_offset = start_offset; i < p_; ++i) {
     tolk_assert(end_offset < static_cast<int>(asm_code.size()));
-    while (asm_code[end_offset].is_comment()) {
+    while (asm_code[end_offset].is_debug_mark()) {
+      if (!std::holds_alternative<DebugMarkCurrentStack>(asm_code[end_offset].debug_mark)) {
+        reappend_debug_marks.push_back(asm_code[end_offset]);
+      }
       delete_count++;
       end_offset++;
     }
@@ -65,6 +86,7 @@ void Optimizer::apply() {
 
   asm_code.erase(asm_code.begin() + start_offset, asm_code.begin() + start_offset + delete_count);
   asm_code.insert(asm_code.begin() + start_offset, oq_, oq_ + insert_count);
+  asm_code.insert(asm_code.begin() + start_offset + insert_count, reappend_debug_marks.begin(), reappend_debug_marks.end());
 
   unpack();
 }
@@ -84,7 +106,7 @@ bool Optimizer::find_const_op(int* op_idx, int cst) {
 // used for `T.fromSlice(s, {code:0xFFFF})`, where `tmp = 0xFFFF` + serialization match + `else throw tmp` is generated;
 // but since it's constant, it transforms to (unused 0xFFFF) + ... + else "65535 THROW", unwrapped here
 bool Optimizer::detect_rewrite_big_THROW() {
-  bool is_throw = op_[0]->is_custom() && op_[0]->op.ends_with(" THROW");
+  bool is_throw = is_single_arg_op_ending_with(op_[0]->op, " THROW");
   if (!is_throw) {
     return false;
   }
@@ -193,7 +215,12 @@ bool Optimizer::detect_rewrite_MY_skip_bits() {
     }
 
     std::string s_number(s_op_len.substr(s_op_len.find(' ') + 1));
-    total_skip_bits += std::stoi(s_number); // it's a small number, stoi() is safe
+    int n_skip = std::stoi(s_number);   // it's a small number, stoi() is safe
+    if (total_skip_bits + n_skip > 1023) {
+      break;
+    }
+
+    total_skip_bits += n_skip;
     n_merged++;
   }
 
@@ -218,11 +245,12 @@ bool Optimizer::detect_rewrite_NEWC_PUSH_STUR() {
   if (!first_newc || pb_ < 3) {
     return false;
   }
-  bool next_push = op_[1]->is_const() && op_[1]->op.ends_with(" PUSHINT");  // actually there can be PUSHPOWDEC2, but ok
+  bool next_push = is_single_arg_op_ending_with(op_[1]->op, " PUSHINT");  // actually there can be PUSHPOWDEC2, but ok
   if (!next_push) {
     return false;
   }
-  bool next_stu_r = op_[2]->is_custom() && (op_[2]->op.ends_with(" STUR") || op_[2]->op.ends_with(" STIR"));
+  bool next_stu_r = is_single_arg_op_ending_with(op_[2]->op, " STUR") ||
+                    is_single_arg_op_ending_with(op_[2]->op, " STIR");
   if (!next_stu_r) {
     return false;
   }
@@ -250,7 +278,7 @@ bool Optimizer::detect_rewrite_LDxx_DROP() {
 
   std::string_view f = op_[0]->op;
   for (size_t i = 0; i < std::size(ends_with); ++i) {
-    if (f.ends_with(ends_with[i])) {
+    if (is_single_arg_op_ending_with(op_[0]->op, ends_with[i])) {
       p_ = 2;
       q_ = 1;
       oq_[0] = AsmOp::Custom(op_[0]->origin, op_[0]->op.substr(0, f.rfind(' ')) + repl_with[i], 0, 1);
@@ -295,11 +323,12 @@ bool Optimizer::detect_rewrite_SWAP_PUSH_STUR() {
   if (!first_swap || pb_ < 3) {
     return false;
   }
-  bool next_push = op_[1]->is_const() && op_[1]->op.ends_with(" PUSHINT");
+  bool next_push = is_single_arg_op_ending_with(op_[1]->op, " PUSHINT");
   if (!next_push) {
     return false;
   }
-  bool next_stu_r = op_[2]->is_custom() && (op_[2]->op.ends_with(" STUR") || op_[2]->op.ends_with(" STIR"));
+  bool next_stu_r = is_single_arg_op_ending_with(op_[2]->op, " STUR") ||
+                    is_single_arg_op_ending_with(op_[2]->op, " STIR");
   if (!next_stu_r) {
     return false;
   }
@@ -316,7 +345,7 @@ bool Optimizer::detect_rewrite_SWAP_PUSH_STUR() {
 // same for `STB` / `STREF` / `n STU` / `n STI`
 bool Optimizer::detect_rewrite_SWAP_STxxxR() {
   bool first_swap = op_[0]->is_swap();
-  if (!first_swap || pb_ < 2 || !op_[1]->is_custom()) {
+  if (!first_swap || pb_ < 2) {
     return false;
   }
 
@@ -327,10 +356,10 @@ bool Optimizer::detect_rewrite_SWAP_STxxxR() {
 
   std::string_view f = op_[1]->op;
   for (size_t i = 0; i < std::size(ends_with); ++i) {
-    if (f.ends_with(ends_with[i])) {
+    if (is_single_arg_op_ending_with(op_[1]->op, ends_with[i])) {
       p_ = 2;
       q_ = 1;
-      oq_[0] = AsmOp::Custom(op_[0]->origin, op_[1]->op.substr(0, f.rfind(' ')) + repl_with[i], 1, 1);
+      oq_[0] = AsmOp::Custom(op_[1]->origin, op_[1]->op.substr(0, f.rfind(' ')) + repl_with[i], 1, 1);
       return true;
     }
   }
@@ -338,7 +367,7 @@ bool Optimizer::detect_rewrite_SWAP_STxxxR() {
     if (f == equl_to[i]) {
       p_ = 2;
       q_ = 1;
-      oq_[0] = AsmOp::Custom(op_[0]->origin, repl_to[i], 0, 1);
+      oq_[0] = AsmOp::Custom(op_[1]->origin, repl_to[i], 0, 1);
       return true;
     }
   }
@@ -351,7 +380,7 @@ bool Optimizer::detect_rewrite_SWAP_STxxxR() {
 // for logical negation `!boolVar`, a special fake `BOOLNOT` instruction was inserted
 bool Optimizer::detect_rewrite_BOOLNOT_THROWIF() {
   bool first_bool_not = op_[0]->is_custom() && op_[0]->op == "BOOLNOT";
-  if (!first_bool_not || pb_ < 2 || !op_[1]->is_custom()) {
+  if (!first_bool_not || pb_ < 2) {
     return false;
   }
 
@@ -360,11 +389,11 @@ bool Optimizer::detect_rewrite_BOOLNOT_THROWIF() {
 
   std::string_view f = op_[1]->op;
   for (size_t i = 0; i < std::size(ends_with); ++i) {
-    if (f.ends_with(ends_with[i])) {
+    if (is_single_arg_op_ending_with(op_[1]->op, ends_with[i])) {
       p_ = 2;
       q_ = 1;
       std::string new_op = op_[1]->op.substr(0, f.rfind(' ')) + repl_with[i];
-      oq_[0] = AsmOp::Custom(op_[0]->origin, new_op, 1, 0);
+      oq_[0] = AsmOp::Custom(op_[1]->origin, new_op, 1, 0);
       return true;
     }
   }
@@ -377,7 +406,7 @@ bool Optimizer::detect_rewrite_BOOLNOT_THROWIF() {
 // particularly, this helps to optimize code like `assert (v == 0, N)` with just one `N THROWIF`
 bool Optimizer::detect_rewrite_0EQINT_THROWIF() {
   bool first_0eqint = op_[0]->is_custom() && (op_[0]->op == "0 EQINT" || op_[0]->op == "0 NEQINT");
-  if (!first_0eqint || pb_ < 2 || !op_[1]->is_custom()) {
+  if (!first_0eqint || pb_ < 2) {
     return false;
   }
 
@@ -386,7 +415,7 @@ bool Optimizer::detect_rewrite_0EQINT_THROWIF() {
 
   std::string_view f = op_[1]->op;
   for (size_t i = 0; i < std::size(ends_with); ++i) {
-    if (f.ends_with(ends_with[i])) {
+    if (is_single_arg_op_ending_with(op_[1]->op, ends_with[i])) {
       bool drop_cond = op_[0]->op == "0 NEQINT";
       p_ = 2;
       q_ = 1;
@@ -394,7 +423,7 @@ bool Optimizer::detect_rewrite_0EQINT_THROWIF() {
         oq_[0] = *op_[1];
       } else {
         std::string new_op = op_[1]->op.substr(0, f.rfind(' ')) + repl_with[i];
-        oq_[0] = AsmOp::Custom(op_[0]->origin, new_op, 1, 0);
+        oq_[0] = AsmOp::Custom(op_[1]->origin, new_op, 1, 0);
       }
       return true;
     }
@@ -406,15 +435,17 @@ bool Optimizer::detect_rewrite_0EQINT_THROWIF() {
 // pattern `NEWC` + store const slice + XCHG + keyLen + DICTSETB -> push const slice + XCHG + keyLen + DICTSET
 // (useful for `someMap.set(k, constVal)` where constVal is represented as a const slice)
 bool Optimizer::detect_rewrite_DICTSETB_DICTSET() {
-  bool fifth_dict = pb_ >= 5 && op_[4]->is_custom() && op_[4]->op.starts_with("DICT");
+  bool fifth_dict = pb_ >= 5 && op_[4]->is_custom() && op_[4]->op.starts_with("DICT") &&
+                    op_[4]->op.find("()") == std::string::npos;
   if (!fifth_dict) {
     return false;
   }
 
   bool first_newc = op_[0]->op == "NEWC";
-  bool second_stsliceconst = op_[1]->op.ends_with(" STSLICECONST");
-  bool third_xchg = op_[2]->is_xchg() || op_[2]->op == "ROT" || op_[2]->op == "-ROT" || op_[2]->op.ends_with(" PUXC");
-  bool fourth_pushint = op_[3]->is_const() && op_[3]->op.ends_with(" PUSHINT");
+  bool second_stsliceconst = is_single_arg_op_ending_with(op_[1]->op, " STSLICECONST");
+  // DICT*SETB consumes `value key dict keyLen`, so before pushing keyLen the constant builder must be at s2
+  bool third_xchg = op_[2]->is_xchg(0, 2) || op_[2]->op == "-ROT" || op_[2]->op == "s2 s1 PUXC";
+  bool fourth_pushint = is_single_arg_op_ending_with(op_[3]->op, " PUSHINT");
   if (!first_newc || !second_stsliceconst || !third_xchg || !fourth_pushint) {
     return false;
   }
@@ -443,8 +474,8 @@ bool Optimizer::detect_rewrite_DICTSETB_DICTSET() {
 // especially useful for `dict.mustGet()` method with a small constant errno if a key not exists
 // (for large or dynamic excno, it's XCHGed from a stack, we need to keep stack aligned, don't remove nullswap)
 bool Optimizer::detect_rewrite_DICTGET_NULLSWAPIFNOT_THROWIFNOT() {
-  bool second_nullswap = pb_ >= 2 && op_[0]->is_custom() && op_[0]->op.ends_with(" NULLSWAPIFNOT");
-  if (!second_nullswap || !op_[1]->op.ends_with(" THROWIFNOT")) {
+  bool second_nullswap = pb_ >= 2 && is_single_arg_op_ending_with(op_[0]->op, " NULLSWAPIFNOT");
+  if (!second_nullswap || !is_single_arg_op_ending_with(op_[1]->op, " THROWIFNOT")) {
     return false;
   }
 
@@ -456,7 +487,7 @@ bool Optimizer::detect_rewrite_DICTGET_NULLSWAPIFNOT_THROWIFNOT() {
   p_ = 2;
   q_ = 2;
   std::string new_op = op0.substr(0, op0.rfind(' '));
-  oq_[0] = AsmOp::Custom(op_[0]->origin, new_op, 3, 2);
+  oq_[0] = AsmOp::Custom(op_[1]->origin, new_op, 3, 2);
   oq_[1] = *op_[1];
   return true;
 }
@@ -475,7 +506,7 @@ bool Optimizer::detect_rewrite_ENDC_CTOS() {
 
   p_ = 2;
   q_ = 1;
-  oq_[0] = AsmOp::Custom(op_[0]->origin, "BTOS", 1, 1);
+  oq_[0] = AsmOp::Custom(op_[1]->origin, "BTOS", 1, 1);
   return true;
 }
 
@@ -493,7 +524,7 @@ bool Optimizer::detect_rewrite_ENDC_HASHCU() {
 
   p_ = 2;
   q_ = 1;
-  oq_[0] = AsmOp::Custom(op_[0]->origin, "HASHBU", 1, 1);
+  oq_[0] = AsmOp::Custom(op_[1]->origin, "HASHBU", 1, 1);
   return true;
 }
 
@@ -511,7 +542,7 @@ bool Optimizer::detect_rewrite_NEWC_BTOS() {
 
   p_ = 2;
   q_ = 1;
-  oq_[0] = AsmOp::Custom(op_[0]->origin, "x{} PUSHSLICE", 0, 1);
+  oq_[0] = AsmOp::Custom(op_[1]->origin, "x{} PUSHSLICE", 0, 1);
   return true;
 }
 
@@ -522,7 +553,7 @@ bool Optimizer::detect_rewrite_NEWC_STSLICECONST_BTOS() {
     return false;
   }
 
-  bool next_stsliceconst = op_[1]->is_custom() && op_[1]->op.ends_with(" STSLICECONST");
+  bool next_stsliceconst = is_single_arg_op_ending_with(op_[1]->op, " STSLICECONST");
   bool next_btos = op_[2]->is_custom() && op_[2]->op == "BTOS";
   if (!next_stsliceconst || !next_btos) {
     return false;
@@ -531,7 +562,7 @@ bool Optimizer::detect_rewrite_NEWC_STSLICECONST_BTOS() {
   std::string op_pushslice = op_[1]->op.substr(0, op_[1]->op.rfind(' ')) + " PUSHSLICE";
   p_ = 3;
   q_ = 1;
-  oq_[0] = AsmOp::Custom(op_[0]->origin, op_pushslice, 0, 1);
+  oq_[0] = AsmOp::Custom(op_[2]->origin, op_pushslice, 0, 1);
   return true;
 }
 
@@ -551,7 +582,7 @@ bool Optimizer::detect_rewrite_NEWC_ENDC_CTOS() {
 
   p_ = 3;
   q_ = 1;
-  oq_[0] = AsmOp::Custom(op_[0]->origin, "x{} PUSHSLICE", 0, 1);
+  oq_[0] = AsmOp::Custom(op_[2]->origin, "x{} PUSHSLICE", 0, 1);
   return true;
 }
 
@@ -569,7 +600,7 @@ bool Optimizer::detect_rewrite_NEWC_ENDC() {
 
   p_ = 2;
   q_ = 1;
-  oq_[0] = AsmOp::Custom(op_[0]->origin, "<b b> PUSHREF", 0, 1);
+  oq_[0] = AsmOp::Custom(op_[1]->origin, "<b b> PUSHREF", 0, 1);
   return true;
 }
 
@@ -592,13 +623,13 @@ bool Optimizer::detect_rewrite_emptySlice_ENDS() {
 
 // pattern `N TUPLE` + `N UNTUPLE` -> nothing (but not vice versa, since `UNTUPLE` may throw)
 bool Optimizer::detect_rewrite_N_TUPLE_N_UNTUPLE() {
-  bool first_tuple = op_[0]->op.ends_with(" TUPLE");
-  if (!first_tuple || op_[0]->op.find(' ') != op_[0]->op.rfind(' ') || pb_ < 2) {
+  bool first_tuple = is_single_arg_op_ending_with(op_[0]->op, " TUPLE");
+  if (!first_tuple || pb_ < 2) {
     return false;
   }
 
-  bool second_untuple = op_[1]->op.ends_with(" UNTUPLE");
-  if (!second_untuple || op_[1]->op.find(' ') != op_[1]->op.rfind(' ')) {
+  bool second_untuple = is_single_arg_op_ending_with(op_[1]->op, " UNTUPLE");
+  if (!second_untuple) {
     return false;
   }
 
@@ -639,7 +670,7 @@ bool Optimizer::detect_rewrite_PUSHREF_CTOS() {
   p_ = 2;
   q_ = 1;
   std::string op = "x{" + std::string(hex) + "} PUSHSLICE";
-  oq_[0] = AsmOp::Custom(op_[0]->origin, op, 0, 1);
+  oq_[0] = AsmOp::Custom(op_[1]->origin, op, 0, 1);
   if (op_[1]->op == "CTOS STRDUMP DROP") {    // debug.printString("str")
     q_ = 2;
     oq_[1] = AsmOp::Custom(op_[1]->origin, "STRDUMP DROP", 1, 0);
@@ -663,11 +694,11 @@ bool Optimizer::detect_rewrite_xxx_NOT() {
 
   std::string_view f = op_[0]->op;
   for (size_t i = 0; i < std::size(ends_with); ++i) {
-    if (f.ends_with(ends_with[i])) {
+    if (is_single_arg_op_ending_with(op_[0]->op, ends_with[i])) {
       p_ = 2;
       q_ = 1;
       std::string new_op = op_[0]->op.substr(0, f.rfind(' ')) + repl_with[i];
-      oq_[0] = AsmOp::Custom(op_[0]->origin, new_op, 0, 1);
+      oq_[0] = AsmOp::Custom(op_[1]->origin, new_op, 0, 1);
       return true;
     }
   }
@@ -675,14 +706,15 @@ bool Optimizer::detect_rewrite_xxx_NOT() {
     if (f == equl_to[i]) {
       p_ = 2;
       q_ = 1;
-      oq_[0] = AsmOp::Custom(op_[0]->origin, repl_to[i], 2, 1);
+      oq_[0] = AsmOp::Custom(op_[1]->origin, repl_to[i], 2, 1);
       return true;
     }
   }
   // `!(a > 7)` -> `a <= 7` -> `a < 8` (but `GTINT` instead of `GREATER` for small numbers)
   // `7 GTINT` + `NOT` -> `8 LESSINT` (there is no `LEINT` instruction)
   // `8 LESSINT` + `NOT` -> `7 GTINT`
-  if (f.ends_with(" GTINT") || f.ends_with(" LESSINT")) {
+  if (is_single_arg_op_ending_with(op_[0]->op, " GTINT") ||
+      is_single_arg_op_ending_with(op_[0]->op, " LESSINT")) {
     bool is_gtint = f.ends_with(" GTINT");
     std::string s_number(f.substr(0, f.rfind(' ')));
     td::RefInt256 number = td::string_to_int256(s_number);
@@ -694,7 +726,7 @@ bool Optimizer::detect_rewrite_xxx_NOT() {
       p_ = 2;
       q_ = 1;
       std::string new_op = number->to_dec_string() + (is_gtint ? " LESSINT" : " GTINT");
-      oq_[0] = AsmOp::Custom(op_[0]->origin, new_op, 2, 1);
+      oq_[0] = AsmOp::Custom(op_[1]->origin, new_op, 2, 1);
       return true;
     }
   }
@@ -1150,7 +1182,7 @@ static std::vector<AsmOp> optimize_code_head(std::vector<AsmOp>&& asm_code, int 
 
 static std::vector<AsmOp> optimize_asm_code(std::vector<AsmOp>&& asm_code, int mode, bool& any_changed) {
   for (int i = 0; i < static_cast<int>(asm_code.size()); ++i) {
-    if (!asm_code[i].is_comment()) {
+    if (!asm_code[i].is_debug_mark()) {
       asm_code = optimize_code_head(std::move(asm_code), i, mode, any_changed);
     }
   }

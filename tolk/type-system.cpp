@@ -111,6 +111,13 @@ TypePtr TypeData::unwrap_alias_slow_path(TypePtr lhs) {
   return unwrapped;
 }
 
+bool TypeData::is_cell_or_CellT() const {
+  if (const TypeDataStruct* t_struct = this->try_as<TypeDataStruct>()) {
+    return t_struct->struct_ref->is_instantiation_of_CellT();
+  }
+  return this == TypeDataCell::create();
+}
+
 // having `type UserId = int` and `type OwnerId = int` (when their underlying types are equal),
 // make `UserId` and `OwnerId` NOT equal and NOT assignable (although they'll have the same type_id);
 // it allows overloading methods for these types independently, e.g.
@@ -123,7 +130,8 @@ static bool are_two_equal_type_aliases_different(const TypeDataAlias* t1, const 
     return false;
   }
   if (t1->alias_ref->is_instantiation_of_generic_alias() && t2->alias_ref->is_instantiation_of_generic_alias()) {
-    return !t1->alias_ref->substitutedTs->equal_to(t2->alias_ref->substitutedTs);
+    return t1->alias_ref->base_alias_ref != t2->alias_ref->base_alias_ref
+       || !t1->alias_ref->substitutedTs->equal_to(t2->alias_ref->substitutedTs);
   }
   // handle `type MInt2 = MInt1`, as well as `type BalanceList = dict`, then they are equal
   const TypeDataAlias* t_und1 = t1->underlying_type->try_as<TypeDataAlias>();
@@ -209,19 +217,19 @@ TypePtr TypeDataBitsN::create(int n_width, bool is_bits) {
   return new TypeDataBitsN(n_width, is_bits);
 }
 
-TypePtr TypeDataUnion::create(std::vector<TypePtr>&& variants) {
+TypePtr TypeDataUnion::create(std::vector<TypePtr>&& variants, std::vector<InvalidDuplicateVariant>* out_invalid_duplicates) {
   // flatten variants and remove duplicates
   // note, that `int | slice` and `int | int | slice` are different TypePtr, but actually the same variants;
-  // note, that `UserId | OwnerId` (both are aliases to `int`) will emit `UserId` (OwnerId is a duplicate)
+  // note that `AliasToInt | int` is rejected: out_invalid_duplicates is filled, and fired while resolving AST types
   std::vector<TypePtr> flat_variants;
   flat_variants.reserve(variants.size());
   for (TypePtr variant : variants) {
     if (const TypeDataUnion* nested_union = variant->unwrap_alias()->try_as<TypeDataUnion>()) {
       for (TypePtr nested_variant : nested_union->variants) {
-        append_union_type_variant(nested_variant, flat_variants);
+        append_union_type_variant(nested_variant, flat_variants, out_invalid_duplicates);
       }
     } else {
-      append_union_type_variant(variant, flat_variants);
+      append_union_type_variant(variant, flat_variants, out_invalid_duplicates);
     }
   }
   // detect, whether it's `T?` or `T1 | T2 | ...`
@@ -369,7 +377,7 @@ int TypeDataTensor::get_type_id() const {
 }
 
 int TypeDataIntN::get_type_id() const {
-  switch (n_bits) {
+  switch (n_bits * !is_variadic) {
     case 8:   return type_id_int8   + is_unsigned;    // for common intN, use predefined small numbers
     case 16:  return type_id_int16  + is_unsigned;
     case 32:  return type_id_int32  + is_unsigned;
@@ -525,6 +533,9 @@ std::string TypeDataMapKV::as_human_readable() const {
 }
 
 
+// as_abi_json() implementations are in type-export-json.cpp
+
+
 // --------------------------------------------
 //    replace_children_custom()
 //
@@ -612,6 +623,9 @@ bool TypeDataInt::can_rhs_be_assigned(TypePtr rhs) const {
     return true;
   }
   if (rhs->try_as<TypeDataIntN>()) {
+    return true;
+  }
+  if (rhs->try_as<TypeDataEnum>()) {
     return true;
   }
   if (rhs == TypeDataCoins::create()) {
@@ -804,6 +818,10 @@ bool TypeDataTensor::can_rhs_be_assigned(TypePtr rhs) const {
 bool TypeDataIntN::can_rhs_be_assigned(TypePtr rhs) const {
   if (rhs == TypeDataInt::create()) {
     return true;
+  }
+  if (rhs->try_as<TypeDataEnum>()) {
+    // `ExitCode.NotOwner` can be assigned to `int32`; we don't check that it fits N, just accept
+    return !is_variadic;
   }
   if (const TypeDataIntN* rhs_intN = rhs->try_as<TypeDataIntN>()) {
     // `int8` is NOT assignable to `int32` without `as`
@@ -1200,7 +1218,7 @@ bool TypeDataMapKV::can_be_casted_with_as_operator(TypePtr cast_to) const {
 
 bool TypeDataUnknown::can_be_casted_with_as_operator(TypePtr cast_to) const {
   // anything be cast to `unknown` and back (if T occupies not 1 stack slot, it's converted into a tuple)
-  return true;
+  return cast_to != TypeDataNever::create();
 }
 
 bool TypeDataNotInferred::can_be_casted_with_as_operator(TypePtr cast_to) const {
@@ -1212,6 +1230,12 @@ bool TypeDataNever::can_be_casted_with_as_operator(TypePtr cast_to) const {
 }
 
 bool TypeDataVoid::can_be_casted_with_as_operator(TypePtr cast_to) const {
+  if (const TypeDataUnion* to_union = cast_to->try_as<TypeDataUnion>()) {  // `void` to `T | void`
+    return to_union->calculate_exact_variant_to_fit_rhs(this);
+  }
+  if (const TypeDataAlias* to_alias = cast_to->try_as<TypeDataAlias>()) {
+    return can_be_casted_with_as_operator(to_alias->underlying_type);
+  }
   return cast_to == singleton || cast_to == TypeDataUnknown::create();
 }
 
@@ -1227,6 +1251,10 @@ bool TypeDataVoid::can_be_casted_with_as_operator(TypePtr cast_to) const {
 
 bool TypeDataAlias::can_hold_tvm_null_instead() const {
   return underlying_type->can_hold_tvm_null_instead();
+}
+
+bool TypeDataNullLiteral::can_hold_tvm_null_instead() const {
+  return false;
 }
 
 bool TypeDataStruct::can_hold_tvm_null_instead() const {
@@ -1443,13 +1471,16 @@ bool TypeDataMapKV::equal_to(TypePtr rhs) const {
 }
 
 
-// union types creation is a bit tricky: nested unions are flattened, duplicates are removed
-// so, a resolved union type has variants, each will be assigned a unique type_id (tagged unions)
-void TypeDataUnion::append_union_type_variant(TypePtr variant, std::vector<TypePtr>& out_unique_variants) {
-  // having `UserId | OwnerId` (both are aliases to `int`) merge them into just `UserId`, because underlying are equal
+void TypeDataUnion::append_union_type_variant(TypePtr variant, std::vector<TypePtr>& out_unique_variants, std::vector<InvalidDuplicateVariant>* out_invalid_duplicates) {
   TypePtr underlying_variant = variant->unwrap_alias();
   for (TypePtr existing : out_unique_variants) {
     if (existing->equal_to(underlying_variant)) {
+      // we allow `int | int`, but disallow `AliasToInt | int` as identical runtime representation;
+      // the same disallows `Wrapper<int|slice> | Wrapper<slice|int>`
+      bool is_invalid = existing->as_human_readable() != variant->as_human_readable();
+      if (out_invalid_duplicates && is_invalid) {
+        out_invalid_duplicates->emplace_back(existing, variant);
+      }
       return;
     }
   }
