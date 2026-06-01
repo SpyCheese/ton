@@ -1,5 +1,6 @@
 import "@stdlib/lisp-lists"
 import "@stdlib/strings"
+import "@stdlib/tvm-dicts"
 
 struct JustInt32 {
     v: MInt32
@@ -40,6 +41,12 @@ enum HashMode: uint16 {
     TotalHash = 255,
 }
 
+enum SignedKey: int8 {
+    Neg = -1,
+    Zero = 0,
+    Pos = 1,
+}
+
 fun map<K, V>.calculateSize(self) {
     var size = 0;
     var r = self.findFirst();
@@ -50,10 +57,37 @@ fun map<K, V>.calculateSize(self) {
     return size;
 }
 
+struct SSSet<T> {
+    // SSSet<T> is not initialized, check that generic T as a key does not trigger errors
+    private m: map<T, ()>
+}
+
 
 struct LinkedMap {
     values: array<int8>
     tree: map<int32, LinkedMap> = []
+}
+
+global gPackCalled: int;
+
+struct GenericValueInMap<T> {
+    value: T
+}
+
+fun GenericValueInMap<T>.packToBuilder(self, mutate b: builder) {
+    gPackCalled += 1;
+    b.storeUint(255, 8);
+    b.storeAny<T>(self.value);
+}
+
+fun GenericValueInMap<T>.unpackFromSlice(mutate s: slice): GenericValueInMap<T> {
+    gPackCalled += 10;
+    s.skipBits(8);
+    return { value: s.loadAny<T>() };
+}
+
+struct HolderWithGenericValueMap {
+    m: map<int32, GenericValueInMap<int8>>
 }
 
 fun LinkedMap.flattenValuesInto<T>(self, mutate out: array<T>): void {
@@ -611,6 +645,77 @@ fun test45() {
     )
 }
 
+fun checkMapSetSnapshot(before: map<int32, int32>, after: map<int32, int32>): (int, int) {
+    return (before.exists(1) ? 1 : 0, after.exists(1) ? 1 : 0);
+}
+
+@method_id(146)
+fun test46() {
+    var m = map<int32, int32> [];
+    return checkMapSetSnapshot(m, m.set(1, 42));
+}
+
+@method_id(147)
+fun test47() {
+    gPackCalled = 0;
+    var m = map<int32, GenericValueInMap<int8>> [];
+    m.set(1, { value: 42 });
+    return (HolderWithGenericValueMap { m }.toCell().beginParse().remainingBitsAndRefsCount(), m.mustGet(1).value, gPackCalled);
+}
+
+fun requireFound(r: MapLookupResult<int32>): void
+    asm "NIP 111 THROWIFNOT"
+
+@method_id(148)
+fun test48() {
+    var m = map<int32, int32> [];
+    try {
+        val r = m.get(7);
+        requireFound(r);
+        return 1;
+    } catch (ex, arg) {
+        return ex;
+    }
+}
+
+fun replaceWithAA(mutate b: builder): void
+    asm "DROP NEWC x{aa} STSLICECONST"
+
+struct MarkerWithCustomSerializer {}
+
+fun MarkerWithCustomSerializer.packToBuilder(self, mutate b: builder) {
+    replaceWithAA(mutate b);
+}
+
+fun MarkerWithCustomSerializer.unpackFromSlice(mutate s: slice): MarkerWithCustomSerializer {
+    s.skipBits(8);
+    return {};
+}
+
+@method_id(149)
+fun test49() {
+    var m = map<uint8, MarkerWithCustomSerializer> [];
+    try {
+        m.set(7, {});
+        return m.exists(7) as int;
+    } catch (errCode) {
+        return errCode;
+    }
+}
+
+@method_id(150)
+fun test50(x: int): int {
+    var d = createEmptyDict();
+    val valueBuilder = beginCell().storeUint(x, 16);
+    val key = 1;
+    val keepBuilder = beginCell().storeUint(0xaaaa, 16);
+    d.uDictSetBuilder(8, key, valueBuilder);
+
+    var (stored, found) = d.uDictGet(8, 1);
+    assert (found) throw 111;
+    var storedSlice = stored!;
+    return keepBuilder.endCell().beginParse().loadUint(16) + storedSlice.loadUint(16);
+}
 
 fun main() {
     __expect_type(createEmptyMap<int8, (int32, int64)>, "() -> map<int8, (int32, int64)>");
@@ -663,6 +768,11 @@ fun main() {
 @testcase | 143 |            | [ 23 [ 24 (null) ] ] [ 5 (null) ] (null)
 @testcase | 144 |            | [ 1 2 3 4 5 6 7 ]
 @testcase | 145 |            | -1 1 8 1 3
+@testcase | 146 |            | 0 1
+@testcase | 147 |            | 1 1 42 11
+@testcase | 148 |            | 111
+@testcase | 149 |            | -1
+@testcase | 150 | 4660       | 48350
 
 @fif_codegen
 """
@@ -673,11 +783,11 @@ fun main() {
     s0 s2 XCHG
     8 PUSHINT
     DICTISET                    //  m
-    1 PUSHINT                   //  m '12=1
+    1 PUSHINT                   //  m '13=1
     SWAP
-    8 PUSHINT                   //  '12=1 m '17=8
-    DICTIGET NULLSWAPIFNOT      //  '13 '14
-    NIP                         //  '14
+    8 PUSHINT                   //  '13=1 m '18=8
+    DICTIGET NULLSWAPIFNOT      //  '14 '15
+    NIP                         //  '15
   }>
 """
 
@@ -734,7 +844,7 @@ fun main() {
     1 PUSHINT                   //  m '3=1
     x{0101} PUSHSLICE           //  m '3=1 '4
     s0 s2 XCHG
-    8 PUSHINT                   //  '4 '3=1 m '7=8
+    8 PUSHINT                   //  '4 '3=1 m '8=8
     DICTISET                    //  m
   }>
 """

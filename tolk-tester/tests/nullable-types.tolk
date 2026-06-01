@@ -5,6 +5,7 @@ fun getNullableIntNull(): int? asm "PUSHNULL";
 
 fun eqInt(x: int) { return x }
 fun eq<T>(x: T) { return x }
+fun isGt0(x: int): bool { return x > 0 }
 
 fun unwrap<T>(x: T?): T { return x!; }
 fun intOr0(x: int?): int { return null == x ? 0 : x!; }
@@ -58,7 +59,7 @@ fun test104(x: MIntN) {
 @method_id(105)
 fun test105() {
     var xy: (int?, MIntN) = (5, null);
-    var ab = [1 ? [xy.0, xy.1] : null] as [[int?, int?]?];
+    var ab = [true ? [xy.0, xy.1] : null] as [[int?, int?]?];
     ab.0!.0 = intOr0(ab.0!.0);
     ab.0!.1 = intOr0(ab.0!.1);
     return ab.0!.0! + ab.0!.1!;
@@ -104,10 +105,29 @@ fun test110() {
     var t : (int, Point?) = (0, {x: 10, y: 20});
     t.1!.y += 30;
     __expect_type(t.1, "Point?");
-    // this modifies `t.1`, not it's too hard for smart casts to follow, so `t.1` is left nullable
-    (t.1, 0).0 = {x: 100, y: 200};
+    t.1 = {x: 100, y: 200} as Point?;
     __expect_type(t.1, "Point?");
     return (t.1 == null, t.1);
+}
+
+@method_id(111)
+fun test111(x: int?): (bool, bool, bool, bool) {
+    return (
+        x! is int,
+        (x!) is int,
+        x !is int,
+        !isGt0(x!),
+    );
+}
+
+struct OnlyNullField {
+    marker: null
+}
+
+@method_id(112)
+fun test112(makeValue: bool) {
+    var value: OnlyNullField? = makeValue ? { marker: null } : null;
+    return (value, value == null);
 }
 
 fun main(x: int?, y: MIntN) {
@@ -130,4 +150,7 @@ fun main(x: int?, y: MIntN) {
 @testcase | 108 |     | 4
 @testcase | 109 |     | [ 3 4 ] 3 4
 @testcase | 110 |     | 0 100 200 typeid-1
+@testcase | 111 | 5   | -1 -1 0 0
+@testcase | 112 | 0   | (null) 0 -1
+@testcase | 112 | -1  | (null) typeid-2 0
  */

@@ -144,6 +144,14 @@ namespace tolk {
  *     Possible enhancement: `getXOfPoint(p)` could also be lazy for inlined functions (now `p` is read as a whole).
  */
 
+// make an error that `lazy` cannot be used for a struct with custom serializers or for a primitive
+static Error err_lazy_for_wrong_variant(TypePtr wrong_variant) {
+  if (get_custom_pack_unpack_function(wrong_variant)) {
+    return err("`lazy` is not applicable to `{}`, because it overrides packToBuilder/unpackFromSlice", wrong_variant);
+  }
+  return err("`lazy` union should contain only structures, but it contains `{}`", wrong_variant);
+}
+
 // Given fun_ref = "A.fromSlice" from `lazy A.fromSlice(s)` check it's correct to be inside the `lazy` operator.
 static bool does_function_satisfy_for_lazy_operator(FunctionPtr fun_ref, bool allow_wrapper = true) {
   if (!fun_ref) {
@@ -161,7 +169,8 @@ static bool does_function_satisfy_for_lazy_operator(FunctionPtr fun_ref, bool al
     if (f_body->size() == 1) {
       if (auto f_returns = f_body->get_item(0)->try_as<ast_return_statement>(); f_returns && f_returns->has_return_value()) {
         if (auto f_returns_call = f_returns->get_return_value()->try_as<ast_function_call>()) {
-          return does_function_satisfy_for_lazy_operator(f_returns_call->fun_maybe, false);
+          return does_function_satisfy_for_lazy_operator(f_returns_call->fun_maybe, false)
+              && fun_ref->inferred_return_type->equal_to(f_returns_call->inferred_type);
         }
       }
     }
@@ -175,7 +184,7 @@ static bool does_function_satisfy_for_lazy_operator(FunctionPtr fun_ref, bool al
 static TypePtr is_union_type_prevented_from_lazy_loading(const TypeDataUnion* t_union) {
   for (TypePtr variant : t_union->variants) {
     bool is_struct = variant->unwrap_alias()->try_as<TypeDataStruct>();
-    if (!is_struct) {
+    if (!is_struct || get_custom_pack_unpack_function(variant)) {
       return variant;
     }
   }
@@ -193,12 +202,15 @@ static void check_lazy_operator_used_correctly(FunctionPtr cur_f, V<ast_lazy_ope
 
   // it should be either a struct or a union of structs
   TypePtr expr_type = v->inferred_type;
+  if (get_custom_pack_unpack_function(expr_type) || expr_type->unwrap_alias()->is_cell_or_CellT()) {
+    err_lazy_for_wrong_variant(expr_type).fire(v->keyword_range(), cur_f);
+  }
   if (expr_type->unwrap_alias()->try_as<TypeDataStruct>()) {
     return;
   }
   if (const TypeDataUnion* expr_union = expr_type->unwrap_alias()->try_as<TypeDataUnion>()) {
     if (TypePtr wrong_variant = is_union_type_prevented_from_lazy_loading(expr_union)) {
-      err("`lazy` union should contain only structures, but it contains `{}`", wrong_variant).fire(v->keyword_range(), cur_f);
+      err_lazy_for_wrong_variant(wrong_variant).fire(v->keyword_range(), cur_f);
     }
     return;
   }
@@ -372,6 +384,7 @@ struct ExprUsagesWhileCollecting {
       std::vector(struct_ref->fields),
       is_variant_of_union ? StructData::PackOpcode(0, 0) : struct_ref->opcode,
       struct_ref->overflow1023_policy,
+      {},
       nullptr,
       nullptr,
       struct_ref->ast_root
@@ -419,8 +432,9 @@ struct ExprUsagesWhileCollecting {
         future_fields.emplace_back(LazyStructLoadInfo::SaveImmutableTail, "`tail`", TypeDataSlice::create());
       }
 
-      if (field_usages.used_for_matching == 1 && !used_anyhow_but_match && !object_used_as_a_whole && !used_for_toCell && !is_variant_of_union && field_idx == struct_ref->get_num_fields() - 1 &&
-        field_type->unwrap_alias()->try_as<TypeDataUnion>() && !is_union_type_prevented_from_lazy_loading(field_type->unwrap_alias()->try_as<TypeDataUnion>())) {
+      const TypeDataUnion* field_union = field_type->unwrap_alias()->try_as<TypeDataUnion>();
+      bool can_lazy_match_field = field_union && !get_custom_pack_unpack_function(field_type) && !is_union_type_prevented_from_lazy_loading(field_union);
+      if (field_usages.used_for_matching == 1 && !used_anyhow_but_match && !object_used_as_a_whole && !used_for_toCell && !is_variant_of_union && field_idx == struct_ref->get_num_fields() - 1 && can_lazy_match_field) {
         future_fields.emplace_back(LazyStructLoadInfo::LazyMatchField, orig_field->name, orig_field->declared_type);
         continue;
       }
@@ -489,7 +503,7 @@ struct ExprUsagesWhileCollecting {
     for (int field_idx = 0; field_idx < static_cast<int>(future_fields.size()); ++field_idx) {
       FutureField f = future_fields[field_idx];
       AnyV v_ident = createV<ast_identifier>(SrcRange::undefined(), "");
-      StructFieldPtr created = new StructFieldData(static_cast<std::string>(f.field_name), v_ident, field_idx, false, false, nullptr, nullptr);
+      StructFieldPtr created = new StructFieldData(static_cast<std::string>(f.field_name), v_ident, field_idx, false, false, nullptr, nullptr, nullptr, {});
       created->mutate()->assign_resolved_type(f.field_type);
       hidden_fields.push_back(created);
       ith_field_action.push_back(f.action);
@@ -501,6 +515,7 @@ struct ExprUsagesWhileCollecting {
       std::move(hidden_fields),
       is_variant_of_union ? StructData::PackOpcode(0, 0) : struct_ref->opcode,
       struct_ref->overflow1023_policy,
+      {},
       nullptr,
       nullptr,
       struct_ref->ast_root
@@ -550,9 +565,14 @@ struct LazyVarInFunction {
 
     // handle if `msg` is used only in `match (msg) { ... }`
     // (it may even be not a union, just a struct with opcode, and `match` with `else`)
+    const TypeDataStruct* t_struct = var_ref->declared_type->unwrap_alias()->try_as<TypeDataStruct>();
+    bool is_union = t_struct == nullptr;
     bool used_only_as_match = var_usages.used_for_matching == 1 && !var_usages.used_for_reading && !var_usages.used_for_toCell && !var_usages.used_for_writing && !var_usages.used_reassigned_type;
     bool variants_not_reassigned = std::all_of(var_usages.variants.begin(), var_usages.variants.end(), [](const ExprUsagesWhileCollecting& variant_usages) { return !variant_usages.used_reassigned_type; });
     if (used_only_as_match && variants_not_reassigned) {
+      if (!is_union && var_usages.total_usages_with_fields - var_usages.used_for_matching > var_usages.variants.front().total_usages_with_fields) {
+        err("`lazy` will not work here, because variable `{}` is used both for lazy matching and in a non-lazy manner", var_ref).fire(created_by_lazy_op->keyword_range(), cur_f);
+      }
       v_lazy_match_var_itself = var_usages.used_as_match_subj.front();
       load_points.reserve(var_usages.variants.size());
       for (ExprUsagesWhileCollecting& variant_usages : var_usages.variants) {
@@ -564,13 +584,14 @@ struct LazyVarInFunction {
 
     // okay, variable is used not only as `match`;
     // prohibit this to a union: lazy union may only be matched, nothing more (`msg is A` etc. don't work)
-    const TypeDataStruct* t_struct = var_ref->declared_type->unwrap_alias()->try_as<TypeDataStruct>();
-    bool is_union = t_struct == nullptr;
     if (is_union && used_only_as_match) {
       err("`lazy` will not work here, because variable `{}` changes its type inside `match`\n""hint: probably, it's reassigned, or called a method with a different receiver", var_ref).fire(created_by_lazy_op->keyword_range(), cur_f);
     }
     if (is_union) {
       err("`lazy` will not work here, because variable `{}` is used in a non-lazy manner\n""hint: lazy union may be used only in `match` statement, exactly once", var_ref).fire(created_by_lazy_op->keyword_range(), cur_f);
+    }
+    if (var_usages.used_for_matching) {
+      err("`lazy` will not work here, because variable `{}` is used both for lazy matching and in a non-lazy manner", var_ref).fire(created_by_lazy_op->keyword_range(), cur_f);
     }
 
     // so, it's just a struct, `lazy Point`; we've already calculated all statements where its fields are used
@@ -650,7 +671,7 @@ class CollectUsagesInStatementVisitor final : public ASTVisitorFunctionBody {
       AnyExprV dot_obj = v->get_callee()->as<ast_dot_access>()->get_obj();
       if (extract_sink_expression_from_vertex(dot_obj) == s_expr) {
         // handle built-in functions specially
-        if (fun_ref->is_builtin() && fun_ref->base_fun_ref->name == "T.toCell") {
+        if (fun_ref->is_builtin() && fun_ref->is_instantiation_of_generic_function() && fun_ref->base_fun_ref->name == "T.toCell") {
           lazy_expr->on_used_toCell();
           if (dot_obj->kind == ast_assign) {
             parent::visit(v->get_callee());
@@ -660,8 +681,10 @@ class CollectUsagesInStatementVisitor final : public ASTVisitorFunctionBody {
         }
 
         // if receiver is another type, e.g. `fun (A|B).method(self)`, called from `match (v) { A => v.method() }`
-        if (!fun_ref->parameters[0].declared_type->equal_to(lazy_expr->expr_type)) {
+        bool receiver_type_matches_lazy_expr = fun_ref->parameters[0].declared_type->equal_to(lazy_expr->expr_type);
+        if (!receiver_type_matches_lazy_expr) {
           lazy_expr->on_used_reassigned_type();
+          lazy_expr->on_used_rw(false);
         }
         // for `obj.f.method()`, mark lazy_expr=obj.f "used" anyway
         if (s_expr.index_path) {    
@@ -669,7 +692,7 @@ class CollectUsagesInStatementVisitor final : public ASTVisitorFunctionBody {
         }
         // if we have `st.save()` / `p.getX()` / `obj.f.method()`, which will be inlined when transforming to IR,
         // dig into that method's body to fetch used fields `self.x` etc.
-        if (can_method_be_inlined_preserving_lazy(fun_ref)) {
+        if (receiver_type_matches_lazy_expr && can_method_be_inlined_preserving_lazy(fun_ref)) {
           auto v_body_block = fun_ref->ast_root->try_as<ast_function_declaration>()->get_body()->try_as<ast_block_statement>();
           ExprUsagesWhileCollecting inner_usages = collect_expr_usages_in_block(lazy_expr->name_str + "(=self)", SinkExpression(&fun_ref->parameters[0]), lazy_expr->expr_type, v_body_block);
           inner_usages.treat_match_like_read();   // nested lazy match in inlined functions doesn't work, it's not wrapped into aux vertex
@@ -709,18 +732,31 @@ class CollectUsagesInStatementVisitor final : public ASTVisitorFunctionBody {
       lazy_expr->on_used_as_match_subj(v);
       const TypeDataUnion* expr_as_union = lazy_expr->expr_type->unwrap_alias()->try_as<TypeDataUnion>();
       for (int i = 0; i < v->get_arms_count(); ++i) {
-        if (auto v_arm = v->get_arm(i); v_arm->pattern_kind == MatchArmKind::exact_type) {
+        auto v_arm = v->get_arm(i);
+        if (v_arm->pattern_kind == MatchArmKind::exact_type) {
           TypePtr exact_type = v_arm->pattern_type_node->resolved_type;
+          int variant_idx = expr_as_union ? expr_as_union->get_variant_idx(exact_type) : 0;   // match over non-union is ok
+          tolk_assert(variant_idx != -1);   // in case of aliases, it may point to another StructPtr (but still equal_to)
+          exact_type = expr_as_union ? expr_as_union->variants[variant_idx] : lazy_expr->expr_type;
           auto v_block = v_arm->get_body()->get_block_statement();
           ExprUsagesWhileCollecting variant_usages = collect_expr_usages_in_block(lazy_expr->name_str, s_expr, exact_type, v_block);
-          int variant_idx = expr_as_union ? expr_as_union->get_variant_idx(exact_type) : 0;   // match over non-union is ok
           lazy_expr->variants[variant_idx].merge_with_sub_block(variant_usages);
+        } else {
+          parent::visit(v_arm);
         }
       }
       return;
     }
 
     parent::visit(v);
+  }
+
+  void visit(V<ast_lambda_fun> v) override {
+    for (LocalVarPtr captured_var_ref : v->captured_vars) {
+      if (SinkExpression(captured_var_ref) == s_expr) {
+        lazy_expr->on_used_rw(false);
+      }
+    }
   }
 
 public:
@@ -864,6 +900,10 @@ class CollectAllLazyObjectsAndFieldsVisitor final : public ASTVisitorFunctionBod
         auto lhs_var = lhs_var_decl->get_expr()->try_as<ast_local_var_lhs>();
         // collect usages of a lazy var inside the same block statement where it's declared
         LocalVarPtr var_ref = lhs_var->var_ref;
+        if (!var_ref->declared_type->equal_to(rhs_lazy->inferred_type)) {
+          err("`lazy` will not work here, because variable `{}` is declared as `{}`, but lazy expression has type `{}`",
+              var_ref, var_ref->declared_type, rhs_lazy->inferred_type).fire(rhs_lazy->keyword_range(), cur_f);
+        }
         ExprUsagesWhileCollecting var_usages = collect_expr_usages_in_block(var_ref->name, SinkExpression(var_ref), var_ref->declared_type, parent_block);
         LazyVarInFunction lazy_var(cur_f, var_ref, rhs_lazy, std::move(var_usages));
         functions_with_lazy_vars[cur_f].emplace_back(std::move(lazy_var));

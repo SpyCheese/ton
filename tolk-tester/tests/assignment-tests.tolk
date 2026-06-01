@@ -186,7 +186,7 @@ global ab122: (int, int);
 @method_id(122)
 fun test122() {
     (i122, ab122) = (0, (0,0));
-    (i122, ab122.0).1 = 10;     // modifies ab122.0
+    ab122.0 = 10;
     return (i122, ab122);
 }
 
@@ -195,7 +195,7 @@ fun test123() {
     var a = 0;
     a = a = a = 10;
     a = a.increment();
-    (a, 0).0 = a.increment().increment();
+    a = a.increment().increment();
     return a;
 }
 
