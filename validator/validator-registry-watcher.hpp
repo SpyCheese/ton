@@ -32,7 +32,8 @@ class ValidatorRegistryWatcher : public td::actor::Actor {
 
   void update(Ref<MasterchainState> mc_state, Ref<ValidatorManagerOptions> opts);
 
-  static std::vector<adnl::AdnlNodeIdShort> get_all_collators(Ref<MasterchainState> mc_state);
+  static std::map<PublicKeyHash, std::vector<adnl::AdnlNodeIdShort>> get_collators_by_validator(
+      Ref<MasterchainState> mc_state);
 
  private:
   PublicKeyHash key_hash_;
