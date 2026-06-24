@@ -47,13 +47,26 @@ class PrivateOverlayImpl : public td::actor::SpawnsWith<Bus>, public td::actor::
     std::vector<td::Bits256> overlay_nodes_tl;
     std::map<PublicKeyHash, td::uint32> authorized_keys;
 
+    if (bus.is_validator()) {
+      if (bus.config.validator_key_was_a_bad_idea()) {
+        local_broadcast_id_ = bus.local_id->adnl_id.pubkey_hash();
+      } else {
+        local_broadcast_id_ = bus.local_id->short_id;
+      }
+    }
+
     td::uint32 max_broadcast_size = bus.config.max_block_size + bus.config.max_collated_data_size + (1 << 20);
     for (const auto& peer : bus.validator_set) {
       adnl_id_to_peer_[peer.adnl_id] = peer;
-      short_id_to_peer_[peer.short_id] = peer;
       overlay_nodes_.push_back(peer.adnl_id);
       overlay_nodes_tl.push_back(peer.short_id.bits256_value());
-      authorized_keys.emplace(peer.short_id, max_broadcast_size);
+      if (bus.config.validator_key_was_a_bad_idea()) {
+        broadcast_id_to_peer_[peer.adnl_id.pubkey_hash()] = peer;
+        authorized_keys.emplace(peer.adnl_id.pubkey_hash(), max_broadcast_size);
+      } else {
+        broadcast_id_to_peer_[peer.short_id] = peer;
+        authorized_keys.emplace(peer.short_id, max_broadcast_size);
+      }
     }
 
     td::actor::send_closure(adnl_sender_, &adnl::AdnlSenderEx::add_id, local_adnl_id_);
@@ -152,7 +165,7 @@ class PrivateOverlayImpl : public td::actor::SpawnsWith<Bus>, public td::actor::
     CHECK(bus.is_validator());
     td::BufferSlice extra = create_serialize_tl_object<ton_api::consensus_broadcastExtra>(event->candidate->id.slot);
     td::actor::send_closure(overlays_, &overlay::Overlays::send_broadcast_fec_with_extra, local_adnl_id_, overlay_id_,
-                            bus.local_id->short_id, 0, event->candidate->serialize(), std::move(extra));
+                            *local_broadcast_id_, 0, event->candidate->serialize(), std::move(extra));
   }
 
  private:
@@ -213,7 +226,7 @@ class PrivateOverlayImpl : public td::actor::SpawnsWith<Bus>, public td::actor::
 
     auto parsed_extra = fetch_tl_object<ton_api::consensus_broadcastExtra>(extra, true).move_as_ok();
 
-    auto peer = short_id_to_peer_.at(src);
+    auto peer = broadcast_id_to_peer_.at(src);
     auto maybe_candidate = Candidate::deserialize(std::move(data), bus, peer.idx, parsed_extra->slot_);
 
     if (maybe_candidate.is_error()) {
@@ -244,7 +257,7 @@ class PrivateOverlayImpl : public td::actor::SpawnsWith<Bus>, public td::actor::
     }
 
     auto& bus = *owning_bus();
-    auto peer = short_id_to_peer_.at(src).idx;
+    auto peer = broadcast_id_to_peer_.at(src).idx;
     td::uint32 slot = parsed_extra.move_as_ok()->slot_;
     if (peer != bus.collator_schedule->expected_collator_for(slot)) {
       co_return td::Status::Error("Precheck failed: Broadcast is not from the expected collator");
@@ -282,7 +295,8 @@ class PrivateOverlayImpl : public td::actor::SpawnsWith<Bus>, public td::actor::
   std::vector<adnl::AdnlNodeIdShort> overlay_nodes_;
   std::vector<adnl::AdnlNodeIdShort> other_overlay_nodes_;
   std::map<adnl::AdnlNodeIdShort, PeerValidator> adnl_id_to_peer_;
-  std::map<PublicKeyHash, PeerValidator> short_id_to_peer_;
+  std::map<PublicKeyHash, PeerValidator> broadcast_id_to_peer_;
+  std::optional<PublicKeyHash> local_broadcast_id_;
 
   std::mt19937 gossip_rng_ = td::Random::fast_gen();
 };
