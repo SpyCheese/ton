@@ -345,7 +345,6 @@ class Network:
         state_dir.mkdir()
 
         self.__zerostate = create_zerostate(
-            self._install,
             state_dir,
             self.__network_config,
             [node.validator_key for node in self.__full_nodes if node.is_initial_validator],
