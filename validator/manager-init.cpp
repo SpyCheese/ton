@@ -321,6 +321,7 @@ void ValidatorManagerMasterchainReiniter::finish() {
       .gc_state = state_,
       .last_key_block_handle_ = handle_,
       .start_groups_from_seqno = start_seqno,
+      .previous_rotation = state_,
   });
   LOG(INFO) << "persistent state download finished";
   stop();
@@ -381,6 +382,7 @@ td::actor::Task<ValidatorManagerInitResult> ValidatorManagerMasterchainStarter::
             state_->get_block_id().seqno() < opts_->get_last_fork_masterchain_seqno())
       << "block_id=" << state_->get_block_id() << " init_block_id=" << opts_->init_block_id()
       << " last_hardfork_seqno=" << opts_->get_last_fork_masterchain_seqno();
+  CHECK(state_->rotated_all_shards());
 
   auto r_gc_block_id = co_await td::actor::ask(db_, &Db::get_gc_masterchain_block).wrap();
   BlockIdExt gc_block_id;
@@ -479,6 +481,7 @@ td::actor::Task<ValidatorManagerInitResult> ValidatorManagerMasterchainStarter::
       .gc_state = gc_state,
       .last_key_block_handle_ = last_key_block_handle,
       .start_groups_from_seqno = start_seqno,
+      .previous_rotation = state_,  // TODO: needs to be previous rotated_all_shards block
   };
 }
 
