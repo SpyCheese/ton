@@ -95,6 +95,7 @@ set(VALIDATOR_SOURCE
   consensus/simplex/candidate-broadcast-relay.cpp
   consensus/simplex/candidate-resolver.cpp
   consensus/simplex/certificate.cpp
+  consensus/simplex/collator-producer.cpp
   consensus/simplex/collator-schedule.cpp
   consensus/simplex/consensus.cpp
   consensus/simplex/db.cpp
@@ -114,6 +115,7 @@ set(VALIDATOR_SOURCE
   consensus/stats.cpp
   consensus/types.cpp
   consensus/utils.cpp
+  consensus/window-producer.cpp
 
   ${VALIDATOR_HEADERS}
 )
