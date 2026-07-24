@@ -163,6 +163,7 @@ class NetworkConfig:
     # purely from collated-data proofs (no celldb state reads); mainnet parity.
     full_collated_data: bool = True
     shard_validators: int = 1
+    mc_validators: int = 0  # 0 - all validators
     block_limit_mul: int = 1
     gas_limit_mul: int = 1
     mc_valgroup_lifetime: int = 250
