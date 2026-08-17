@@ -30,6 +30,7 @@
 #include "rocksdb/utilities/transaction.h"
 #include "rocksdb/write_batch.h"
 #include "td/db/RocksDb.h"
+#include "td/utils/ThreadSafeCounter.h"
 #include "td/utils/misc.h"
 
 namespace td {
@@ -392,6 +393,7 @@ Status RocksDb::commit_write_batch() {
   if (options_.read_only) {
     return td::Status::Error("trying to write to read-only database");
   }
+  TD_PERF_COUNTER(rocksdb_commit_write_batch);
   CHECK(write_batch_);
   auto write_batch = std::move(write_batch_);
   rocksdb::WriteOptions options;
@@ -403,6 +405,7 @@ Status RocksDb::commit_transaction() {
   if (options_.read_only) {
     return td::Status::Error("trying to write to read-only database");
   }
+  TD_PERF_COUNTER(rocksdb_commit_transaction);
   CHECK(transaction_);
   auto transaction = std::move(transaction_);
   return from_rocksdb(transaction->Commit());

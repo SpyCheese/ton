@@ -17,7 +17,9 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "keys/encryptor.h"
+#include "metrics/tl-traffic-bucket.h"
 #include "td/utils/Random.h"
+#include "td/utils/Timer.h"
 
 #include "adnl-local-id.h"
 #include "utils.hpp"
@@ -110,6 +112,15 @@ void AdnlLocalId::deliver(AdnlNodeIdShort src, td::BufferSlice data) {
 
 void AdnlLocalId::deliver_query(AdnlNodeIdShort src, td::BufferSlice data, td::Promise<td::BufferSlice> promise) {
   auto s = std::move(data);
+  // Every transport (peer pairs, RLDP2, QUIC, the ext server) funnels its queries through here, so
+  // this is the one place that times dispatch-to-answer. A dropped promise still runs the lambda
+  // ("Lost promise"), so an abandoned query is recorded as failed instead of vanishing.
+  // The answer may complete on any thread, so the recording happens on the peer table's own thread.
+  promise = [timer = td::Timer(), magic = metrics::resolve_tl_magic(s.as_slice()), src, peer_table = peer_table_,
+             promise = std::move(promise)](td::Result<td::BufferSlice> R) mutable {
+    td::actor::send_closure(peer_table, &AdnlPeerTable::record_query_duration, src, magic, timer.elapsed(), R.is_ok());
+    promise.set_result(std::move(R));
+  };
   for (auto &cb : cb_) {
     auto f = cb.first;
     if (f.length() <= s.length() && s.as_slice().substr(0, f.length()) == f) {
@@ -129,9 +140,9 @@ void AdnlLocalId::subscribe(std::string prefix, std::unique_ptr<AdnlPeerTable::C
   for (auto &cb : cb_) {
     auto G = td::Slice(cb.first);
     if (S.size() < G.size()) {
-      LOG_CHECK(G.substr(0, S.size()) != S) << this << ": duplicate subscribe prefix";
+      LOG_CHECK(G.substr(0, S.size()) != S) << this << ": duplicate subscribe prefix " << td::buffer_to_hex(prefix);
     } else {
-      LOG_CHECK(S.substr(0, G.size()) != G) << this << ": duplicate subscribe prefix";
+      LOG_CHECK(S.substr(0, G.size()) != G) << this << ": duplicate subscribe prefix " << td::buffer_to_hex(prefix);
     }
   }
   cb_.emplace_back(prefix, std::move(callback));
@@ -147,7 +158,7 @@ void AdnlLocalId::unsubscribe(std::string prefix) {
       it++;
     }
   }
-  LOG_CHECK(deleted) << this << ": cannot unsubscribe: prefix not found";
+  LOG_CHECK(deleted) << this << ": cannot unsubscribe: prefix " << td::buffer_to_hex(prefix) << " not found";
 }
 
 void AdnlLocalId::update_address_list(AdnlAddressList addr_list) {
