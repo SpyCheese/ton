@@ -187,6 +187,34 @@ struct CollationStats {
                        << " import_externals=" << import_externals.get(is_cpu)
                        << " process_new_msgs=" << process_new_msgs.get(is_cpu);
     }
+
+    WorkTimeStats& operator+=(const WorkTimeStats& r) {
+      total += r.total;
+      queue_cleanup += r.queue_cleanup;
+      prelim_storage_stat += r.prelim_storage_stat;
+      trx_tvm += r.trx_tvm;
+      trx_storage_stat += r.trx_storage_stat;
+      trx_other += r.trx_other;
+      final_storage_stat += r.final_storage_stat;
+      create_block += r.create_block;
+      create_collated_data += r.create_collated_data;
+      create_block_candidate += r.create_block_candidate;
+      return *this;
+    }
+
+    WorkTimeStats& operator*=(double r) {
+      total *= r;
+      queue_cleanup *= r;
+      prelim_storage_stat *= r;
+      trx_tvm *= r;
+      trx_storage_stat *= r;
+      trx_other *= r;
+      final_storage_stat *= r;
+      create_block *= r;
+      create_collated_data *= r;
+      create_block_candidate *= r;
+      return *this;
+    }
   };
   WorkTimeStats work_time;
   double wait_externals_time = 0.0;
@@ -276,6 +304,48 @@ struct ValidationStats {
                        << " check_processed_upto=" << check_processed_upto.get(is_cpu)
                        << " check_in_queue=" << check_in_queue.get(is_cpu)
                        << " check_new_state=" << check_new_state.get(is_cpu);
+    }
+
+    WorkTimeStats& operator+=(const WorkTimeStats& r) {
+      total += r.total;
+      trx_tvm += r.trx_tvm;
+      trx_storage_stat += r.trx_storage_stat;
+      trx_other += r.trx_other;
+      unpack_state += r.unpack_state;
+      validate_block_tlb += r.validate_block_tlb;
+      precheck_account_updates += r.precheck_account_updates;
+      precheck_account_transactions += r.precheck_account_transactions;
+      precheck_msg_queue += r.precheck_msg_queue;
+      unpack_dispatch_queue += r.unpack_dispatch_queue;
+      check_in_msg_descr += r.check_in_msg_descr;
+      check_out_msg_descr += r.check_out_msg_descr;
+      check_dispatch_queue += r.check_dispatch_queue;
+      check_processed_upto += r.check_processed_upto;
+      check_in_queue += r.check_in_queue;
+      check_transactions_other += r.check_transactions_other;
+      check_new_state += r.check_new_state;
+      return *this;
+    }
+
+    WorkTimeStats& operator*=(double r) {
+      total *= r;
+      trx_tvm *= r;
+      trx_storage_stat *= r;
+      trx_other *= r;
+      unpack_state *= r;
+      validate_block_tlb *= r;
+      precheck_account_updates *= r;
+      precheck_account_transactions *= r;
+      precheck_msg_queue *= r;
+      unpack_dispatch_queue *= r;
+      check_in_msg_descr *= r;
+      check_out_msg_descr *= r;
+      check_dispatch_queue *= r;
+      check_processed_upto *= r;
+      check_in_queue *= r;
+      check_transactions_other *= r;
+      check_new_state *= r;
+      return *this;
     }
   };
   WorkTimeStats work_time;

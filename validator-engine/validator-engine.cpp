@@ -5508,6 +5508,28 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_waitForIn
                           std::move(P));
 }
 
+void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_validationReplayerCommand &query,
+                                        td::BufferSlice data, ton::PublicKeyHash src, td::uint32 perm,
+                                        td::Promise<td::BufferSlice> promise) {
+  if (!(perm & ValidatorEnginePermissions::vep_modify)) {
+    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::error, "not authorized")));
+    return;
+  }
+  if (!started_) {
+    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::notready, "not started")));
+    return;
+  }
+  td::actor::send_closure(
+      validator_manager_, &ton::validator::ValidatorManagerInterface::validation_replayer_command,
+      std::move(query.command_), [promise = std::move(promise)](td::Result<std::string> R) mutable {
+        if (R.is_error()) {
+          promise.set_value(create_control_query_error(R.move_as_error()));
+          return;
+        }
+        promise.set_value(ton::create_serialize_tl_object<ton::ton_api::engine_validator_text>(R.move_as_ok()));
+      });
+}
+
 void ValidatorEngine::process_control_query(td::uint16 port, ton::adnl::AdnlNodeIdShort src,
                                             ton::adnl::AdnlNodeIdShort dst, td::BufferSlice data,
                                             td::Promise<td::BufferSlice> promise) {

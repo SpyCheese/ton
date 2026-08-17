@@ -42,6 +42,7 @@
 #include "td/utils/port/Poll.h"
 #include "td/utils/port/StdStreams.h"
 #include "ton/ton-io.hpp"
+#include "validation-replay/validation-replay.h"
 
 #include "collator-scoreboard.hpp"
 #include "manager-init.h"
@@ -838,6 +839,17 @@ class ValidatorManagerImpl : public ValidatorManager {
 
   td::actor::Task<> collect(metrics::Context ctx) override;
   void update_block_receive_stats(BlockIdExt block_id, BlockSource type);
+
+  td::actor::ActorOwn<ValidationReplayer> validation_replayer_;
+
+ public:
+  void validation_replayer_command(std::string command, td::Promise<std::string> promise) override {
+    if (validation_replayer_.empty()) {
+      validation_replayer_ = ValidationReplayer::create(actor_id(this), opts_);
+    }
+    td::actor::send_closure(validation_replayer_, &ValidationReplayer::run_command, std::move(command),
+                            std::move(promise));
+  }
 };
 
 }  // namespace validator

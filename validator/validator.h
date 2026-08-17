@@ -423,6 +423,10 @@ class ValidatorManagerInterface : public td::actor::Actor {
   virtual td::actor::Task<> collect(metrics::Context ctx) {
     co_return {};
   }
+
+  virtual void validation_replayer_command(std::string command, td::Promise<std::string> promise) {
+    promise.set_error(td::Status::Error("not supported"));
+  }
 };
 
 }  // namespace validator

@@ -2107,3 +2107,21 @@ td::Status GetConsensusNoncriticalParamsOverridesQuery::receive(td::BufferSlice 
   td::TerminalIO::out() << td::json_encode<std::string>(td::ToJson(*result), true) << "\n";
   return td::Status::OK();
 }
+
+td::Status ValidationReplayerCommandQuery::run() {
+  command_ = tokenizer_.remaining_str();
+  return td::Status::OK();
+}
+
+td::Status ValidationReplayerCommandQuery::send() {
+  auto b = ton::create_serialize_tl_object<ton::ton_api::engine_validator_validationReplayerCommand>(command_);
+  td::actor::send_closure(console_, &ValidatorEngineConsole::envelope_send_query, std::move(b), create_promise());
+  return td::Status::OK();
+}
+
+td::Status ValidationReplayerCommandQuery::receive(td::BufferSlice data) {
+  TRY_RESULT_PREFIX(result, ton::fetch_tl_object<ton::ton_api::engine_validator_text>(data.as_slice(), true),
+                    "received incorrect answer: ");
+  td::TerminalIO::out() << result->text_ << (!result->text_.empty() && result->text_.back() != '\n' ? "\n" : "");
+  return td::Status::OK();
+}

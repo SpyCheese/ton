@@ -209,7 +209,15 @@ void Collator::start_up() {
     LOG(WARNING) << "generating a hardfork block";
   }
   // 3. install external message queue
-  if (!params_.is_hardfork) {
+  if (params_.is_replay) {
+    LOG(DEBUG) << "installing external message queue";
+    ext_msg_queue_ = ExtMsgQueue("ext_msg_queue", 50000);
+    auto callback = std::make_unique<ExtMsgCallback>();
+    for (auto& msg : params_.in_external_messages) {
+      ext_msg_queue_.push(std::make_pair(msg, 0)).detach();
+    }
+    ext_msg_queue_.close();
+  } else if (!params_.is_hardfork) {
     LOG(DEBUG) << "installing external message queue";
     ext_msg_queue_ = ExtMsgQueue("ext_msg_queue", 500);
     auto callback = std::make_unique<ExtMsgCallback>();
@@ -224,14 +232,19 @@ void Collator::start_up() {
     // 4. load shard block info messages
     LOG(DEBUG) << "sending get_shard_blocks_for_collator() query to Manager";
     ++pending;
-    auto token = perf_log_.start_action("get_shard_blocks_for_collator");
-    td::actor::send_closure_later(manager, &ValidatorManager::get_shard_blocks_for_collator, prev_blocks[0],
-                                  [self = get_self(), token = std::move(token)](
-                                      td::Result<std::vector<Ref<ShardTopBlockDescription>>> res) mutable -> void {
-                                    LOG(DEBUG) << "got answer to get_shard_blocks_for_collator() query";
-                                    td::actor::send_closure_later(std::move(self), &Collator::after_get_shard_blocks,
-                                                                  std::move(res), std::move(token));
-                                  });
+    if (params_.is_replay) {
+      td::actor::send_closure_later(actor_id(this), &Collator::after_get_shard_blocks, params_.in_shard_blocks,
+                                    td::PerfLogAction{});
+    } else {
+      auto token = perf_log_.start_action("get_shard_blocks_for_collator");
+      td::actor::send_closure_later(manager, &ValidatorManager::get_shard_blocks_for_collator, prev_blocks[0],
+                                    [self = get_self(), token = std::move(token)](
+                                        td::Result<std::vector<Ref<ShardTopBlockDescription>>> res) mutable -> void {
+                                      LOG(DEBUG) << "got answer to get_shard_blocks_for_collator() query";
+                                      td::actor::send_closure_later(std::move(self), &Collator::after_get_shard_blocks,
+                                                                    std::move(res), std::move(token));
+                                    });
+    }
   }
   // 5. get storage stat cache
   ++pending;
@@ -357,9 +370,9 @@ bool Collator::fatal_error(td::Status error) {
   error.ensure_error();
   LOG(ERROR) << "cannot generate block candidate for " << show_shard(shard_) << " : " << error.to_string();
   if (busy_) {
-    if (allow_repeat_collation_ && error.code() != ErrorCode::cancelled && params_.attempt_idx + 1 < MAX_ATTEMPTS &&
-        !params_.is_hardfork && !timeout_.is_in_past()) {
-      CollateParams new_params = params_;
+    if (!params_.is_replay && allow_repeat_collation_ && error.code() != ErrorCode::cancelled &&
+        params_.attempt_idx + 1 < MAX_ATTEMPTS && !params_.is_hardfork && !timeout_.is_in_past()) {
+      CollateParams new_params = std::move(params_);
       ++new_params.attempt_idx;
       LOG(WARNING) << "Repeating collation (attempt #" << new_params.attempt_idx << ")";
       if (stats_.ext_msgs_total != 0) {
@@ -372,7 +385,11 @@ bool Collator::fatal_error(td::Status error) {
       LOG(INFO) << perf_log_;
       finalize_stats();
       stats_.status = error.clone();
-      td::actor::send_closure(manager, &ValidatorManager::log_collate_query_stats, std::move(stats_));
+      if (params_.store_stats_to) {
+        params_.store_stats_to.set_value(std::move(stats_));
+      } else {
+        td::actor::send_closure(manager, &ValidatorManager::log_collate_query_stats, std::move(stats_));
+      }
       main_promise.set_error(std::move(error));
     }
     busy_ = false;
@@ -682,11 +699,11 @@ void Collator::request_top_masterchain_state(BlockIdExt prev_mc_ref) {
   LOG(DEBUG) << "sending get_top_masterchain_state_block() to Manager";
   ++pending;
   auto token = perf_log_.start_action("get_top_masterchain_state_block");
-  if (params_.is_hardfork) {
+  if (params_.is_hardfork || params_.is_replay) {
+    BlockIdExt block_id = params_.is_replay ? params_.in_top_mc_block_id : params_.min_masterchain_block_id;
     td::actor::send_closure_later(
-        manager, &ValidatorManager::get_shard_state_from_db_short, params_.min_masterchain_block_id,
-        [self = get_self(), block_id = params_.min_masterchain_block_id,
-         token = std::move(token)](td::Result<Ref<ShardState>> res) mutable {
+        manager, &ValidatorManager::get_shard_state_from_db_short, block_id,
+        [self = get_self(), block_id, token = std::move(token)](td::Result<Ref<ShardState>> res) mutable {
           LOG(DEBUG) << "got answer to get_top_masterchain_state_block";
           if (res.is_error()) {
             td::actor::send_closure_later(std::move(self), &Collator::after_get_mc_state, res.move_as_error(),
@@ -986,6 +1003,9 @@ bool Collator::request_out_msg_queue_size() {
   if (have_out_msg_queue_size_in_state_) {
     // if after_split then have_out_msg_queue_size_in_state_ is always true, since the size is calculated during split
     return true;
+  }
+  if (params_.is_replay) {
+    return fatal_error("request_out_msg_queue_size is not supported");
   }
   out_msg_queue_size_ = 0;
   for (size_t i = 0; i < prev_blocks.size(); ++i) {
@@ -1872,16 +1892,29 @@ bool Collator::import_new_shard_top_blocks() {
     auto chk_res = sh_bd->prevalidate(mc_block_id_, mc_state_,
                                       ShardTopBlockDescrQ::fail_new | ShardTopBlockDescrQ::fail_too_new, res_flags);
     if (chk_res.is_error()) {
+      if (params_.is_replay) {
+        return fatal_error(PSTRING() << "ShardTopBlockDescr for " << sh_bd->block_id() << " skipped: res_flags="
+                                     << res_flags << " " << chk_res.move_as_error().to_string());
+      }
       LOG(DEBUG) << "ShardTopBlockDescr for " << sh_bd->block_id() << " skipped: res_flags=" << res_flags << " "
                  << chk_res.move_as_error().to_string();
       continue;
     }
     int chain_len = chk_res.move_as_ok();
     if (chain_len <= 0 || chain_len > 8) {
+      if (params_.is_replay) {
+        return fatal_error(PSTRING() << "ShardTopBlockDescr for " << sh_bd->block_id()
+                                     << " skipped: its chain length is " << chain_len);
+      }
       LOG(DEBUG) << "ShardTopBlockDescr for " << sh_bd->block_id() << " skipped: its chain length is " << chain_len;
       continue;
     }
     if (allow_same_timestamp_ ? sh_bd->generated_at() > now_ : sh_bd->generated_at() >= now_) {
+      if (params_.is_replay) {
+        return fatal_error(PSTRING() << "ShardTopBlockDescr for " << sh_bd->block_id()
+                                     << " skipped: it claims to be generated at " << sh_bd->generated_at()
+                                     << " while it is still " << now_);
+      }
       LOG(DEBUG) << "ShardTopBlockDescr for " << sh_bd->block_id() << " skipped: it claims to be generated at "
                  << sh_bd->generated_at() << " while it is still " << now_;
       continue;
@@ -1893,6 +1926,10 @@ bool Collator::import_new_shard_top_blocks() {
     auto start_blks = sh_bd->get_prev_at(chain_len);
     auto res = shard_conf_->may_update_shard_block_info(descr, start_blks, lt_limit);
     if (res.is_error()) {
+      if (params_.is_replay) {
+        return fatal_error(PSTRING() << "cannot add new top shard block " << sh_bd->block_id()
+                                     << " to shard configuration: " << res.move_as_error().to_string());
+      }
       LOG(DEBUG) << "cannot add new top shard block " << sh_bd->block_id()
                  << " to shard configuration: " << res.move_as_error().to_string();
       continue;
@@ -1909,6 +1946,11 @@ bool Collator::import_new_shard_top_blocks() {
         auto end_lt = std::max(prev_descr->end_lt_, descr->end_lt_);
         auto ures = shard_conf_->update_shard_block_info2(prev_descr, descr, std::move(start_blks2));
         if (ures.is_error()) {
+          if (params_.is_replay) {
+            return fatal_error(PSTRING() << "cannot add new split top shard blocks " << sh_bd->block_id() << " and "
+                                         << prev_bd->block_id()
+                                         << " to shard configuration: " << ures.move_as_error().to_string());
+          }
           LOG(DEBUG) << "cannot add new split top shard blocks " << sh_bd->block_id() << " and " << prev_bd->block_id()
                      << " to shard configuration: " << ures.move_as_error().to_string();
           prev_descr.clear();
@@ -1949,6 +1991,10 @@ bool Collator::import_new_shard_top_blocks() {
     auto end_lt = descr->end_lt_;
     auto ures = shard_conf_->update_shard_block_info(descr, std::move(start_blks));
     if (ures.is_error()) {
+      if (params_.is_replay) {
+        return fatal_error(PSTRING() << "cannot add new top shard block " << sh_bd->block_id()
+                                     << " to shard configuration: " << ures.move_as_error().to_string());
+      }
       LOG(DEBUG) << "cannot add new top shard block " << sh_bd->block_id()
                  << " to shard configuration: " << ures.move_as_error().to_string();
       descr.clear();
@@ -2119,11 +2165,13 @@ bool Collator::init_utime() {
   CHECK(config_);
   // consider unixtime and lt from previous block(s) of the same shardchain
   prev_now_ = prev_state_utime_;
-  // Extend collator timeout if previous block is too old
-  td::Timestamp new_timeout = td::Timestamp::in(std::min(30.0, (td::Clocks::system() - (double)prev_now_) / 2));
-  if (timeout_ < new_timeout) {
-    timeout_ = new_timeout;
-    alarm_timestamp() = timeout_;
+  if (!params_.is_replay) {
+    // Extend collator timeout if previous block is too old
+    td::Timestamp new_timeout = td::Timestamp::in(std::min(30.0, (td::Clocks::system() - (double)prev_now_) / 2));
+    if (timeout_ < new_timeout) {
+      timeout_ = new_timeout;
+      alarm_timestamp() = timeout_;
+    }
   }
 
   auto prev = std::max<td::uint32>(config_->utime, prev_now_);
@@ -2138,7 +2186,8 @@ bool Collator::init_utime() {
   // check whether masterchain catchain rotation is overdue
   auto ccvc = config_->get_catchain_validators_config();
   unsigned lifetime = ccvc.mc_cc_lifetime;
-  if (is_masterchain() && now_ / lifetime > prev_now_ / lifetime && now_ > (prev_now_ / lifetime + 1) * lifetime + 20) {
+  if (!params_.is_replay && is_masterchain() && now_ / lifetime > prev_now_ / lifetime &&
+      now_ > (prev_now_ / lifetime + 1) * lifetime + 20) {
     auto overdue = now_ - (prev_now_ / lifetime + 1) * lifetime;
     // masterchain catchain rotation overdue, skip topsharddescr with some probability
     skip_topmsgdescr_ = (td::Random::fast(0, 1023) < 256);  // probability 1/4
@@ -2153,7 +2202,7 @@ bool Collator::init_utime() {
           << "randomly skipping external message import because of overdue masterchain catchain rotation (overdue by "
           << overdue << " seconds)";
     }
-  } else if (is_masterchain() && now_ > prev_now_ + 60) {
+  } else if (!params_.is_replay && is_masterchain() && now_ > prev_now_ + 60) {
     auto interval = now_ - prev_now_;
     skip_topmsgdescr_ = (td::Random::fast(0, 1023) < 128);  // probability 1/8
     skip_extmsg_ = (td::Random::fast(0, 1023) < 128);       // skip ext msg probability 1/8
@@ -6499,7 +6548,7 @@ bool Collator::create_block_candidate() {
   // 4. finish collation
   td::actor::send_closure_later(actor_id(this), &Collator::return_block_candidate);
   // 5. communicate about bad and delayed external messages
-  if (!bad_ext_msgs_.empty() || !delay_ext_msgs_.empty()) {
+  if (!params_.is_replay && (!bad_ext_msgs_.empty() || !delay_ext_msgs_.empty())) {
     LOG(INFO) << "sending complete_external_messages() to Manager";
     td::actor::send_closure_later(manager, &ValidatorManager::complete_external_messages, std::move(delay_ext_msgs_),
                                   std::move(bad_ext_msgs_));
@@ -6522,7 +6571,11 @@ void Collator::return_block_candidate() {
   LOG(WARNING) << perf_log_;
   finalize_stats();
   stats_.status = td::Status::OK();
-  td::actor::send_closure(manager, &ValidatorManager::log_collate_query_stats, std::move(stats_));
+  if (params_.store_stats_to) {
+    params_.store_stats_to.set_value(std::move(stats_));
+  } else {
+    td::actor::send_closure(manager, &ValidatorManager::log_collate_query_stats, std::move(stats_));
+  }
   main_promise.set_value(block_candidate->clone());
   busy_ = false;
   stop();

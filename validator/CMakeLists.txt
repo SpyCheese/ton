@@ -119,6 +119,11 @@ set(VALIDATOR_SOURCE
   consensus/utils.cpp
   consensus/window-producer.cpp
 
+  validation-replay/validation-replay.h
+  validation-replay/validation-replay.cpp
+  validation-replay/utils.h
+  validation-replay/utils.cpp
+
   ${VALIDATOR_HEADERS}
 )
 

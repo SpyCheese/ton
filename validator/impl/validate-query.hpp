@@ -148,6 +148,7 @@ class ValidateQuery : public td::actor::Actor {
   bool is_key_block_{false};
   bool update_shard_cc_{false};
   bool is_fake_{false};
+  bool is_replay_{false};
   bool full_collated_data_{false};
   bool prev_key_block_exists_{false};
   bool debug_checks_{false};
@@ -486,6 +487,7 @@ class ValidateQuery : public td::actor::Actor {
   }
 
   ValidationStats stats_;
+  td::Promise<ValidationStats> store_stats_to_;
   void record_stats();
 };
 
