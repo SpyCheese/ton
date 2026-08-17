@@ -64,6 +64,10 @@ class Tokenizer {
   template <typename T>
   inline td::Result<std::vector<T>> get_token_vector();
 
+  std::string remaining_str() const {
+    return remaining_.str();
+  }
+
  private:
   td::BufferSlice data_;
   td::Slice remaining_;
@@ -1912,4 +1916,26 @@ class GetConsensusNoncriticalParamsOverridesQuery : public Query {
   std::string name() const override {
     return get_name();
   }
+};
+
+class ValidationReplayerCommandQuery : public Query {
+ public:
+  ValidationReplayerCommandQuery(td::actor::ActorId<ValidatorEngineConsole> console, Tokenizer tokenizer)
+      : Query(console, std::move(tokenizer)) {
+  }
+  td::Status run() override;
+  td::Status send() override;
+  td::Status receive(td::BufferSlice data) override;
+  static std::string get_name() {
+    return "vrp";
+  }
+  static std::string get_help() {
+    return "vrp\tcommand for validation replayer. `vrp help` for more info";
+  }
+  std::string name() const override {
+    return get_name();
+  }
+
+ private:
+  std::string command_;
 };
