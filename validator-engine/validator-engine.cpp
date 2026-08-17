@@ -161,9 +161,8 @@ Config::Config(const ton::ton_api::engine_validator_config &config) {
     }
   }
   for (auto &col : config.collators_) {
-    auto id = ton::adnl::AdnlNodeIdShort{col->adnl_id_};
-    ton::ShardIdFull shard = ton::create_shard_id(col->shard_);
-    config_add_collator(id, shard).ensure();
+    auto id = ton::adnl::AdnlNodeIdShort{col};
+    config_add_collator(id).ensure();
   }
   config_add_full_node_adnl_id(ton::PublicKeyHash{config.fullnode_}).ensure();
 
@@ -190,7 +189,7 @@ Config::Config(const ton::ton_api::engine_validator_config &config) {
       }
     }
     if (config.extraconfig_->collator_node_whitelist_) {
-      collator_node_whiltelist_enabled = config.extraconfig_->collator_node_whitelist_->enabled_;
+      collator_node_whitelist_enabled = config.extraconfig_->collator_node_whitelist_->enabled_;
       for (const auto &id : config.extraconfig_->collator_node_whitelist_->adnl_ids_) {
         collator_node_whitelist.emplace(id);
       }
@@ -263,12 +262,9 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
     val_vec.push_back(ton::create_tl_object<ton::ton_api::engine_validator>(
         val.first.tl(), std::move(temp_vec), std::move(adnl_val_vec), val.second.election_date, val.second.expire_at));
   }
-  std::vector<ton::tl_object_ptr<ton::ton_api::engine_collator>> col_vec;
-  for (auto &[col, shards] : collators) {
-    for (auto &shard : shards) {
-      col_vec.push_back(
-          ton::create_tl_object<ton::ton_api::engine_collator>(col.bits256_value(), ton::create_tl_shard_id(shard)));
-    }
+  std::vector<td::Bits256> col_vec;
+  for (auto &col : collators) {
+    col_vec.push_back(col.bits256_value());
   }
 
   std::vector<ton::tl_object_ptr<ton::ton_api::engine_validator_fullNodeSlave>> full_node_slaves_vec;
@@ -288,9 +284,9 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
   }
 
   ton::tl_object_ptr<ton::ton_api::engine_validator_collatorNodeWhitelist> collator_node_whitelist_obj = {};
-  if (collator_node_whiltelist_enabled || !collator_node_whitelist.empty()) {
+  if (collator_node_whitelist_enabled || !collator_node_whitelist.empty()) {
     collator_node_whitelist_obj = ton::create_tl_object<ton::ton_api::engine_validator_collatorNodeWhitelist>();
-    collator_node_whitelist_obj->enabled_ = collator_node_whiltelist_enabled;
+    collator_node_whitelist_obj->enabled_ = collator_node_whitelist_enabled;
     for (const auto &id : collator_node_whitelist) {
       collator_node_whitelist_obj->adnl_ids_.push_back(id.bits256_value());
     }
@@ -512,35 +508,22 @@ td::Result<bool> Config::config_add_validator_adnl_id(ton::PublicKeyHash perm_ke
   }
 }
 
-td::Result<bool> Config::config_add_collator(ton::adnl::AdnlNodeIdShort addr, ton::ShardIdFull shard) {
-  if (!shard.is_valid_ext()) {
-    return td::Status::Error(PSTRING() << "invalid shard: " << shard);
+td::Result<bool> Config::config_add_collator(ton::adnl::AdnlNodeIdShort addr) {
+  if (!adnl_ids.contains(addr.pubkey_hash())) {
+    return td::Status::Error(ton::ErrorCode::notready, "to-be-added collator address not in adnl nodes list");
   }
-  auto &shards = collators[addr];
-  if (std::find(shards.begin(), shards.end(), shard) != shards.end()) {
-    return false;
+  if (collators.insert(addr).second) {
+    incref(addr.pubkey_hash());
+    return true;
   }
-  shards.push_back(shard);
-  return true;
+  return false;
 }
 
-td::Result<bool> Config::config_del_collator(ton::adnl::AdnlNodeIdShort addr, ton::ShardIdFull shard) {
-  if (!shard.is_valid_ext()) {
-    return td::Status::Error(PSTRING() << "invalid shard: " << shard);
-  }
-  auto it = collators.find(addr);
-  if (it == collators.end()) {
+td::Result<bool> Config::config_del_collator(ton::adnl::AdnlNodeIdShort addr) {
+  if (collators.erase(addr) == 0) {
     return false;
   }
-  auto &shards = it->second;
-  auto it2 = std::find(shards.begin(), shards.end(), shard);
-  if (it2 == shards.end()) {
-    return false;
-  }
-  shards.erase(it2);
-  if (shards.empty()) {
-    collators.erase(it);
-  }
+  decref(addr.pubkey_hash());
   return true;
 }
 
@@ -762,6 +745,9 @@ td::Result<bool> Config::config_del_adnl_addr(ton::PublicKeyHash addr) {
     return td::Status::Error(ton::ErrorCode::error, "adnl addr still in use");
   }
   if (full_node == addr) {
+    return td::Status::Error(ton::ErrorCode::error, "adnl addr still in use");
+  }
+  if (collators.contains(ton::adnl::AdnlNodeIdShort{addr})) {
     return td::Status::Error(ton::ErrorCode::error, "adnl addr still in use");
   }
 
@@ -1707,7 +1693,7 @@ td::Status ValidatorEngine::load_global_config() {
   for (auto &id : config_.collator_node_whitelist) {
     validator_options_.write().set_collator_node_whitelisted_validator(id, true);
   }
-  validator_options_.write().set_collator_node_whitelist_enabled(config_.collator_node_whiltelist_enabled);
+  validator_options_.write().set_collator_node_whitelist_enabled(config_.collator_node_whitelist_enabled);
 
   return td::Status::OK();
 }
@@ -1720,11 +1706,6 @@ void ValidatorEngine::set_shard_check_function() {
         });
   } else {
     std::vector<ton::ShardIdFull> shards = {ton::ShardIdFull(ton::masterchainId)};
-    for (const auto &[_, collator_shards] : config_.collators) {
-      for (const auto &shard : collator_shards) {
-        shards.push_back(shard);
-      }
-    }
     for (const auto &s : config_.shards_to_monitor) {
       shards.push_back(s);
     }
@@ -2200,6 +2181,10 @@ void ValidatorEngine::start_adnl() {
   adnl_network_manager_ = ton::adnl::AdnlNetworkManager::create(config_.out_port);
   adnl_ = ton::adnl::Adnl::create(db_root_, keyring_.get());
   td::actor::send_closure(adnl_, &ton::adnl::Adnl::register_network_manager, adnl_network_manager_.get());
+  td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::add<ton::adnl::AdnlNetworkManager>,
+                          adnl_network_manager_.get(), &ton::adnl::AdnlNetworkManager::collect);
+  td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::add<ton::adnl::Adnl>, adnl_.get(),
+                          &ton::adnl::Adnl::collect);
   reload_adnl_addrs();
   td::actor::send_closure(adnl_, &ton::adnl::Adnl::add_static_nodes_from_config, std::move(adnl_static_nodes_));
   started_adnl();
@@ -2298,6 +2283,8 @@ void ValidatorEngine::start_rldp() {
   td::actor::send_closure(quic_.get(), &ton::quic::QuicSender::set_quic_options, quic_options_);
   td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::add<ton::quic::QuicSender>, quic_.get(),
                           &ton::quic::QuicSender::collect);
+  td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::add<ton::rldp2::Rldp>, rldp2_.get(),
+                          &ton::rldp2::Rldp::collect);
   td::actor::send_closure(rldp2_, &ton::rldp2::Rldp::set_default_mtu, 2048);
   started_rldp();
 }
@@ -2314,6 +2301,8 @@ void ValidatorEngine::start_overlays() {
     };
     overlay_manager_ = ton::overlay::Overlays::create(db_root_, keyring_.get(), adnl_.get(),
                                                       dht_nodes_[default_dht_node_].get(), buffer_limits);
+    td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::add<ton::overlay::Overlays>,
+                            overlay_manager_.get(), &ton::overlay::Overlays::collect);
   }
   started_overlays();
 }
@@ -2394,10 +2383,8 @@ void ValidatorEngine::start_full_node() {
       td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::add_permanent_key, v.first,
                               [](td::Result<>) {});
     }
-    for (auto &[c, shards] : config_.collators) {
-      for (auto &_ : shards) {
-        td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::add_collator_adnl_id, c);
-      }
+    for (auto &c : config_.collators) {
+      td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::add_collator_adnl_id, c);
     }
     for (auto &x : config_.fast_sync_member_certificates) {
       td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::import_fast_sync_member_certificate,
@@ -2446,10 +2433,8 @@ void ValidatorEngine::started_lite_server() {
 }
 
 void ValidatorEngine::start_collator() {
-  for (auto &[id, shards] : config_.collators) {
-    for (auto &shard : shards) {
-      td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::add_collator, id, shard);
-    }
+  for (auto &id : config_.collators) {
+    td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::add_collator, id);
   }
 
   started_collator();
@@ -4941,11 +4926,11 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_collatorN
     promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::notready, "not started")));
     return;
   }
-  if (config_.collator_node_whiltelist_enabled == query.enabled_) {
+  if (config_.collator_node_whitelist_enabled == query.enabled_) {
     promise.set_value(ton::create_serialize_tl_object<ton::ton_api::engine_validator_success>());
     return;
   }
-  config_.collator_node_whiltelist_enabled = query.enabled_;
+  config_.collator_node_whitelist_enabled = query.enabled_;
   validator_options_.write().set_collator_node_whitelist_enabled(query.enabled_);
   td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::update_options,
                           validator_options_);
@@ -4972,7 +4957,7 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_showColla
   }
   ton::tl_object_ptr<ton::ton_api::engine_validator_collatorNodeWhitelist> result = {};
   result = ton::create_tl_object<ton::ton_api::engine_validator_collatorNodeWhitelist>();
-  result->enabled_ = config_.collator_node_whiltelist_enabled;
+  result->enabled_ = config_.collator_node_whitelist_enabled;
   for (const auto &id : config_.collator_node_whitelist) {
     result->adnl_ids_.push_back(id.bits256_value());
   }
@@ -5161,29 +5146,6 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_showColla
   }
 }
 
-void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_getCollationManagerStats &query,
-                                        td::BufferSlice data, ton::PublicKeyHash src, td::uint32 perm,
-                                        td::Promise<td::BufferSlice> promise) {
-  if (!(perm & ValidatorEnginePermissions::vep_default)) {
-    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::error, "not authorized")));
-    return;
-  }
-  if (!started_) {
-    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::notready, "not started")));
-    return;
-  }
-  td::actor::send_closure(
-      validator_manager_, &ton::validator::ValidatorManagerInterface::get_collation_manager_stats,
-      [promise = std::move(promise)](
-          td::Result<ton::tl_object_ptr<ton::ton_api::engine_validator_collationManagerStats>> R) mutable {
-        if (R.is_ok()) {
-          promise.set_value(ton::serialize_tl_object(R.move_as_ok(), true));
-        } else {
-          promise.set_value(create_control_query_error(R.move_as_error()));
-        }
-      });
-}
-
 void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_addCollator &query, td::BufferSlice data,
                                         ton::PublicKeyHash src, td::uint32 perm, td::Promise<td::BufferSlice> promise) {
   if (!(perm & ValidatorEnginePermissions::vep_modify)) {
@@ -5196,8 +5158,7 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_addCollat
   }
 
   auto id = ton::adnl::AdnlNodeIdShort{query.adnl_id_};
-  auto shard = ton::create_shard_id(query.shard_);
-  auto R = config_.config_add_collator(id, shard);
+  auto R = config_.config_add_collator(id);
   if (R.is_error()) {
     promise.set_value(create_control_query_error(R.move_as_error()));
     return;
@@ -5206,11 +5167,10 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_addCollat
     promise.set_value(ton::serialize_tl_object(ton::create_tl_object<ton::ton_api::engine_validator_success>(), true));
     return;
   }
-  set_shard_check_function();
   if (!validator_manager_.empty()) {
     td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::update_options,
                             validator_options_);
-    td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::add_collator, id, shard);
+    td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::add_collator, id);
   }
   if (!full_node_.empty()) {
     td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::add_collator_adnl_id, id);
@@ -5237,8 +5197,7 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_delCollat
   }
 
   auto id = ton::adnl::AdnlNodeIdShort{query.adnl_id_};
-  auto shard = ton::create_shard_id(query.shard_);
-  auto R = config_.config_del_collator(id, shard);
+  auto R = config_.config_del_collator(id);
   if (R.is_error()) {
     promise.set_value(create_control_query_error(R.move_as_error()));
     return;
@@ -5247,15 +5206,10 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_delCollat
     promise.set_value(create_control_query_error(td::Status::Error("No such collator")));
     return;
   }
-  if (!R.move_as_ok()) {
-    promise.set_value(ton::serialize_tl_object(ton::create_tl_object<ton::ton_api::engine_validator_success>(), true));
-    return;
-  }
-  set_shard_check_function();
   if (!validator_manager_.empty()) {
     td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::update_options,
                             validator_options_);
-    td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::del_collator, id, shard);
+    td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::del_collator, id);
   }
   if (!full_node_.empty()) {
     td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::del_collator_adnl_id, id);
@@ -5785,22 +5739,32 @@ int main(int argc, char *argv[]) {
 #endif
     td::set_signal_handler(td::SignalType::HangUp, force_rotate_logs).ensure();
   });
+  enum class LogType { None, Synchronous, Asynchronous };
+  LogType log_type = LogType::None;
+  std::string log_file;
   std::string session_logs_file;
-  auto init_log_file = [&](td::Slice fname) {
+  auto set_log_file = [&](td::Slice fname, LogType type) {
     if (session_logs_file.empty()) {
       session_logs_file = fname.str() + ".session-stats";
     }
-    td::log_interface = logger_.get();
-    td::set_log_fatal_error_callback([](td::CSlice s) { std::cerr << "FATAL_ERROR: " << s.c_str() << std::endl; });
+    log_type = type;
+    log_file = fname.str();
   };
-  p.add_option('l', "logname", "log to file", [&](td::Slice fname) {
-    logger_ = td::TsFileLog::create(fname.str()).move_as_ok();
-    init_log_file(fname);
-  });
-  p.add_option('\0', "async-logname", "log to file asynchronously", [&](td::Slice fname) {
-    logger_ = td::AsyncFileLog::create(fname.str()).move_as_ok();
-    init_log_file(fname);
-  });
+  p.add_option('l', "logname", "log to file", [&](td::Slice fname) { set_log_file(fname, LogType::Synchronous); });
+  p.add_option('\0', "async-logname", "log to file asynchronously",
+               [&](td::Slice fname) { set_log_file(fname, LogType::Asynchronous); });
+  td::int64 async_log_max_file_size = td::AsyncFileLog::DEFAULT_ROTATE_THRESHOLD;
+  p.add_checked_option(
+      '\0', "async-log-max-file-size",
+      PSTRING() << "maximum async log file size in bytes before rotation (default=" << async_log_max_file_size << ")",
+      [&](td::Slice arg) {
+        TRY_RESULT(value, td::to_integer_safe<td::int64>(arg));
+        if (value <= 0) {
+          return td::Status::Error("async-log-max-file-size should be positive");
+        }
+        async_log_max_file_size = value;
+        return td::Status::OK();
+      });
   p.add_checked_option('s', "state-ttl", "state will be gc'd after this time (in seconds) default=86400",
                        [&](td::Slice fname) {
                          auto v = td::to_double(fname);
@@ -6235,6 +6199,21 @@ int main(int argc, char *argv[]) {
   if (S.is_error()) {
     LOG(ERROR) << "failed to parse options: " << S.move_as_error();
     std::_Exit(2);
+  }
+
+  switch (log_type) {
+    case LogType::None:
+      break;
+    case LogType::Synchronous:
+      logger_ = td::TsFileLog::create(log_file).move_as_ok();
+      break;
+    case LogType::Asynchronous:
+      logger_ = td::AsyncFileLog::create(log_file, async_log_max_file_size).move_as_ok();
+      break;
+  }
+  if (logger_) {
+    td::log_interface = logger_.get();
+    td::set_log_fatal_error_callback([](td::CSlice s) { std::cerr << "FATAL_ERROR: " << s.c_str() << std::endl; });
   }
 
   td::set_runtime_signal_handler(1, need_stats).ensure();
