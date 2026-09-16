@@ -96,13 +96,16 @@ ValidateQuery::ValidateQuery(BlockCandidate candidate, ValidateParams params,
     , timeout(timeout)
     , main_promise(std::move(promise))
     , is_fake_(params.is_fake)
+    , is_replay_(params.is_replay)
     , parallel_accounts_validation_(params.parallel_validation)
     , shard_pfx_(shard_.shard)
     , shard_pfx_len_(ton::shard_prefix_length(shard_))
     , preloaded_prev_block_state_roots_(std::move(params.prev_block_state_roots))
-    , perf_timer_("validateblock", 0.1, [manager](double duration) {
-      send_closure(manager, &ValidatorManager::add_perf_timer_stat, "validateblock", duration);
-    }) {
+    , perf_timer_("validateblock", 0.1,
+                  [manager](double duration) {
+                    send_closure(manager, &ValidatorManager::add_perf_timer_stat, "validateblock", duration);
+                  })
+    , store_stats_to_(std::move(params.store_stats_to)) {
   CHECK(main_promise);
 }
 
@@ -1109,7 +1112,7 @@ bool ValidateQuery::try_unpack_mc_state() {
     global_version_ = config_->get_global_version();
     allow_same_timestamp_ = global_version_ >= 13;
     store_dispatch_queue_balance_ = global_version_ >= 16;
-    check_global_balance_ = global_version_ >= 17 && shard_.is_masterchain() && !is_fake_;
+    check_global_balance_ = global_version_ >= 17 && shard_.is_masterchain() && !is_fake_ && !is_replay_;
     prev_key_block_exists_ = config_->get_last_key_block(prev_key_block_, prev_key_block_lt_);
     if (prev_key_block_exists_) {
       prev_key_block_seqno_ = prev_key_block_.seqno();
@@ -2106,7 +2109,7 @@ bool ValidateQuery::check_one_shard(const block::McShardHash& info, const block:
         return reject_query("no ShardTopBlockDescr for newly-registered shard "s + info.top_block_id().to_str() +
                             " is present in collated data");
       }
-      auto res = ShardTopBlockDescrQ::fetch(std::move(tbd_ref), is_fake_);
+      auto res = ShardTopBlockDescrQ::fetch(std::move(tbd_ref), is_fake_ || is_replay_);
       if (res.is_error()) {
         return reject_query("cannot unpack ShardTopBlockDescr for "s + shard.to_str() +
                             " contained in collated data : "s + res.move_as_error().to_string());
@@ -2387,7 +2390,7 @@ bool ValidateQuery::check_shard_layout() {
                                     << " is active, but is absent from new shard configuration");
     }
   }
-  if (!new_top_shard_blocks.empty()) {
+  if (!new_top_shard_blocks.empty() && !is_replay_) {
     ++pending;
     td::actor::send_closure(
         manager, &ValidatorManager::wait_verify_shard_blocks, std::move(new_top_shard_blocks),
@@ -7676,7 +7679,7 @@ bool ValidateQuery::finish_global_balance_check() {
     if (check_global_balance_) {
       expected_global_balance.grams = validate_global_balance_result_.ok();
     } else {
-      CHECK(is_fake_);
+      CHECK(is_fake_ || is_replay_);
       expected_global_balance.grams =
           ps_.global_balance_.grams + value_flow_.created.grams + import_created_.grams - value_flow_.burned.grams;
     }
@@ -7928,7 +7931,11 @@ void ValidateQuery::record_stats() {
   LOG(WARNING) << "Validate query work time = " << stats_.work_time.total.real
                << "s, cpu time = " << stats_.work_time.total.cpu << "s";
   LOG(WARNING) << perf_log_;
-  td::actor::send_closure(manager, &ValidatorManager::log_validate_query_stats, std::move(stats_));
+  if (store_stats_to_) {
+    store_stats_to_.set_value(std::move(stats_));
+  } else {
+    td::actor::send_closure(manager, &ValidatorManager::log_validate_query_stats, std::move(stats_));
+  }
 }
 
 }  // namespace validator

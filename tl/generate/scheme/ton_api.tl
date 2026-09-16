@@ -643,6 +643,8 @@ engine.validator.oneStat key:string value:string = engine.validator.OneStat;
 engine.validator.stats stats:(vector engine.validator.oneStat) = engine.validator.Stats;
 engine.validator.textStats data:string = engine.validator.TextStats;
 
+engine.validator.text text:string = engine.validator.Text;
+
 engine.validator.controlQueryError code:int message:string = engine.validator.ControlQueryError;
 
 engine.validator.time time:int = engine.validator.Time;
@@ -786,6 +788,8 @@ engine.validator.waitForLiteServer = engine.validator.Success;
 engine.validator.waitForInitialSync = engine.validator.Success;
 
 engine.validator.setExtMessagePoolOptions config:engine.validator.extMessagePoolConfig = engine.validator.Success;
+
+engine.validator.validationReplayerCommand command:string = engine.validator.Text;
 
 ---types---
 
