@@ -239,6 +239,14 @@ struct BlockId {
     return std::string{buffer, (unsigned)snprintf(buffer, 63, "(%d,%016llx,%u)", workchain,
                                                   static_cast<unsigned long long>(shard), seqno)};
   }
+  static td::Result<BlockId> from_str(td::CSlice s) {
+    BlockId v;
+    auto r = sscanf(s.begin(), "(%d,%" SCNx64 ",%u)", &v.workchain, &v.shard, &v.seqno);
+    if (r < 3) {
+      return td::Status::Error("failed to parse block id");
+    }
+    return v;
+  }
 };
 
 inline bool operator<(const ShardIdFull& x, const BlockId& y) {

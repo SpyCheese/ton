@@ -43,6 +43,7 @@
 #include "td/utils/port/Poll.h"
 #include "td/utils/port/StdStreams.h"
 #include "ton/ton-io.hpp"
+#include "validation-replay/validation-replay.h"
 
 #include "collator-scoreboard.hpp"
 #include "global-balance-calculator.hpp"
@@ -873,6 +874,17 @@ class ValidatorManagerImpl : public ValidatorManager {
   void update_block_receive_stats(BlockIdExt block_id, BlockSource type);
 
   td::actor::ActorOwn<GlobalBalanceCalculator> global_balance_calculator_;
+
+  td::actor::ActorOwn<ValidationReplayer> validation_replayer_;
+
+ public:
+  void validation_replayer_command(std::string command, td::Promise<std::string> promise) override {
+    if (validation_replayer_.empty()) {
+      validation_replayer_ = ValidationReplayer::create(actor_id(this), opts_);
+    }
+    td::actor::send_closure(validation_replayer_, &ValidationReplayer::run_command, std::move(command),
+                            std::move(promise));
+  }
 };
 
 }  // namespace validator
