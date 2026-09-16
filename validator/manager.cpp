@@ -3338,6 +3338,9 @@ void ValidatorManagerImpl::update_options(td::Ref<ValidatorManagerOptions> opts)
     network_state_->update_options(opts);
   }
   td::actor::send_closure(ext_message_pool_, &ExtMessagePool::update_options, opts);
+  if (!validation_replayer_.empty()) {
+    td::actor::send_closure(validation_replayer_, &ValidationReplayer::update_options, opts);
+  }
   opts_ = std::move(opts);
 }
 

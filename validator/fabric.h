@@ -58,6 +58,12 @@ struct CollateParams {
   // External messages from this set will be dropped
   // Collator adds new processed messages and returns the new set
   td::PersistentTreap<td::Bits256, td::Unit> processed_external_messages = {};
+
+  bool is_replay = false;
+  BlockIdExt in_top_mc_block_id = {};
+  std::vector<Ref<ExtMessage>> in_external_messages = {};
+  std::vector<Ref<ShardTopBlockDescription>> in_shard_blocks = {};
+  td::Promise<CollationStats> store_stats_to = {};
 };
 
 struct ValidateParams {
@@ -74,6 +80,9 @@ struct ValidateParams {
   // Optional - if empty, states are taken from manager
   // If not empty, should be the same size as prev
   std::vector<Ref<vm::Cell>> prev_block_state_roots = {};
+
+  bool is_replay = false;
+  td::Promise<ValidationStats> store_stats_to = {};
 };
 
 td::actor::ActorOwn<Db> create_db_actor(td::actor::ActorId<ValidatorManager> manager, std::string db_root_,

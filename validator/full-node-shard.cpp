@@ -134,6 +134,8 @@ void FullNodeShardImpl::create_overlay() {
 }
 
 void FullNodeShardImpl::check_broadcast(PublicKeyHash src, td::BufferSlice broadcast, td::Promise<td::Unit> promise) {
+  promise.set_error(td::Status::Error("no"));
+  return;
   TRY_RESULT_PROMISE(promise, message,
                      fetch_tl_object<ton_api::tonNode_externalMessageBroadcast>(std::move(broadcast), true));
   if (opts_.config_.ext_messages_broadcast_disabled_) {
