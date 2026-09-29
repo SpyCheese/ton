@@ -26,6 +26,17 @@ bool cell_equal(const Ref<vm::Cell>& a, const Ref<vm::Cell>& b) {
   return a->get_hash() == b->get_hash();
 }
 
+td::uint32 get_elections_end_before(Ref<vm::Cell> cell) {
+  if (cell.is_null()) {
+    return 0;
+  }
+  block::gen::ElectionTimings::Record rec;
+  if (!block::gen::unpack_cell(cell, rec)) {
+    return 0;
+  }
+  return rec.elections_end_before;
+}
+
 struct Entry {
   std::vector<adnl::AdnlNodeIdShort> collators;
 };
@@ -320,6 +331,7 @@ void ValidatorRegistryWatcherImpl::update_local_validator(PublicKeyHash key_hash
   validator.update_at = td::Timestamp::never();
   bool found = false;
   td::uint32 val_set_idx = 0, val_idx = 0;
+  size_t val_set_size = 0;
   td::Bits256 public_key;
   for (int next : {0, 1, -1}) {
     auto val_set = mc_state_->get_total_validator_set(next);
@@ -328,6 +340,7 @@ void ValidatorRegistryWatcherImpl::update_local_validator(PublicKeyHash key_hash
       if (val) {
         val_set_idx = 34 + next * 2;
         val_idx = idx;
+        val_set_size = val_set->size();
         public_key = val->key.as_bits256();
         found = true;
         break;
@@ -353,6 +366,23 @@ void ValidatorRegistryWatcherImpl::update_local_validator(PublicKeyHash key_hash
     VLOG(validator, INFO) << "Update registry: need to update entry, wait for allow_update_at (" << t << " s)";
     validator.update_at.relax(td::Timestamp::in(t));
     return;
+  }
+  if (val_set_idx == 36) {
+    CHECK(val_idx < val_set_size);
+    Ref<MasterchainStateQ> mc_state{mc_state_};
+    auto val_set_start_at = (double)mc_state->get_config()->get_validator_set_start_stop(1).first;
+    td::uint32 elections_end_before = get_elections_end_before(mc_state->get_config()->get_config_param(15));
+    if (elections_end_before != 0) {
+      double window_start = val_set_start_at - (double)elections_end_before * 0.9;
+      double window_length = (double)elections_end_before * 0.5;
+      td::Timestamp send_at = td::Timestamp::at_unix(window_start + window_length * val_idx / (double)val_set_size);
+      if (!send_at.is_in_past()) {
+        VLOG(validator, INFO) << "Update registry: need to update entry for the next validator set (" << val_idx << "/"
+                              << val_set_size << "), waiting (" << send_at.in() << " s)";
+        validator.update_at.relax(send_at);
+        return;
+      }
+    }
   }
 
   VLOG(validator, INFO) << "Update registry: updating entry";
