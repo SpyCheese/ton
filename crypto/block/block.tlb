@@ -1015,12 +1015,12 @@ val_registry_entry_old#eae0b274 collators:(HashmapE 256 ValRegistryCollator) mon
 val_registry_entry#eae0b274 collators:(HashmapE 256 ValRegistryCollator) monitoring_shards:ValRegistryShardSet
     self_adnl_id:bits256 = ValRegistryEntry;
 val_registry_collator#10364494 monitoring_shards:ValRegistryShardSet = ValRegistryCollator;
-val_registry_adnl_id_info#14108b04 allowUpdateAt:uint32 refcnt:uint32 addressList:(Maybe ^Cell) = ValRegistryAdnlIdInfo;
+val_registry_adnl_id_info#14108b04 allow_update_at:uint32 refcnt:uint32 address_list:(Maybe ^Cell) = ValRegistryAdnlIdInfo;
 
 val_registry_message_request#cdb9d286 signature:(512 * Bit) request:ValRegistryRequest = ValRegistryMessageRequest;
 val_registry_request_update#fbd82b02 last_key_block_seqno:uint32 val_set:uint8 val_idx:uint16 valid_until:uint32
     new_entry:(Maybe ^ValRegistryEntry) = ValRegistryRequest;
-val_registry_request_update_adnl_id#498cf8c7 adnl_id_full:bits256 validUntil:uint32 newAdnlNode:(Maybe ^Cell) = ValRegistryRequest;
+val_registry_request_update_adnl_id#498cf8c7 adnl_id_full:bits256 valid_until:uint32 new_adnl_node:(Maybe ^Cell) = ValRegistryRequest;
 
 val_registry_message_cleanup#32b85a9b nonce:uint64 = ValRegistryMessageCleanup;
 val_registry_message_update_code#34bdaa6c new_code:^Cell = ValRegistryMessageUpdateCode;
