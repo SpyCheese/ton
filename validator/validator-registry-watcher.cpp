@@ -116,12 +116,14 @@ struct RegistryState {
     if (!account.unpack(std::move(account_cs), mc_state->get_unix_time(), true)) {
       return td::Status::Error(PSTRING() << "failed to unpack registry contract -1:" << addr.to_hex());
     }
-    if (account.data.is_null()) {
-      return td::Status::Error(PSTRING() << "registry contract -1:" << addr.to_hex() << " has no data");
+    if (account.data.is_null() || account.code.is_null()) {
+      return td::Status::Error(PSTRING() << "registry contract -1:" << addr.to_hex() << " has no data or code");
     }
 
     RegistryState result;
     result.config = std::move(registry_config);
+    result.contract_updated =
+        (account.code->get_hash().to_hex() == "C220FB5C6E127B0BED4F6765CA0E0ABE53FE2FE236DA1AA9DD9BB878383229C8");
     if (block::gen::ValRegistryStorage::Record_val_registry_storage_old rec;
         block::gen::unpack_cell(account.data, rec)) {
       result.validators = vm::Dictionary{rec.registry, 256, false};
@@ -132,7 +134,6 @@ struct RegistryState {
       result.validators = vm::Dictionary{rec.registry, 256, false};
       result.last_cleanup_key_block_seqno = rec.last_cleanup_key_block_seqno;
       result.adnl_ids = vm::Dictionary{rec.adnl_ids, 256, false};
-      result.contract_updated = true;
       return std::move(result);
     }
     return td::Status::Error(PSTRING() << "failed to unpack registry contract -1:" << addr.to_hex() << " data");
