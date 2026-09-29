@@ -274,6 +274,7 @@ void ValidatorRegistryWatcherImpl::update(Ref<MasterchainState> mc_state, Ref<Va
     update_is_current_validator();
   }
   read_adnl_id_diff(registry_state_.adnl_ids, new_registry_state.adnl_ids);
+  bool contract_just_updated = !registry_state_.contract_updated && new_registry_state.contract_updated;
   registry_state_ = std::move(new_registry_state);
   inited_ = true;
   if (registry_state_.contract_updated) {
@@ -281,7 +282,7 @@ void ValidatorRegistryWatcherImpl::update(Ref<MasterchainState> mc_state, Ref<Va
       update_local_adnl_id(id, info);
     }
   }
-  if (opts->get_collators_list() != collators_list_ || mc_state_->is_key_state()) {
+  if (opts->get_collators_list() != collators_list_ || mc_state_->is_key_state() || contract_just_updated) {
     collators_list_ = opts->get_collators_list();
     for (auto& [key_hash, validator] : local_validators_) {
       validator.new_entry_cell = make_entry_cell(key_hash);
