@@ -36,6 +36,8 @@ struct ValidatorInfo {
 struct RegistryState {
   vm::Dictionary validators{256};
   BlockSeqno last_cleanup_key_block_seqno = 0;
+  vm::Dictionary adnl_ids{256};
+  bool contract_updated = false;
   block::ValidatorRegistryConfig config;
 
   td::Result<ValidatorInfo> get_validator_info(td::Bits256 public_key) {
@@ -60,13 +62,17 @@ struct RegistryState {
       if (info.entry.is_null()) {
         return Entry{};
       }
-      block::gen::ValRegistryEntry::Record rec;
-      if (!block::gen::unpack_cell(info.entry, rec)) {
+      Ref<vm::Cell> collators_root;
+      if (block::gen::ValRegistryEntry::Record rec; block::gen::unpack_cell(info.entry, rec)) {
+        collators_root = rec.collators->prefetch_ref();
+      } else if (block::gen::ValRegistryEntryOld::Record rec; block::gen::unpack_cell(info.entry, rec)) {
+        collators_root = rec.collators->prefetch_ref();
+      } else {
         return td::Status::Error("failed to parse entry");
       }
       Entry entry;
       td::uint32 cnt = 0;
-      vm::Dictionary{rec.collators, 256}.check_for_each([&](Ref<vm::CellSlice>, td::ConstBitPtr key, int) -> bool {
+      vm::Dictionary{collators_root, 256}.check_for_each([&](Ref<vm::CellSlice>, td::ConstBitPtr key, int) -> bool {
         if (cnt >= config.max_collators_per_validator) {
           return false;
         }
@@ -101,15 +107,22 @@ struct RegistryState {
       return td::Status::Error(PSTRING() << "registry contract -1:" << addr.to_hex() << " has no data");
     }
 
-    block::gen::ValRegistryStorage::Record rec;
-    if (!block::gen::unpack_cell(account.data, rec)) {
-      return td::Status::Error(PSTRING() << "failed to unpack registry contract -1:" << addr.to_hex() << " data");
-    }
     RegistryState result;
-    result.validators = vm::Dictionary{rec.registry, 256, false};
-    result.last_cleanup_key_block_seqno = rec.last_cleanup_key_block_seqno;
     result.config = std::move(registry_config);
-    return std::move(result);
+    if (block::gen::ValRegistryStorage::Record_val_registry_storage_old rec;
+        block::gen::unpack_cell(account.data, rec)) {
+      result.validators = vm::Dictionary{rec.registry, 256, false};
+      result.last_cleanup_key_block_seqno = rec.last_cleanup_key_block_seqno;
+      return std::move(result);
+    }
+    if (block::gen::ValRegistryStorage::Record_val_registry_storage rec; block::gen::unpack_cell(account.data, rec)) {
+      result.validators = vm::Dictionary{rec.registry, 256, false};
+      result.last_cleanup_key_block_seqno = rec.last_cleanup_key_block_seqno;
+      result.adnl_ids = vm::Dictionary{rec.adnl_ids, 256, false};
+      result.contract_updated = true;
+      return std::move(result);
+    }
+    return td::Status::Error(PSTRING() << "failed to unpack registry contract -1:" << addr.to_hex() << " data");
   }
 };
 
@@ -122,6 +135,9 @@ class ValidatorRegistryWatcherImpl : public ValidatorRegistryWatcher {
 
   void add_validator_key(PublicKeyHash key_hash) override {
     local_validators_.emplace(key_hash, LocalValidator{});
+    if (inited_) {
+      local_validators_[key_hash].new_entry_cell = make_entry_cell(key_hash);
+    }
     update_is_current_validator();
   }
 
@@ -138,6 +154,7 @@ class ValidatorRegistryWatcherImpl : public ValidatorRegistryWatcher {
 
   struct LocalValidator {
     td::Timestamp update_at = td::Timestamp::now();
+    Ref<vm::Cell> new_entry_cell = {};
   };
   std::map<PublicKeyHash, LocalValidator> local_validators_;
   td::Timestamp try_cleanup_at_ = td::Timestamp::now();
@@ -147,7 +164,6 @@ class ValidatorRegistryWatcherImpl : public ValidatorRegistryWatcher {
   Ref<MasterchainState> mc_state_;
   RegistryState registry_state_;
   Ref<CollatorsList> collators_list_;
-  Ref<vm::Cell> new_entry_cell_;
 
   void update_is_current_validator() {
     is_current_validator_ = false;
@@ -167,7 +183,7 @@ class ValidatorRegistryWatcherImpl : public ValidatorRegistryWatcher {
   }
 
   void update_local_validator(PublicKeyHash key_hash, LocalValidator& validator);
-  Ref<vm::Cell> make_entry_cell();
+  Ref<vm::Cell> make_entry_cell(PublicKeyHash key_hash);
 
   td::actor::Task<> sign_and_send_request(StdSmcAddress addr, PublicKeyHash key_hash, Ref<vm::Cell> request_cell);
   td::actor::Task<> send_external_message(StdSmcAddress addr, vm::CellSlice body);
@@ -191,8 +207,8 @@ void ValidatorRegistryWatcherImpl::update(Ref<MasterchainState> mc_state, Ref<Va
   }
   if (opts->get_collators_list() != collators_list_ || mc_state_->is_key_state()) {
     collators_list_ = opts->get_collators_list();
-    new_entry_cell_ = make_entry_cell();
-    for (auto& [_, validator] : local_validators_) {
+    for (auto& [key_hash, validator] : local_validators_) {
+      validator.new_entry_cell = make_entry_cell(key_hash);
       validator.update_at = td::Timestamp::now();
     }
   }
@@ -203,16 +219,20 @@ void ValidatorRegistryWatcherImpl::update(Ref<MasterchainState> mc_state, Ref<Va
     update_local_validator(id, validator);
   }
 
-  auto vset = mc_state_->get_total_validator_set(0);
-  if (is_current_validator_ && vset.not_null() &&
-      registry_state_.last_cleanup_key_block_seqno < mc_state_->last_key_block_id().seqno() &&
-      td::Random::fast(1, (int)vset->size()) == 1 && try_cleanup_at_.is_in_past()) {
-    VLOG(validator, INFO) << "Update registry: cleanup";
-    send_external_message(
-        registry_state_.config.contract_address,
-        vm::CellBuilder{}.store_long(block::gen::ValRegistryMessageCleanup::cons_tag[0], 32).as_cellslice())
-        .start()
-        .detach("send registry cleanup");
+  if (is_current_validator_ && try_cleanup_at_.is_in_past() &&
+      registry_state_.last_cleanup_key_block_seqno < mc_state_->last_key_block_id().seqno()) {
+    auto vset = mc_state_->get_total_validator_set(0);
+    if (vset.not_null() && td::Random::fast(1, (int)vset->size()) == 1) {
+      VLOG(validator, INFO) << "Update registry: cleanup";
+      vm::CellBuilder cb;
+      cb.store_long(block::gen::ValRegistryMessageCleanup::cons_tag[0], 32);
+      if (registry_state_.contract_updated) {
+        cb.store_long(td::Random::fast_uint64(), 64);
+      }
+      send_external_message(registry_state_.config.contract_address, cb.as_cellslice())
+          .start()
+          .detach("send registry cleanup");
+    }
     try_cleanup_at_ = td::Timestamp::in(60.0);
   }
 }
@@ -248,7 +268,7 @@ void ValidatorRegistryWatcherImpl::update_local_validator(PublicKeyHash key_hash
     return;
   }
   ValidatorInfo info = r_info.move_as_ok();
-  if (cell_equal(new_entry_cell_, info.entry)) {
+  if (cell_equal(validator.new_entry_cell, info.entry)) {
     validator.update_at.relax(td::Timestamp::in(60.0));
     return;
   }
@@ -261,12 +281,13 @@ void ValidatorRegistryWatcherImpl::update_local_validator(PublicKeyHash key_hash
 
   VLOG(validator, INFO) << "Update registry: updating entry";
   vm::CellBuilder cb;
-  cb.store_maybe_ref(new_entry_cell_);
-  block::gen::ValRegistryRequest::Record request{.last_key_block_seqno = mc_state_->last_key_block_id().seqno(),
-                                                 .val_set = (int)val_set_idx,
-                                                 .val_idx = (int)val_idx,
-                                                 .valid_until = (UnixTime)td::Clocks::system() + 60,
-                                                 .new_entry = cb.as_cellslice_ref()};
+  cb.store_maybe_ref(validator.new_entry_cell);
+  block::gen::ValRegistryRequest::Record_val_registry_request_update request{
+      .last_key_block_seqno = mc_state_->last_key_block_id().seqno(),
+      .val_set = (int)val_set_idx,
+      .val_idx = (int)val_idx,
+      .valid_until = (UnixTime)td::Clocks::system() + 60,
+      .new_entry = cb.as_cellslice_ref()};
   Ref<vm::Cell> request_cell;
   CHECK(block::gen::pack_cell(request_cell, request));
   sign_and_send_request(registry_state_.config.contract_address, key_hash, std::move(request_cell))
@@ -275,7 +296,7 @@ void ValidatorRegistryWatcherImpl::update_local_validator(PublicKeyHash key_hash
   validator.update_at.relax(td::Timestamp::in(60.0));
 }
 
-Ref<vm::Cell> ValidatorRegistryWatcherImpl::make_entry_cell() {
+Ref<vm::Cell> ValidatorRegistryWatcherImpl::make_entry_cell(PublicKeyHash key_hash) {
   std::set<adnl::AdnlNodeIdShort> collators;
   collators.insert(collators_list_->register_collators.begin(), collators_list_->register_collators.end());
   if (collators.size() > registry_state_.config.max_collators_per_validator) {
@@ -287,7 +308,7 @@ Ref<vm::Cell> ValidatorRegistryWatcherImpl::make_entry_cell() {
     }
   }
   VLOG(validator, INFO) << "Make entry cell: " << collators.size() << " collators";
-  if (collators.empty()) {
+  if (collators.empty() && !registry_state_.contract_updated) {
     return {};
   }
   auto monitoring_shards_all = vm::CellBuilder{}.store_long(0, 4).store_ones(1).as_cellslice_ref();
@@ -298,8 +319,24 @@ Ref<vm::Cell> ValidatorRegistryWatcherImpl::make_entry_cell() {
     collators_dict.set_builder(id.bits256_value(), std::move(cb));
   }
   Ref<vm::Cell> result;
-  CHECK(block::gen::t_ValRegistryEntry.cell_pack_val_registry_entry(result, collators_dict.get_root(),
-                                                                    monitoring_shards_all));
+  if (registry_state_.contract_updated) {
+    td::Bits256 self_adnl_id = td::Bits256::zero();
+    for (int next : {0, 1, -1}) {
+      auto val_set = mc_state_->get_total_validator_set(next);
+      if (val_set.not_null()) {
+        auto val = val_set->get_validator(key_hash.bits256_value());
+        if (val) {
+          self_adnl_id = val->addr.is_zero() ? key_hash.bits256_value() : val->addr;
+          break;
+        }
+      }
+    }
+    CHECK(block::gen::t_ValRegistryEntry.cell_pack_val_registry_entry(result, collators_dict.get_root(),
+                                                                      monitoring_shards_all, self_adnl_id));
+  } else {
+    CHECK(block::gen::t_ValRegistryEntryOld.cell_pack_val_registry_entry_old(result, collators_dict.get_root(),
+                                                                             monitoring_shards_all));
+  }
   return result;
 }
 
