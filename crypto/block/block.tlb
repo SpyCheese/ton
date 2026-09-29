@@ -699,7 +699,8 @@ _ BlockCreateFees = ConfigParam 14;
 
 _ validators_elected_for:uint32 elections_start_before:uint32
   elections_end_before:uint32 stake_held_for:uint32
-  = ConfigParam 15;
+  = ElectionTimings;
+_ ElectionTimings = ConfigParam 15;
 
 _ max_validators:(## 16) max_main_validators:(## 16) min_validators:(## 16)
   { max_validators >= max_main_validators }
