@@ -19,7 +19,8 @@ class ValidatorRegistryWatcher : public td::actor::Actor {
   virtual void update(Ref<MasterchainState> mc_state, Ref<ValidatorManagerOptions> opts) = 0;
 
   static td::actor::ActorOwn<ValidatorRegistryWatcher> create(td::actor::ActorId<ValidatorManager> manager,
-                                                              td::actor::ActorId<keyring::Keyring> keyring);
+                                                              td::actor::ActorId<keyring::Keyring> keyring,
+                                                              td::actor::ActorId<adnl::Adnl> adnl);
   static std::set<adnl::AdnlNodeIdShort> get_all_collators(Ref<MasterchainState> mc_state);
 };
 
