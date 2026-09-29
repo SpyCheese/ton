@@ -202,6 +202,7 @@ class ValidatorRegistryWatcherImpl : public ValidatorRegistryWatcher {
     UnixTime allow_update_at = 0;
   };
   std::map<adnl::AdnlNodeIdShort, StoredAdnlId> stored_adnl_ids_;
+  std::map<adnl::AdnlNodeIdShort, UnixTime> adnl_ids_to_gc_;
 
   void update_is_current_validator() {
     is_current_validator_ = false;
@@ -283,10 +284,10 @@ void ValidatorRegistryWatcherImpl::update(Ref<MasterchainState> mc_state, Ref<Va
     update_local_validator(id, validator);
   }
 
-  if (is_current_validator_ && try_cleanup_at_.is_in_past() &&
-      registry_state_.last_cleanup_key_block_seqno < mc_state_->last_key_block_id().seqno()) {
-    auto vset = mc_state_->get_total_validator_set(0);
-    if (vset.not_null() && td::Random::fast(1, (int)vset->size()) == 1) {
+  auto vset = mc_state_->get_total_validator_set(0);
+  if (is_current_validator_ && try_cleanup_at_.is_in_past() && vset.not_null()) {
+    if (registry_state_.last_cleanup_key_block_seqno < mc_state_->last_key_block_id().seqno() &&
+        td::Random::fast(1, (int)vset->size()) == 1) {
       VLOG(validator, INFO) << "Update registry: cleanup";
       vm::CellBuilder cb;
       cb.store_long(block::gen::ValRegistryMessageCleanup::cons_tag[0], 32);
@@ -296,6 +297,17 @@ void ValidatorRegistryWatcherImpl::update(Ref<MasterchainState> mc_state, Ref<Va
       send_external_message(registry_state_.config.contract_address, cb.as_cellslice())
           .start()
           .detach("send registry cleanup");
+    }
+    for (auto& [id, remove_at] : adnl_ids_to_gc_) {
+      if ((double)remove_at < td::Clocks::system() && td::Random::fast(1, (int)vset->size()) == 1) {
+        VLOG(validator, DEBUG) << "Update registry: remove adnl id " << id;
+        vm::CellBuilder cb;
+        CHECK(block::gen::t_ValRegistryMessageCleanupAdnlId.pack_val_registry_message_cleanup_adnl_id(
+            cb, id.bits256_value(), td::Random::fast_uint64()));
+        send_external_message(registry_state_.config.contract_address, cb.as_cellslice())
+            .start()
+            .detach("send adnl id cleanup");
+      }
     }
     try_cleanup_at_ = td::Timestamp::in(60.0);
   }
@@ -451,7 +463,12 @@ void ValidatorRegistryWatcherImpl::read_adnl_id_diff(vm::Dictionary& old_dict, v
               new_cell = rec.address_list->prefetch_ref();
               new_authorized = true;
               allow_update_at = rec.allow_update_at;
+              adnl_ids_to_gc_.erase(adnl_id);
+            } else {
+              adnl_ids_to_gc_[adnl_id] = rec.allow_update_at;
             }
+          } else {
+            adnl_ids_to_gc_.erase(adnl_id);
           }
           if (!new_authorized) {
             if (stored_adnl_ids_.erase(adnl_id)) {
