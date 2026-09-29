@@ -1024,4 +1024,4 @@ val_registry_request_update_adnl_id#498cf8c7 adnl_id_full:bits256 valid_until:ui
 
 val_registry_message_cleanup#32b85a9b nonce:uint64 = ValRegistryMessageCleanup;
 val_registry_message_update_code#34bdaa6c new_code:^Cell = ValRegistryMessageUpdateCode;
-val_registry_message_cleanup_adnl_id#7b2f3bcc adnlId:bits256 nonce:uint64 = ValRegistryMessageRequest;
+val_registry_message_cleanup_adnl_id#7b2f3bcc adnlId:bits256 nonce:uint64 = ValRegistryMessageCleanupAdnlId;
