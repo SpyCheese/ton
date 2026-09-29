@@ -473,6 +473,7 @@ void ValidatorRegistryWatcherImpl::read_adnl_id_diff(vm::Dictionary& old_dict, v
           if (!new_authorized) {
             if (stored_adnl_ids_.erase(adnl_id)) {
               VLOG(validator, DEBUG) << "adnl node " << adnl_id << " removed from registry";
+              td::actor::send_closure(adnl_, &adnl::Adnl::del_static_peer, adnl_id);
             }
             return true;
           }
@@ -483,16 +484,20 @@ void ValidatorRegistryWatcherImpl::read_adnl_id_diff(vm::Dictionary& old_dict, v
           if (new_cell.is_null()) {
             VLOG(validator, DEBUG) << "adnl node " << adnl_id << " has empty entry in registry";
             stored_adnl_ids_[adnl_id].node = std::nullopt;
+            td::actor::send_closure(adnl_, &adnl::Adnl::del_static_peer, adnl_id);
             return true;
           }
           auto r_node = parse_adnl_node(adnl_id, new_cell);
           if (r_node.is_error()) {
             VLOG(validator, DEBUG) << "adnl node " << adnl_id << " in registry is invalid: " << r_node.move_as_error();
             stored_adnl_ids_[adnl_id].node = std::nullopt;
+            td::actor::send_closure(adnl_, &adnl::Adnl::del_static_peer, adnl_id);
             return true;
           }
           VLOG(validator, DEBUG) << "updated adnl node " << adnl_id << " in registry";
-          stored_adnl_ids_[adnl_id].node.emplace(r_node.move_as_ok());
+          auto node = r_node.move_as_ok();
+          stored_adnl_ids_[adnl_id].node.emplace(node);
+          td::actor::send_closure(adnl_, &adnl::Adnl::add_static_peer, std::move(node));
           return true;
         });
     if (!ok) {
