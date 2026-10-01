@@ -1014,8 +1014,9 @@ val_registry_storage#9bc722a9 registry:(HashmapE 256 ValRegistryValidator) last_
 val_registry_validator#57766eec allow_update_at:uint32 entry:(Maybe ^ValRegistryEntry) = ValRegistryValidator;
 val_registry_entry_old#eae0b274 collators:(HashmapE 256 ValRegistryCollator) monitoring_shards:ValRegistryShardSet = ValRegistryEntryOld;
 val_registry_entry#eae0b274 collators:(HashmapE 256 ValRegistryCollator) monitoring_shards:ValRegistryShardSet
-    self_adnl_id:bits256 = ValRegistryEntry;
+    extra_adnl_ids:(HashmapE 256 ValRegistryExtraAdnlId) = ValRegistryEntry;
 val_registry_collator#10364494 monitoring_shards:ValRegistryShardSet = ValRegistryCollator;
+val_registry_extra_adnl_id#1e1b6975 = ValRegistryExtraAdnlId;
 val_registry_adnl_id_info#14108b04 allow_update_at:uint32 refcnt:uint32 address_list:(Maybe ^Cell) = ValRegistryAdnlIdInfo;
 
 val_registry_message_request#cdb9d286 signature:(512 * Bit) request:ValRegistryRequest = ValRegistryMessageRequest;

@@ -123,7 +123,7 @@ struct RegistryState {
     RegistryState result;
     result.config = std::move(registry_config);
     result.contract_updated =
-        (account.code->get_hash().to_hex() == "C220FB5C6E127B0BED4F6765CA0E0ABE53FE2FE236DA1AA9DD9BB878383229C8");
+        (account.code->get_hash().to_hex() == "9AAB0A18B3144EF2654886477B5A09D9285AC2574D58C5F18088030222DEACA9");
     if (block::gen::ValRegistryStorage::Record_val_registry_storage_old rec;
         block::gen::unpack_cell(account.data, rec)) {
       result.validators = vm::Dictionary{rec.registry, 256, false};
@@ -428,6 +428,7 @@ Ref<vm::Cell> ValidatorRegistryWatcherImpl::make_entry_cell(PublicKeyHash key_ha
   }
   Ref<vm::Cell> result;
   if (registry_state_.contract_updated) {
+    vm::Dictionary extra_adnl_ids_dict{256};
     td::Bits256 self_adnl_id = td::Bits256::zero();
     for (int next : {0, 1, -1}) {
       auto val_set = mc_state_->get_total_validator_set(next);
@@ -439,8 +440,11 @@ Ref<vm::Cell> ValidatorRegistryWatcherImpl::make_entry_cell(PublicKeyHash key_ha
         }
       }
     }
-    CHECK(block::gen::t_ValRegistryEntry.cell_pack_val_registry_entry(result, collators_dict.get_root(),
-                                                                      monitoring_shards_all, self_adnl_id));
+    vm::CellBuilder cb;
+    CHECK(block::gen::t_ValRegistryExtraAdnlId.pack_val_registry_extra_adnl_id(cb));
+    extra_adnl_ids_dict.set_builder(self_adnl_id, std::move(cb));
+    CHECK(block::gen::t_ValRegistryEntry.cell_pack_val_registry_entry(
+        result, collators_dict.get_root(), monitoring_shards_all, extra_adnl_ids_dict.get_root()));
   } else {
     CHECK(block::gen::t_ValRegistryEntryOld.cell_pack_val_registry_entry_old(result, collators_dict.get_root(),
                                                                              monitoring_shards_all));

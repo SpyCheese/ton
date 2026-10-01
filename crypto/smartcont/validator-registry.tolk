@@ -7,6 +7,7 @@ import "@stdlib/gas-payments"
 const VAL_REGISTRY_CONFIG_PARAM = 46;
 const VALIDATOR_REQUEST_PERIOD = 120;
 const ADNL_ID_REQUEST_PERIOD = 600;
+const MAX_EXTRA_ADNL_IDS = 6;
 
 const OP_CLEANUP = 0x32b85a9b;
 const OP_UPDATE_CODE = 0x34bdaa6c;
@@ -30,6 +31,7 @@ const ERR_NEW_CODE_ALREADY_INSTALLED = 913;
 const ERR_ADNL_ID_NOT_FOUND = 914;
 const ERR_INVALID_ADNL_NODE = 915;
 const ERR_ADNL_ID_IS_ALIVE = 916;
+const ERR_TOO_MANY_EXTRA_ADNL_IDS = 917;
 
 const OLD_STORAGE_TAG = 0x9bc722a8;
 
@@ -58,11 +60,14 @@ struct (0x57766eec) ValidatorInfo {
 struct (0xeae0b274) Entry {
     collators: map<uint256, Collator>,
     monitoringShards: ShardSet,
-    selfAdnlId: uint256
+    extraAdnlIds: map<uint256, ExtraAdnlId>
 }
 
 struct (0x10364494) Collator {
     monitoringShards: ShardSet
+}
+
+struct (0x1e1b6975) ExtraAdnlId {
 }
 
 struct (0x14108b04) AdnlIdInfo {
@@ -151,6 +156,14 @@ fun validateEntry(c: Cell<Entry>?) {
         r.loadValue();
         r = entry.collators.iterateNext(r);
     }
+    var nExtraAdnlIds = 0;
+    var r2 = entry.extraAdnlIds.findFirst();
+    while (r2.isFound) {
+        nExtraAdnlIds += 1;
+        assert (nExtraAdnlIds <= MAX_EXTRA_ADNL_IDS) throw ERR_TOO_MANY_EXTRA_ADNL_IDS;
+        r2.loadValue();
+        r2 = entry.extraAdnlIds.iterateNext(r2);
+    }
 }
 
 fun getValidatorKeys(configIdx: int, mutate validators: map<uint256, ()>) {
@@ -194,11 +207,15 @@ fun updateAdnlIdRefcnt(mutate storage: Storage, adnlId: uint256, diff: int) {
 }
 
 fun updateAdnlIdRefcntForEntry(mutate storage: Storage, entry: Entry, diff: int) {
-    updateAdnlIdRefcnt(mutate storage, entry.selfAdnlId, diff);
     var r = entry.collators.findFirst();
     while (r.isFound) {
         updateAdnlIdRefcnt(mutate storage, r.getKey(), diff);
         r = entry.collators.iterateNext(r);
+    }
+    var r2 = entry.extraAdnlIds.findFirst();
+    while (r2.isFound) {
+        updateAdnlIdRefcnt(mutate storage, r2.getKey(), diff);
+        r2 = entry.extraAdnlIds.iterateNext(r2);
     }
 }
 
