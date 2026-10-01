@@ -2146,6 +2146,22 @@ void ValidatorEngine::finish_fast_sync_member_certificate_import(td::Promise<> p
   write_config(std::move(promise));
 }
 
+void ValidatorEngine::update_fast_sync_clients_opts() {
+  if (validator_options_.is_null()) {
+    return;
+  }
+  td::Ref<ton::validator::FastSyncClientsList> ref{true};
+  auto &list = ref.write();
+  for (auto &client : config_.fast_sync_overlay_clients) {
+    list.clients.push_back(client.id);
+  }
+  validator_options_.write().set_fast_sync_clients_list(std::move(ref));
+  if (!validator_manager_.empty()) {
+    td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::update_options,
+                            validator_options_);
+  }
+}
+
 td::Promise<ton::PublicKey> ValidatorEngine::get_key_promise(td::MultiPromise::InitGuard &ig) {
   auto P = td::PromiseCreator::lambda(
       [SelfId = actor_id(this), promise = ig.get_promise()](td::Result<ton::PublicKey> R) mutable {
@@ -2168,6 +2184,7 @@ void ValidatorEngine::start() {
   load_collators_list();
   load_shard_block_verifier_config();
   load_noncritical_params_overrides();
+  update_fast_sync_clients_opts();
   read_config_ = true;
   start_adnl();
 }
@@ -5357,6 +5374,7 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_addFastSy
   }
   if (!found) {
     config_.fast_sync_overlay_clients.emplace_back(adnl_id, slot);
+    update_fast_sync_clients_opts();
   }
   write_config([promise = std::move(promise)](td::Result<> R) mutable {
     if (R.is_error()) {
@@ -5385,6 +5403,7 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_delFastSy
     if (c.id == adnl_id) {
       std::swap(c, config_.fast_sync_overlay_clients.back());
       config_.fast_sync_overlay_clients.pop_back();
+      update_fast_sync_clients_opts();
       break;
     }
   }

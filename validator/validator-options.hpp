@@ -158,6 +158,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   td::Ref<CollatorsList> get_collators_list() const override {
     return collators_list_;
   }
+  td::Ref<FastSyncClientsList> get_fast_sync_clients_list() const override {
+    return fast_sync_clients_list_;
+  }
   bool check_collator_node_whitelist(adnl::AdnlNodeIdShort id) const override {
     return !collator_node_whitelist_enabled_ || collator_node_whitelist_.contains(id);
   }
@@ -278,6 +281,9 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   void set_collators_list(td::Ref<CollatorsList> list) override {
     collators_list_ = std::move(list);
   }
+  void set_fast_sync_clients_list(td::Ref<FastSyncClientsList> list) override {
+    fast_sync_clients_list_ = std::move(list);
+  }
   void set_collator_node_whitelisted_validator(adnl::AdnlNodeIdShort id, bool add) override {
     if (add) {
       collator_node_whitelist_.insert(id);
@@ -354,6 +360,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
   td::Ref<CollatorOptions> collator_options_{true};
   bool permanent_celldb_ = false;
   td::Ref<CollatorsList> collators_list_{true, CollatorsList::default_list()};
+  td::Ref<FastSyncClientsList> fast_sync_clients_list_{true};
   std::set<adnl::AdnlNodeIdShort> collator_node_whitelist_;
   bool collator_node_whitelist_enabled_ = false;
   td::Ref<ShardBlockVerifierConfig> shard_block_verifier_config_{true};

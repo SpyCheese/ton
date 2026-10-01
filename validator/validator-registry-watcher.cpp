@@ -16,6 +16,9 @@
 namespace ton::validator {
 
 namespace {
+
+constexpr size_t MAX_EXTRA_ADNL_IDS = 6;
+
 bool cell_equal(const Ref<vm::Cell>& a, const Ref<vm::Cell>& b) {
   if (a.is_null()) {
     return b.is_null();
@@ -35,6 +38,12 @@ td::uint32 get_elections_end_before(Ref<vm::Cell> cell) {
     return 0;
   }
   return rec.elections_end_before;
+}
+
+Ref<vm::CellSlice> extra_adnl_id_record() {
+  vm::CellBuilder cb;
+  CHECK(block::gen::t_ValRegistryExtraAdnlId.pack_val_registry_extra_adnl_id(cb));
+  return cb.as_cellslice_ref();
 }
 
 struct Entry {
@@ -202,6 +211,7 @@ class ValidatorRegistryWatcherImpl : public ValidatorRegistryWatcher {
   Ref<MasterchainState> mc_state_;
   RegistryState registry_state_;
   Ref<CollatorsList> collators_list_;
+  Ref<FastSyncClientsList> fast_sync_clients_list_;
 
   struct LocalAdnlId {
     td::Timestamp update_at = td::Timestamp::now();
@@ -283,8 +293,10 @@ void ValidatorRegistryWatcherImpl::update(Ref<MasterchainState> mc_state, Ref<Va
       update_local_adnl_id(id, info);
     }
   }
-  if (opts->get_collators_list() != collators_list_ || mc_state_->is_key_state() || contract_just_updated) {
+  if (opts->get_collators_list() != collators_list_ || opts->get_fast_sync_clients_list() != fast_sync_clients_list_ ||
+      mc_state_->is_key_state() || contract_just_updated) {
     collators_list_ = opts->get_collators_list();
+    fast_sync_clients_list_ = opts->get_fast_sync_clients_list();
     for (auto& [key_hash, validator] : local_validators_) {
       validator.new_entry_cell = make_entry_cell(key_hash);
       validator.update_at = td::Timestamp::now();
@@ -440,9 +452,17 @@ Ref<vm::Cell> ValidatorRegistryWatcherImpl::make_entry_cell(PublicKeyHash key_ha
         }
       }
     }
-    vm::CellBuilder cb;
-    CHECK(block::gen::t_ValRegistryExtraAdnlId.pack_val_registry_extra_adnl_id(cb));
-    extra_adnl_ids_dict.set_builder(self_adnl_id, std::move(cb));
+    extra_adnl_ids_dict.set(self_adnl_id, extra_adnl_id_record());
+    size_t adnl_ids = 1;
+    for (adnl::AdnlNodeIdShort id : fast_sync_clients_list_->clients) {
+      if (adnl_ids >= MAX_EXTRA_ADNL_IDS) {
+        break;
+      }
+      if (!collators.contains(id) &&
+          extra_adnl_ids_dict.set(id.bits256_value(), extra_adnl_id_record(), vm::Dictionary::SetMode::Add)) {
+        ++adnl_ids;
+      }
+    }
     CHECK(block::gen::t_ValRegistryEntry.cell_pack_val_registry_entry(
         result, collators_dict.get_root(), monitoring_shards_all, extra_adnl_ids_dict.get_root()));
   } else {
