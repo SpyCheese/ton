@@ -167,6 +167,7 @@ class FullNode : public td::actor::Actor {
 
   virtual void import_fast_sync_member_certificate(adnl::AdnlNodeIdShort local_id,
                                                    overlay::OverlayMemberCertificate cert) = 0;
+  virtual void initial_config_loaded() = 0;
 
   virtual td::actor::Task<td::BufferSlice> handle_query(td::BufferSlice query, adnl::AdnlNodeIdShort src,
                                                         QuerySource source) = 0;
@@ -184,10 +185,10 @@ class FullNode : public td::actor::Actor {
 
   static constexpr td::int32 MAX_FAST_SYNC_OVERLAY_CLIENTS = 5;
   static constexpr td::uint32 PROTO_VERSION_MAJOR = 3;
-  static constexpr td::uint32 PROTO_VERSION_MINOR = 2;
+  static constexpr td::uint32 PROTO_VERSION_MINOR = 3;
 
   static td::actor::ActorOwn<FullNode> create(
-      ton::PublicKeyHash local_id, adnl::AdnlNodeIdShort adnl_id, FileHash zero_state_file_hash, FullNodeOptions opts,
+      adnl::AdnlNodeIdShort adnl_id, FileHash zero_state_file_hash, FullNodeOptions opts,
       td::actor::ActorId<keyring::Keyring> keyring, td::actor::ActorId<adnl::Adnl> adnl,
       td::actor::ActorId<rldp2::Rldp> rldp2, td::actor::ActorId<quic::QuicSender> quic,
       td::actor::ActorId<dht::Dht> dht, td::actor::ActorId<overlay::Overlays> overlays,
