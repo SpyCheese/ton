@@ -94,6 +94,10 @@ struct CollatorsList : public td::CntObject {
   static CollatorsList default_list();
 };
 
+struct FastSyncClientsList : public td::CntObject {
+  std::vector<adnl::AdnlNodeIdShort> clients;
+};
+
 struct ShardBlockVerifierConfig : public td::CntObject {
   struct Shard {
     ShardIdFull shard_id;
@@ -191,6 +195,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual bool get_parallel_validation() const = 0;
   virtual bool get_permanent_celldb() const = 0;
   virtual td::Ref<CollatorsList> get_collators_list() const = 0;
+  virtual td::Ref<FastSyncClientsList> get_fast_sync_clients_list() const = 0;
   virtual bool check_collator_node_whitelist(adnl::AdnlNodeIdShort id) const = 0;
   virtual td::Ref<ShardBlockVerifierConfig> get_shard_block_verifier_config() const = 0;
   virtual std::string get_db_event_fifo_path() const = 0;
@@ -229,6 +234,7 @@ struct ValidatorManagerOptions : public td::CntObject {
   virtual void set_collator_options(td::Ref<CollatorOptions> value) = 0;
   virtual void set_permanent_celldb(bool value) = 0;
   virtual void set_collators_list(td::Ref<CollatorsList> list) = 0;
+  virtual void set_fast_sync_clients_list(td::Ref<FastSyncClientsList> list) = 0;
   virtual void set_collator_node_whitelisted_validator(adnl::AdnlNodeIdShort id, bool add) = 0;
   virtual void set_collator_node_whitelist_enabled(bool enabled) = 0;
   virtual void set_shard_block_verifier_config(td::Ref<ShardBlockVerifierConfig> config) = 0;

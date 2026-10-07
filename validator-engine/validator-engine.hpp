@@ -225,6 +225,7 @@ class ValidatorEngine : public td::actor::Actor {
   void write_config(td::Promise<td::Unit> promise);
   void schedule_fast_sync_member_certificates_write();
   void finish_fast_sync_member_certificate_import(td::Promise<td::Unit> promise, bool defer_write);
+  void update_fast_sync_clients_opts();
 
   std::map<td::uint32, ton::adnl::AdnlAddressList> addr_lists_;
   std::map<td::uint32, ton::adnl::AdnlAddressList> prio_addr_lists_;
