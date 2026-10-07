@@ -106,16 +106,11 @@ static td::Result<ton::adnl::AdnlNodeIdShort> parse_adnl_id_hex(td::Slice value)
 }
 
 Config::Config() {
-  out_port = 3278;
   full_node = ton::PublicKeyHash::zero();
 }
 
-Config::Config(const ton::ton_api::engine_validator_config &config) {
+Config::Config(ton::ton_api::engine_validator_config config) {
   full_node = ton::PublicKeyHash::zero();
-  out_port = static_cast<td::uint16>(config.out_port_);
-  if (!out_port) {
-    out_port = 3278;
-  }
   for (auto &addr : config.addrs_) {
     td::IPAddress ip;
     std::vector<AdnlCategory> categories;
@@ -198,6 +193,7 @@ Config::Config(const ton::ton_api::engine_validator_config &config) {
       auto key = ton::adnl::AdnlNodeIdShort{client->adnl_id_};
       fast_sync_overlay_clients.emplace_back(std::move(key), client->slot_);
     }
+    ext_message_pool_config = std::move(config.extraconfig_->ext_message_pool_config_);
   } else {
     state_serializer_enabled = true;
   }
@@ -294,7 +290,7 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
 
   ton::tl_object_ptr<ton::ton_api::engine_validator_extraConfig> extra_config_obj = {};
   if (!state_serializer_enabled || !fast_sync_member_certificates.empty() || collator_node_whitelist_obj ||
-      !fast_sync_overlay_clients.empty()) {
+      !fast_sync_overlay_clients.empty() || ext_message_pool_config) {
     // Non-default values
     extra_config_obj = ton::create_tl_object<ton::ton_api::engine_validator_extraConfig>();
     extra_config_obj->state_serializer_enabled_ = state_serializer_enabled;
@@ -308,6 +304,15 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
       extra_config_obj->fast_sync_overlay_clients_.push_back(
           ton::create_tl_object<ton::ton_api::engine_validator_fastSyncOverlayClient>(client.id.bits256_value(),
                                                                                       client.slot));
+    }
+    if (ext_message_pool_config) {
+      extra_config_obj->ext_message_pool_config_ =
+          ton::create_tl_object<ton::ton_api::engine_validator_extMessagePoolConfig>(
+              ext_message_pool_config->max_mempool_messages_, ext_message_pool_config->num_regular_checkers_,
+              ext_message_pool_config->num_priority_checkers_, ext_message_pool_config->max_admission_waiters_,
+              ext_message_pool_config->max_ext_msg_per_addr_,
+              ext_message_pool_config->max_ext_msg_per_addr_time_window_,
+              ext_message_pool_config->local_ls_message_priority_);
     }
   }
 
@@ -337,7 +342,7 @@ ton::tl_object_ptr<ton::ton_api::engine_validator_config> Config::tl() const {
   }
 
   return ton::create_tl_object<ton::ton_api::engine_validator_config>(
-      out_port, std::move(addrs_vec), std::move(adnl_vec), std::move(dht_vec), std::move(val_vec), std::move(col_vec),
+      std::move(addrs_vec), std::move(adnl_vec), std::move(dht_vec), std::move(val_vec), std::move(col_vec),
       full_node.tl(), std::move(full_node_slaves_vec), std::move(full_node_masters_vec),
       std::move(full_node_config_obj), std::move(extra_config_obj), std::move(liteserver_vec), std::move(control_vec),
       std::move(shards_vec), std::move(gc_vec));
@@ -1622,9 +1627,6 @@ td::Status ValidatorEngine::load_global_config() {
   if (state_ttl_ != 0) {
     validator_options_.write().set_state_ttl(state_ttl_);
   }
-  if (max_mempool_num_ != 0) {
-    validator_options_.write().set_max_mempool_num(max_mempool_num_);
-  }
   if (block_ttl_ != 0) {
     validator_options_.write().set_block_ttl(block_ttl_);
   }
@@ -2097,7 +2099,7 @@ void ValidatorEngine::load_config(td::Promise<> promise) {
     return;
   }
 
-  config_ = Config{conf};
+  config_ = Config{std::move(conf)};
 
   td::MultiPromise mp;
   auto ig = mp.init_guard();
@@ -2173,12 +2175,16 @@ void ValidatorEngine::start() {
   load_collators_list();
   load_shard_block_verifier_config();
   load_noncritical_params_overrides();
+  if (config_.ext_message_pool_config) {
+    validator_options_.write().set_ext_message_pool_options(
+        ton::validator::ExtMessagePoolOptions::unpack(*config_.ext_message_pool_config).ensure().move_as_ok());
+  }
   read_config_ = true;
   start_adnl();
 }
 
 void ValidatorEngine::start_adnl() {
-  adnl_network_manager_ = ton::adnl::AdnlNetworkManager::create(config_.out_port);
+  adnl_network_manager_ = ton::adnl::AdnlNetworkManager::create();
   adnl_ = ton::adnl::Adnl::create(db_root_, keyring_.get());
   td::actor::send_closure(adnl_, &ton::adnl::Adnl::register_network_manager, adnl_network_manager_.get());
   td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::add<ton::adnl::AdnlNetworkManager>,
@@ -2318,7 +2324,7 @@ void ValidatorEngine::start_validator() {
   load_collator_options();
 
   validator_manager_ = ton::validator::ValidatorManagerFactory::create(
-      validator_options_, db_root_, keyring_.get(), adnl_.get(), rldp2_.get(), quic_.get(), overlay_manager_.get());
+      validator_options_, db_root_, keyring_.get(), adnl_.get(), quic_.get(), overlay_manager_.get());
   td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::add<ton::validator::ValidatorManagerInterface>,
                           validator_manager_.get(), &ton::validator::ValidatorManagerInterface::collect);
 
@@ -2341,6 +2347,12 @@ void ValidatorEngine::start_validator() {
     }
   }
 
+  // The last collector any configuration registers is the one above: start_adnl -> ... ->
+  // start_validator runs unconditionally in one turn, and the start-up steps after it register
+  // none. They can also wait on the full node coming up, so sealing at the end of the chain would
+  // keep /metrics answering 503 for the whole database warm-up instead of just for start-up.
+  td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::ready);
+
   started_validator();
 }
 
@@ -2351,9 +2363,6 @@ void ValidatorEngine::started_validator() {
 void ValidatorEngine::start_full_node() {
   if (!config_.full_node.is_zero() || !config_.full_node_slaves.empty()) {
     full_node_id_ = ton::adnl::AdnlNodeIdShort{config_.full_node};
-    auto pk = ton::PrivateKey{ton::privkeys::Ed25519::random()};
-    auto short_id = pk.compute_short_id();
-    td::actor::send_closure(keyring_, &ton::keyring::Keyring::add_key, std::move(pk), true, [](td::Result<>) {});
     if (config_.full_node_slaves.size() > 0) {
       std::vector<std::pair<ton::adnl::AdnlNodeIdFull, td::IPAddress>> vec;
       for (auto &x : config_.full_node_slaves) {
@@ -2375,8 +2384,8 @@ void ValidatorEngine::start_full_node() {
     ton::validator::fullnode::FullNodeOptions full_node_options = full_node_options_;
     full_node_options.config_ = config_.full_node_config;
     full_node_ = ton::validator::fullnode::FullNode::create(
-        short_id, full_node_id_, validator_options_->zero_block_id().file_hash, full_node_options, keyring_.get(),
-        adnl_.get(), rldp2_.get(), quic_.get(),
+        full_node_id_, validator_options_->zero_block_id().file_hash, full_node_options, keyring_.get(), adnl_.get(),
+        rldp2_.get(), quic_.get(),
         default_dht_node_.is_zero() ? td::actor::ActorId<ton::dht::Dht>{} : dht_nodes_[default_dht_node_].get(),
         overlay_manager_.get(), validator_manager_.get(), full_node_client_.get(), db_root_, std::move(P));
     for (auto &v : config_.validators) {
@@ -2390,6 +2399,7 @@ void ValidatorEngine::start_full_node() {
       td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::import_fast_sync_member_certificate,
                               x.first, x.second);
     }
+    td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::initial_config_loaded);
     if (!validator_telemetry_filename_.empty()) {
       td::actor::send_closure(full_node_, &ton::validator::fullnode::FullNode::set_validator_telemetry_filename,
                               validator_telemetry_filename_);
@@ -3412,6 +3422,34 @@ static td::Result<td::Ref<ton::validator::CollatorOptions>> parse_collator_optio
   }
   opts.force_full_collated_data = f.force_full_collated_data_;
   opts.ignore_collated_data_limits = f.ignore_collated_data_limits_;
+
+  static auto parse_param_limits =
+      [](const ton::tl_object_ptr<ton::ton_api::engine_validator_collatorOptions_paramLimits> &l)
+      -> td::Result<std::optional<block::ParamLimits>> {
+    if (!l) {
+      return std::nullopt;
+    }
+    if (l->underload_ < 0) {
+      return td::Status::Error("invalid underload value");
+    }
+    if (l->soft_limit_ < 0) {
+      return td::Status::Error("invalid soft_limit value");
+    }
+    if (l->hard_limit_ < 0) {
+      return td::Status::Error("invalid hard_limit value");
+    }
+    if (l->underload_ > l->soft_limit_) {
+      return td::Status::Error("underload should not be greater than soft_limit");
+    }
+    if (l->soft_limit_ > l->hard_limit_) {
+      return td::Status::Error("soft_limit should not be greater than hard_limit");
+    }
+    return block::ParamLimits(l->underload_, l->soft_limit_, l->hard_limit_);
+  };
+  TRY_RESULT_ASSIGN(opts.block_limits_bytes, parse_param_limits(f.block_limits_bytes_));
+  TRY_RESULT_ASSIGN(opts.block_limits_gas, parse_param_limits(f.block_limits_gas_));
+  TRY_RESULT_ASSIGN(opts.block_limits_lt_delta, parse_param_limits(f.block_limits_lt_delta_));
+  TRY_RESULT_ASSIGN(opts.block_limits_collated_data, parse_param_limits(f.block_limits_collated_data_));
 
   return ref;
 }
@@ -5508,6 +5546,36 @@ void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_waitForIn
                           std::move(P));
 }
 
+void ValidatorEngine::run_control_query(ton::ton_api::engine_validator_setExtMessagePoolOptions &query,
+                                        td::BufferSlice data, ton::PublicKeyHash src, td::uint32 perm,
+                                        td::Promise<td::BufferSlice> promise) {
+  if (!(perm & ValidatorEnginePermissions::vep_modify)) {
+    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::error, "not authorized")));
+    return;
+  }
+  if (!started_) {
+    promise.set_value(create_control_query_error(td::Status::Error(ton::ErrorCode::notready, "not started")));
+    return;
+  }
+  auto r_options = ton::validator::ExtMessagePoolOptions::unpack(*query.config_);
+  if (r_options.is_error()) {
+    promise.set_value(create_control_query_error(r_options.move_as_error_prefix("failed to unpack options: ")));
+    return;
+  }
+  validator_options_.write().set_ext_message_pool_options(r_options.move_as_ok());
+  td::actor::send_closure(validator_manager_, &ton::validator::ValidatorManagerInterface::update_options,
+                          validator_options_);
+  config_.ext_message_pool_config = std::move(query.config_);
+  write_config([promise = std::move(promise)](td::Result<> R) mutable {
+    if (R.is_error()) {
+      promise.set_value(create_control_query_error(R.move_as_error()));
+    } else {
+      promise.set_value(
+          ton::serialize_tl_object(ton::create_tl_object<ton::ton_api::engine_validator_success>(), true));
+    }
+  });
+}
+
 void ValidatorEngine::process_control_query(td::uint16 port, ton::adnl::AdnlNodeIdShort src,
                                             ton::adnl::AdnlNodeIdShort dst, td::BufferSlice data,
                                             td::Promise<td::BufferSlice> promise) {
@@ -5774,11 +5842,11 @@ int main(int argc, char *argv[]) {
                          acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_state_ttl, v); });
                          return td::Status::OK();
                        });
-  p.add_checked_option('m', "mempool-num", "Maximal number of mempool external message", [&](td::Slice s) {
-    TRY_RESULT(v, td::to_integer_safe<size_t>(s));
-    acts.push_back([&x, v]() { td::actor::send_closure(x, &ValidatorEngine::set_max_mempool_num, v); });
-    return td::Status::OK();
-  });
+  p.add_checked_option('m', "mempool-num", "deprecated (use set-ext-message-pool-options-json instead)",
+                       [&](td::Slice s) {
+                         TRY_RESULT(_, td::to_integer_safe<size_t>(s));
+                         return td::Status::OK();
+                       });
   p.add_checked_option('b', "block-ttl", "deprecated", [&](td::Slice fname) {
     auto v = td::to_double(fname);
     if (v <= 0) {
