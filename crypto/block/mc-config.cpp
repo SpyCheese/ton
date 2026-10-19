@@ -47,8 +47,6 @@ namespace block {
 using namespace std::literals::string_literals;
 using td::Ref;
 
-static constexpr td::uint64 max_total_validator_weight = 1ULL << 61;
-
 #define DBG(__n) dbg(__n) &&
 #define DSTART int __dcnt = 0;
 #define DEB DBG(++__dcnt)
@@ -666,9 +664,6 @@ td::Result<std::shared_ptr<TotalValidatorSet>> Config::unpack_validator_set(Ref<
   }
   if (rec.total_weight && rec.total_weight != ptr->total_weight) {
     return td::Status::Error("validator set declares incorrect total weight");
-  }
-  if (ptr->total_weight > max_total_validator_weight) {
-    return td::Status::Error("total weight of all validators in validator set exceeds 2^61");
   }
   if (use_cache) {
     cache.set(vset_root->get_hash(), ptr);
@@ -2199,6 +2194,18 @@ td::Result<std::pair<ton::UnixTime, ton::UnixTime>> Config::unpack_validator_set
     return std::pair<ton::UnixTime, ton::UnixTime>(rec0.utime_since, rec0.utime_until);
   }
   return td::Status::Error("validator set is invalid");
+}
+
+td::Result<td::uint32> Config::get_validator_elections_end_before() const {
+  auto param = get_config_param(15);
+  if (param.is_null()) {
+    return td::Status::Error("configuration parameter 15 is absent");
+  }
+  gen::ConfigParam::Record_cons15 data;
+  if (!gen::ConfigParam{15}.cell_unpack(std::move(param), data)) {
+    return td::Status::Error("configuration parameter 15 is invalid");
+  }
+  return data.elections_end_before;
 }
 
 std::pair<ton::UnixTime, ton::UnixTime> Config::get_validator_set_start_stop(int next) const {
